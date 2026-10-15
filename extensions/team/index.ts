@@ -21,9 +21,12 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import {
 	getPackageDir,
 	type ExtensionAPI,
+	type ExtensionContext,
 	RpcClient,
 	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
@@ -35,6 +38,9 @@ import {
 	type ResolvedWorkspace,
 } from "../workspace/launch.ts";
 import { promptAndWaitSafely } from "./rpc.ts";
+import { POLICY_ENV } from "../workspace/policy.ts";
+import { BRIDGE_ENV, MEMBER_ENV, communication, createParentBridge, mayCommunicate, validMemberName, type MessageRequest, type ParentBridge } from "./messaging.ts";
+import { ROSTER_TYPE, readRoster, type MemberDefinition, type RosterSnapshot } from "./roster.ts";
 
 /** Shape of the launch plan returned by the lead-owned workspace helper. */
 type WorkspaceLaunchPlan = Awaited<ReturnType<typeof prepareWorkspaceLaunch>>;
@@ -52,6 +58,8 @@ interface TranscriptItem {
 }
 
 interface TeamMember {
+	definition: MemberDefinition;
+	bridge?: ParentBridge;
 	name: string;
 	role: string;
 	client: RpcClient;
@@ -200,7 +208,11 @@ function taskIcon(status: TaskStatus): string {
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
+	// The explicit child bridge is the only team capability in member processes.
+	// In particular, a resumed member session must never restore the lead roster.
+	if (process.env[MEMBER_ENV] || process.env[POLICY_ENV]) return;
 	const members = new Map<string, TeamMember>();
+	const definitions = new Map<string, MemberDefinition>();
 	const spawning = new Set<string>();
 	const startingClients = new Set<RpcClient>();
 	const tasks: TeamTask[] = [];
@@ -211,6 +223,20 @@ export default function (pi: ExtensionAPI) {
 	let epoch = 0;
 	let closing = false;
 	let deliveryError: string | undefined;
+	let currentCtx: ExtensionContext | undefined;
+	const waitingFor = new Map<string, { from: string; to: string }>();
+	const restoreErrors = new Map<string, string>();
+
+	function persist() {
+		if (!currentCtx) return;
+		const snapshot: RosterSnapshot = {
+			version: 1,
+			members: [...definitions.values()].filter(member => member.persistent),
+			pendingJobs: [...jobs.values()].map(job => ({ id: job.id, member: job.member.name, goalId: job.goalId })),
+			completedJobs: history.slice(-100),
+		};
+		pi.appendEntry(ROSTER_TYPE, JSON.parse(JSON.stringify(snapshot)));
+	}
 
 	function reportMember(member: TeamMember, activity?: string) {
 		if (closing || member.stopped || members.get(member.name) !== member) return;
@@ -251,6 +277,7 @@ export default function (pi: ExtensionAPI) {
 		const completion: Completion = { id: job.id, member: job.member.name, goalId: job.goalId, ...result };
 		history.push({ ...completion, reply: completion.reply ? truncate(completion.reply, 12000) : undefined });
 		if (history.length > 100) history.splice(0, history.length - 100);
+		persist();
 		pi.events.emit("team:job-end", completion);
 		if (!suppress && job.notify !== "off") {
 			if (job.notify !== "immediate" || !deliver([completion])) notifications.push(completion);
@@ -263,17 +290,21 @@ export default function (pi: ExtensionAPI) {
 		finishJob(job, { ok: false, error: reason }, true);
 		if (job.member.activeJobId === job.id) job.member.waitAbort?.abort();
 	}
-	function background(member: TeamMember, message: string, timeout: number, notify: NotifyPolicy) {
-		const scope: { goalId?: string } = {};
-		pi.events.emit("team:scope", scope);
+	function startJob(member: TeamMember, message: string, timeout: number, notify: NotifyPolicy, signal?: AbortSignal, goalId?: string) {
+		const scope: { goalId?: string } = { goalId };
+		if (!goalId) pi.events.emit("team:scope", scope);
 		const job: BackgroundJob = { id: `${Date.now().toString(36)}-${uid()}`, member, goalId: scope.goalId, notify, epoch, cancelled: false, finished: false };
 		jobs.set(job.id, job);
+		persist();
 		pi.events.emit("team:job-start", { id: job.id, member: member.name, goalId: job.goalId });
-		void dispatch(member, message, timeout, undefined, undefined, job).then(
-			result => finishJob(job, result),
-			error => finishJob(job, { ok: false, error: String(error) }),
+		const result = dispatch(member, message, timeout, undefined, signal, job).then(
+			result => { finishJob(job, result); return result; },
+			error => { const result = { ok: false, error: String(error) }; finishJob(job, result); return result; },
 		);
-		return job.id;
+		return { id: job.id, result };
+	}
+	function background(member: TeamMember, message: string, timeout: number, notify: NotifyPolicy) {
+		return startJob(member, message, timeout, notify).id;
 	}
 	pi.events.on("team:cancel-goal", data => {
 		const goalId = (data as { goalId?: string } | undefined)?.goalId;
@@ -320,6 +351,9 @@ export default function (pi: ExtensionAPI) {
 			member.stopped = true;
 			member.status = "error";
 			member.error = `Member process exited (code=${code}).`;
+			member.definition.interrupted = true;
+			persist();
+			void member.bridge?.stop();
 			pi.events.emit("agent-monitor:update", { id: `team:${member.name}`, kind: "team", name: member.name, status: "error", alive: false, activity: "进程退出", output: member.error, model: member.model, workspace: member.workspace?.root, access: member.workspace?.access, cwd: member.cwd });
 			member.waitAbort?.abort();
 		});
@@ -366,6 +400,8 @@ export default function (pi: ExtensionAPI) {
 			member.onPartial = onPartial;
 			member.lastActivityAt = Date.now();
 			member.workStartedAt = member.lastActivityAt;
+			member.definition.interrupted = true;
+			persist();
 			// A new task must not display the previous reply as current output.
 			pi.events.emit("agent-monitor:update", { id: `team:${member.name}`, kind: "team", name: member.name, status: "working", alive: true, model: member.model, activity: "等待响应", output: "", startedAt: member.workStartedAt, workspace: member.workspace?.root, access: member.workspace?.access, cwd: member.cwd });
 			member.transcript.push({ role: "lead", text: message, at: Date.now() });
@@ -408,6 +444,12 @@ export default function (pi: ExtensionAPI) {
 				if (member.activeJobId === job?.id) member.activeJobId = undefined;
 				member.onPartial = undefined;
 				member.lastActivityAt = Date.now();
+				if (!closing && members.get(member.name) === member) {
+					member.definition.interrupted = member.stopped || waitAbort.signal.aborted;
+					member.definition.turns = member.turns;
+					member.definition.lastReply = member.lastReply ? truncate(member.lastReply, 12000) : undefined;
+					persist();
+				}
 			}
 		});
 		// Keep the serialization chain alive even when a run fails.
@@ -434,6 +476,7 @@ export default function (pi: ExtensionAPI) {
 			removeMember(member.name);
 			member.stopped = true;
 			member.waitAbort?.abort();
+			await member.bridge?.stop().catch(() => {});
 			try {
 				await member.client.stop();
 			} catch {
@@ -445,16 +488,35 @@ export default function (pi: ExtensionAPI) {
 		members.clear();
 	}
 
-	pi.on("session_start", () => { closing = false; });
+	async function restoreRoster(ctx: any) {
+		currentCtx = ctx;
+		let snapshot: RosterSnapshot | undefined;
+		try { snapshot = readRoster(ctx.sessionManager.getBranch()); }
+		catch (error) { restoreErrors.set("roster", String((error as Error)?.message ?? error)); return; }
+		if (!snapshot) return;
+		const pendingMembers = new Set(snapshot.pendingJobs.map(job => job.member));
+		history.push(...snapshot.completedJobs.slice(-100));
+		for (const definition of snapshot.members) {
+			definition.interrupted = pendingMembers.has(definition.name) || definition.interrupted;
+			if (members.has(definition.name) || spawning.has(definition.name)) continue;
+			definitions.set(definition.name, definition);
+			void spawnMember({ __definition: definition }, ctx).catch(error => restoreErrors.set(definition.name, String((error as Error)?.message ?? error)));
+		}
+	}
+
+	pi.on("session_start", async (_event, ctx) => { closing = false; await restoreRoster(ctx); });
 	pi.on("session_shutdown", async () => {
+		persist();
 		closing = true;
 		await disposeAll(true);
 	});
-	pi.on("session_tree", async () => {
+	pi.on("session_tree", async (_event, ctx) => {
 		closing = true;
 		await disposeAll(true);
+		definitions.clear();
 		tasks.length = 0;
 		closing = false;
+		await restoreRoster(ctx);
 	});
 
 	function rosterSummary(): string {
@@ -506,9 +568,46 @@ export default function (pi: ExtensionAPI) {
 			),
 			cwd: Type.Optional(Type.String({ description: "Working directory. Defaults to the lead's cwd." })),
 			workspace: Type.Optional(WorkspaceSchema),
+			persistent: Type.Optional(Type.Boolean({ default: true, description: "Persist the member definition and isolated child session across reload/restart of this main session. Default true." })),
+			communication: Type.Optional(Type.Object({ allow: Type.Array(Type.String({ minLength: 1, maxLength: 32 }), { maxItems: 100, description: "Member names this member may message; the lead can always message every member." }) }, { additionalProperties: false })),
 		}),
 		async execute(_toolCallId, params, _signal, onUpdate, ctx) {
-			const name = String(params.name).trim();
+			return spawnMember(params, ctx, onUpdate);
+		},
+	});
+
+	// -------------------------------------------------------------------
+	// team_send
+	// -------------------------------------------------------------------
+
+	async function routeMemberMessage(from: string, request: MessageRequest, signal: AbortSignal): Promise<{ ok: boolean; reply?: string; error?: string; jobId?: string }> {
+		if (request.to === "lead") {
+			if (request.wait) return { ok: false, error: "Messages to the lead require wait:false." };
+			try {
+				pi.sendMessage({ customType: "team-member-message", content: `Message from ${from}:\n\n${request.message}`, display: true, details: { from, to: "lead" } }, { triggerTurn: true, deliverAs: "followUp" });
+				return { ok: true, jobId: request.id };
+			} catch (error) { return { ok: false, error: String((error as Error)?.message ?? error) }; }
+		}
+		const sender = members.get(from);
+		const recipient = members.get(request.to);
+		const roster = new Map([...members].map(([name, member]) => [name, { communication: member.definition.communication }]));
+		if (!sender || !recipient || !mayCommunicate(from, request.to, roster)) return { ok: false, error: "TEAM_MESSAGE_DENIED: communication ACL denied." };
+		const forwarded = `[Message from teammate ${from}]\n\n${request.message}`;
+		if (!request.wait) {
+			void dispatch(recipient, forwarded, Math.max(1, request.expiresAt - Date.now()), undefined, signal).catch(() => {});
+			return { ok: true, jobId: request.id };
+		}
+		const result = await dispatch(recipient, forwarded, Math.max(1, request.expiresAt - Date.now()), undefined, signal);
+		return result.ok ? { ok: true, reply: result.reply } : { ok: false, error: result.error };
+	}
+
+	async function spawnMember(params: any, ctx: any, onUpdate?: any) {
+		currentCtx = ctx;
+		if (params.__definition) {
+			const saved = params.__definition as MemberDefinition;
+			params = { ...params, name: saved.name, role: saved.role, systemPrompt: saved.systemPrompt, model: saved.model, tools: saved.tools, cwd: saved.cwd, workspace: saved.workspace, persistent: true, communication: saved.communication, __definition: saved };
+		}
+		const name = String(params.name).trim();
 			if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) {
 				return {
 					content: [{ type: "text" as const, text: `Invalid member name "${name}". Use letters, digits, _ or - (max 32).` }],
@@ -525,12 +624,18 @@ export default function (pi: ExtensionAPI) {
 			const inheritedModel =
 				params.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined);
 
+		const comm = communication(params.communication);
+		const persistent = params.__definition?.persistent ?? params.persistent !== false;
+		const sessionId = params.__definition?.sessionId ?? (persistent ? `team-${String(ctx.sessionManager?.getSessionId?.() ?? randomUUID()).replace(/[^A-Za-z0-9._-]/g, "_")}-${name}` : undefined);
+			const effectiveTools = params.tools ? [...new Set([...params.tools, ...(comm.allow.length ? ["team_message"] : [])])] : params.tools;
+
 			const systemPrompt = [
 				`You are "${name}", a member of an agent team led by another agent.`,
 				`Your role: ${params.role}.`,
 				"You work in your own isolated context window. Work autonomously and completely on each task.",
 				"When you finish a task, reply with a concise, self-contained report: what you did, the files or commands involved, key findings, and any blocker.",
 				"That reply is the only thing the lead sees, so do not assume the lead has read your files or tool output.",
+				comm.allow.length ? `You may communicate with these teammates through team_message: ${comm.allow.join(", ")}. Do not message other members.` : "No teammate-to-teammate communication is enabled for this member; use the lead.",
 				params.systemPrompt ?? "",
 			]
 				.filter((part) => part && part.trim())
@@ -542,7 +647,7 @@ export default function (pi: ExtensionAPI) {
 			// validation failure must surface as a normal tool error with no subprocess.
 			let plan: WorkspaceLaunchPlan;
 			try {
-				plan = await prepareWorkspaceLaunch({ baseCwd: ctx.cwd, cwd: params.cwd, workspace: params.workspace, tools: params.tools });
+				plan = await prepareWorkspaceLaunch({ baseCwd: ctx.cwd, cwd: params.cwd, workspace: params.workspace, tools: effectiveTools });
 				if (closing || spawnEpoch !== epoch) throw new Error("Team session changed while workspace was being validated.");
 			} catch (error) {
 				spawning.delete(name);
@@ -562,7 +667,13 @@ export default function (pi: ExtensionAPI) {
 
 			// Runtime args only; the helper owns tool selection (legacy --tools, or
 			// --no-tools + restricted flags + guard extension when restricted).
-			const args = [...plan.args, "--no-session"];
+		const definition: MemberDefinition = params.__definition ?? { name, role: params.role, systemPrompt: params.systemPrompt, model: inheritedModel, thinkingLevel: ctx.thinkingLevel, tools: effectiveTools, cwd: memberCwd, workspace: memberWorkspace, persistent, sessionId, communication: comm, createdAt: Date.now() };
+			const bridgePath = fileURLToPath(new URL("./member-bridge.ts", import.meta.url));
+			const bridge = await createParentBridge(os.tmpdir(), name, (request, signal) => routeMemberMessage(name, request, signal));
+			const args = [...plan.args];
+			if (!args.includes("--no-extensions")) args.push("--no-extensions");
+			args.push("--extension", bridgePath);
+			if (persistent) args.push("--session-id", sessionId!); else args.push("--no-session");
 			if (inheritedModel) args.push("--model", inheritedModel);
 			if (!params.model && ctx.thinkingLevel) args.push("--thinking", ctx.thinkingLevel);
 
@@ -578,7 +689,7 @@ export default function (pi: ExtensionAPI) {
 					cliPath: resolveCliPath(),
 					cwd: memberCwd,
 					args,
-					env: plan.env,
+					env: { ...plan.env, [MEMBER_ENV]: name, [BRIDGE_ENV]: JSON.stringify(bridge.config) },
 				});
 				startingClients.add(client);
 				await client.start();
@@ -587,12 +698,14 @@ export default function (pi: ExtensionAPI) {
 				startingClients.delete(client);
 
 				const member: TeamMember = {
+					definition,
+					bridge,
 					name,
 					role: params.role,
 					client,
 					status: "idle",
 					model: inheritedModel,
-					tools: params.tools,
+					tools: effectiveTools,
 					workspace: memberWorkspace,
 					cwd: memberCwd,
 					promptFilePath,
@@ -605,6 +718,8 @@ export default function (pi: ExtensionAPI) {
 				};
 				attachEvents(member);
 				members.set(name, member);
+				definitions.set(name, definition);
+				persist();
 				reportMember(member, "等待任务");
 
 				onUpdate?.({
@@ -619,10 +734,11 @@ export default function (pi: ExtensionAPI) {
 							text: `Spawned team member "${name}" (${params.role})${inheritedModel ? ` on ${inheritedModel}` : ""}${memberWorkspace ? ` in workspace ${memberWorkspace.root} (${memberWorkspace.access})` : ""}. Roster: ${rosterSummary()}. Delegate with team_send.`,
 						},
 					],
-					details: { name, model: inheritedModel, tools: params.tools, cwd: memberCwd, workspace: memberWorkspace },
+						details: { name, model: inheritedModel, tools: effectiveTools, cwd: memberCwd, workspace: memberWorkspace, communication: comm, persistent },
 				};
 			} catch (error) {
 				if (!closing && spawnEpoch === epoch) pi.events.emit("agent-monitor:update", { id: `team:${name}`, kind: "team", name, status: "error", alive: false, model: inheritedModel, activity: "启动失败", workspace: memberWorkspace?.root, access: memberWorkspace?.access, cwd: memberCwd });
+				if (bridge) await bridge.stop().catch(() => {});
 				if (client) startingClients.delete(client);
 				await client?.stop().catch(() => {});
 				if (promptFilePath) {
@@ -643,12 +759,8 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			} finally { spawning.delete(name); }
-		},
-	});
+		}
 
-	// -------------------------------------------------------------------
-	// team_send
-	// -------------------------------------------------------------------
 	pi.registerTool({
 		name: "team_send",
 		label: "Team: send to member",
@@ -875,6 +987,8 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params) {
 			if (params.name === "*") {
 				const count = members.size;
+				definitions.clear();
+				persist();
 				await disposeAll();
 				return {
 					content: [{ type: "text" as const, text: `Disbanded all ${count} members.` }],
@@ -892,8 +1006,11 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				// best effort
 			}
-			removePromptFile(member);
-			members.delete(params.name);
+				await member.bridge?.stop().catch(() => {});
+				removePromptFile(member);
+				members.delete(params.name);
+				definitions.delete(params.name);
+				persist();
 			return {
 				content: [
 					{ type: "text" as const, text: `Disbanded "${params.name}". Roster: ${rosterSummary()}.` },

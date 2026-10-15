@@ -7,7 +7,7 @@ import {hostDir} from './host.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const agentDir=fs.mkdtempSync(path.join(os.tmpdir(),'pi-workbench-unit-'));
 fs.writeFileSync(path.join(agentDir,'settings.json'),JSON.stringify({retry:{enabled:false},cacheWarming:'off'}));
-const files=['extensions/goal/tests/goal-team.test.mjs','extensions/goal/tests/team-wake.test.mjs','extensions/agent-monitor/tests/monitor.test.mjs','extensions/workspace/tests/workspace.test.mjs','scripts/package.test.mjs'];
+const files=['extensions/goal/tests/goal-team.test.mjs','extensions/goal/tests/team-wake.test.mjs','extensions/agent-monitor/tests/monitor.test.mjs','extensions/workspace/tests/workspace.test.mjs','extensions/retry-any/tests/retry.test.mjs','extensions/team/tests/messaging.test.mjs','extensions/supervisor/tests/supervisor.test.mjs','scripts/package.test.mjs'];
 const child=spawn(process.execPath,['--unhandled-rejections=strict','--test',...files],{cwd:root,env:{...process.env,PI_TEST_PACKAGE_DIR:hostDir,PI_CODING_AGENT_DIR:agentDir},stdio:'inherit'});
 child.on('error',error=>{console.error(error.message);process.exitCode=1;fs.rmSync(agentDir,{recursive:true,force:true});});
 child.on('exit',code=>{process.exitCode=code??1;fs.rmSync(agentDir,{recursive:true,force:true});});

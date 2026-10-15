@@ -18,8 +18,9 @@ export interface ResolvedWorkspace {
 export const POLICY_ENV = "PI_AGENT_WORKSPACE_POLICY";
 export const readableTools = ["read", "ls", "find", "grep"];
 export const writableTools = ["write", "edit"];
+export const bridgeTools = ["team_message"];
 export const toolAlias = (name: string) => `workspace_${name}`;
-export const allowedTools = (policy: ResolvedWorkspace) => [...readableTools, ...(policy.access === "read-write" ? writableTools : [])];
+export const allowedTools = (policy: ResolvedWorkspace) => [...readableTools, ...(policy.access === "read-write" ? writableTools : []), ...bridgeTools];
 export function inside(root: string, target: string) {
 	const relative = path.relative(root, target);
 	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));

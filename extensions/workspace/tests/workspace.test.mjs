@@ -44,7 +44,7 @@ test('launch binds cwd, disables commands/resources, and passes immutable policy
  const plan=await prepareWorkspaceLaunch({baseCwd:f.base,workspace:{root:'project',access:'read-only',extraReadRoots:['docs']}});
  assert.equal(plan.cwd,await fs.realpath(f.root));assert.equal(plan.workspace.access,'read-only');
  for(const flag of ['--no-extensions','--no-mcp','--no-context-files','--no-skills','--no-approve'])assert.ok(plan.args.includes(flag));
- assert.equal(plan.args[plan.args.indexOf('--tools')+1],'workspace_read,workspace_ls,workspace_find,workspace_grep');assert.equal(JSON.parse(plan.env[POLICY_ENV]).root,plan.cwd);
+ assert.equal(plan.args[plan.args.indexOf('--tools')+1],'workspace_read,workspace_ls,workspace_find,workspace_grep,workspace_team_message');assert.equal(JSON.parse(plan.env[POLICY_ENV]).root,plan.cwd);
  await assert.rejects(prepareWorkspaceLaunch({baseCwd:f.base,cwd:f.outside,workspace:{root:f.root}}),/cwd must be inside/);
 }));
 test('unrestricted cwd remains compatible; unsupported sandbox and unsafe tools fail before spawn',()=>fixture(async f=>{

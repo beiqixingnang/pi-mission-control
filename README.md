@@ -10,7 +10,10 @@
 | 紧凑 TUI 状态区 | 默认最多 3 行；`/agents on|off|status` |
 | 成员工作区限制 | `workspace.root`、`access`、`extraReadRoots` |
 | 普通子智能体 | `subagent` 的单次、并行和链式模式 |
-| 压缩模型路由 | `/compaction-model` 查看/设置；默认使用配置中的 DeepSeek 模型 |
+| 上游错误重试 | `retry-any` 扩展补足未被 Pi 内置分类的 provider 错误 |
+| 成员间通信 | `team_spawn.communication.allow` 控制成员之间的 `team_message` |
+| 团队持久化 | 默认保存成员定义和独立 session，重启/恢复主会话后尝试重新连接 |
+| 会话内监督器 | `/supervisor on|off|status|interval`，只在当前 Pi 进程活动时检查 Goal/团队 |
 
 包内自带 `worker`、`planner`、`scout` 和 `reviewer` 预设。用户 `~/.pi/agent/agents` 中同名定义优先，项目定义仍需按原有方式显式启用。无需把包内 agents 复制到用户配置目录。
 
@@ -78,6 +81,45 @@ pi remove /path/to/pi-mission-control
   }
 }
 ```
+
+## 成员间通信
+
+团队成员默认不能互相通信。创建成员时指定允许的对象：
+
+```json
+{
+  "name": "cpu-supervisor",
+  "role": "CPU 监督员",
+  "communication": { "allow": ["cpu-builder"] }
+}
+```
+
+允许关系按成员对检查：任一方明确允许另一方即可建立这对成员的通信。主 AI 始终可以和全部成员通信。成员通过 `team_message` 发送短消息；发送到 `lead` 时必须使用 `wait:false`，否则容易造成同步循环。通信由父 Pi 进程校验 ACL 和超时，成员不能通过消息扩大文件工作区或命令权限。
+
+## 持久团队
+
+`team_spawn` 默认 `persistent:true`。主会话会保存成员名称、角色、模型、工作区、通信 ACL 和独立 child session ID。重启 Pi 或恢复同一个主会话时，团队扩展会重新启动持久成员并恢复其子会话上下文。正在执行的单次请求不能跨进程继续，恢复时会保留中断标记，主模型或 Goal 可以重新派发。
+
+设为 `persistent:false` 可以创建只在当前 Pi 进程存活的临时成员。`/reload` 会停止旧进程，再从当前会话里的 roster 记录尝试恢复持久成员；不要在持久成员正在执行关键写操作时随意重载。
+
+## 会话内监督器
+
+监督器默认关闭，避免无任务时消耗模型请求：
+
+```text
+/supervisor on
+/supervisor status
+/supervisor interval 300
+/supervisor off
+```
+
+它只在 Pi 当前进程运行时存在，不写入系统计划任务。开启后，只有活动 Goal 或未完成团队任务时才每隔一段时间提醒主 AI检查进度。主 AI正在运行、有排队消息或已有监督检查时不会重复排队。主模型 provider 错误会触发有限次数的恢复检查。关闭终端或 Pi 进程崩溃后监督器不会运行；需要这种能力时使用 Windows 任务计划程序、cron 或 systemd。
+
+## 重试策略
+
+Pi 内置重试负责已识别的网络、限流和服务端错误。`retry-any` 扩展补足未被 Pi 分类的 assistant/provider 错误，例如中转站返回的随机 `upstream_error` 或模型选择错误。它读取 `settings.json` 的 `retry.maxRetries`，默认最多 5 次，并使用指数退避。
+
+为避免已知错误被内置层和扩展层重复重试，已知 429、5xx、timeout 等模式交给 Pi 内置重试；扩展主要处理其余 provider error。额度、账单和用户主动中断不会被无限重试。若需要统一测试，请在目标 settings 中启用 retry，并确认 `maxRetries`。
 
 ## 快速使用
 
