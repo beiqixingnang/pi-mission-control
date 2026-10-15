@@ -79,14 +79,14 @@ test('enabled supervisor wakes once and never overlaps an outstanding check turn
 }));
 
 test('goal state is read from session entries; paused goals alone never wake', async () => withHarness(async h => {
-  await h.command('on');
+  await h.command('on 1');
   h.goal({status: 'paused'});
   h.bus.emit('goal:state', {});
   await delay(30);
   assert.equal(h.sent.length, 0);
   h.goal({status: 'waiting'});
   h.bus.emit('goal:state', {});
-  await delay(30);
+  await delay(1100);
   assert.equal(h.sent.length, 1);
   assert.match(h.sent[0].message.content, /Goal waiting/);
 }));

@@ -73,7 +73,27 @@ test('user aborts and successful assistant responses are never retried',async()=
   assert.equal(await h.emit('agent_before_settle',{entries:[],continue:false,outcome:'completed'}),undefined);
 }));
 
+test('core-classified errors are not retried again by the fallback layer',async()=>withHarness(async h=>{
+  await h.emit('message_end',{message:{role:'assistant',stopReason:'error',errorMessage:'502 Bad Gateway'}});
+  assert.equal(await h.emit('agent_before_settle',{entries:[],continue:false,outcome:'error'}),undefined);
+},{retry:{enabled:true,maxRetries:5,baseDelayMs:0,maxAgentDelayMs:0}}));
+
+test('explicitly disabled retry stays disabled for random gateway errors',async()=>withHarness(async h=>{
+  assert.equal(await h.fail(),undefined);
+},{retry:{enabled:false,maxRetries:5,baseDelayMs:0,maxAgentDelayMs:0}}));
+
+test('user abort during backoff never starts another provider attempt',async()=>withHarness(async h=>{
+  const controller=new AbortController();h.ctx.signal=controller.signal;
+  const waiting=h.fail();setTimeout(()=>controller.abort(),10);
+  assert.equal(await waiting,undefined);
+},{retry:{enabled:true,maxRetries:5,baseDelayMs:500,maxAgentDelayMs:500}}));
+
+test('shutdown invalidates a pending fallback retry',async()=>withHarness(async h=>{
+  await h.emit('message_end',{message:{role:'assistant',stopReason:'error',errorMessage:'arbitrary upstream failure'}});
+  const waiting=h.emit('agent_before_settle',{entries:[],continue:false,outcome:'error'});
+  await h.close();assert.equal(await waiting,undefined);
+},{retry:{enabled:true,maxRetries:5,baseDelayMs:30,maxAgentDelayMs:30}}));
+
 test('malformed retry configuration disables retries',async()=>withHarness(async h=>{
-  const result=await h.fail();
-  assert.equal(result,undefined);
+  assert.equal(await h.fail(),undefined);
 },{retry:{maxRetries:-1,baseDelayMs:0,maxAgentDelayMs:0}}));

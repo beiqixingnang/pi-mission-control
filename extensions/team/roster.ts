@@ -35,9 +35,13 @@ export interface RosterSnapshot {
 	completedJobs: SavedCompletion[];
 }
 function optionalString(value: unknown) { return value === undefined || typeof value === "string"; }
+/** Keep the exact ID of v1.0 members: renaming it would orphan their child history. */
+export function validMemberSessionId(value: unknown, name: string): value is string {
+	return validRequestId(value) || (typeof value === "string" && value.length <= 256 && value.startsWith("team-") && value.endsWith(`-${name}`) && /^[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]$/.test(value));
+}
 function parseDefinition(value: unknown): MemberDefinition {
 	const member = value as MemberDefinition;
-	if (!member || !validMemberName(member.name) || typeof member.role !== "string" || !member.role.trim() || typeof member.cwd !== "string" || !path.isAbsolute(member.cwd) || member.persistent !== true || !validRequestId(member.sessionId) || !Number.isFinite(member.createdAt) || !optionalString(member.systemPrompt) || !optionalString(member.model) || !optionalString(member.thinkingLevel) || !optionalString(member.lastReply) || (member.interrupted !== undefined && typeof member.interrupted !== "boolean") || (member.turns !== undefined && (!Number.isSafeInteger(member.turns) || member.turns < 0)) || (member.tools !== undefined && (!Array.isArray(member.tools) || member.tools.some(tool => typeof tool !== "string")))) throw new Error("Invalid persistent team member definition.");
+	if (!member || !validMemberName(member.name) || typeof member.role !== "string" || !member.role.trim() || typeof member.cwd !== "string" || !path.isAbsolute(member.cwd) || member.persistent !== true || !validMemberSessionId(member.sessionId, member.name) || !Number.isFinite(member.createdAt) || !optionalString(member.systemPrompt) || !optionalString(member.model) || !optionalString(member.thinkingLevel) || !optionalString(member.lastReply) || (member.interrupted !== undefined && typeof member.interrupted !== "boolean") || (member.turns !== undefined && (!Number.isSafeInteger(member.turns) || member.turns < 0)) || (member.tools !== undefined && (!Array.isArray(member.tools) || member.tools.some(tool => typeof tool !== "string")))) throw new Error("Invalid persistent team member definition.");
 	// A malformed policy must never be restored as an unrestricted member.
 	if (member.workspace !== undefined) {
 		const workspace = member.workspace;

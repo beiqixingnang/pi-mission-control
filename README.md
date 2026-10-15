@@ -1,5 +1,7 @@
 # Pi Mission Control
 
+当前版本 **1.0.1** 修复受限成员消息工具不可达、旧成员 ID 无法恢复，以及 Goal/重试/监督器状态冲突。详见 [修复验证记录](docs/verification-1.0.1.md)。
+
 适用于 Pi 1.2.0 的本地功能包。支持 Windows 与 WSL/Linux，包含：
 
 | 功能 | 用法 |
@@ -48,7 +50,7 @@ pi list
 pi remove /path/to/pi-mission-control
 ```
 
-`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.0.0.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 或 Git 服务发布这个包。
+`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.0.1.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
 
 ## 已经安装散装扩展时
 
@@ -94,13 +96,13 @@ pi remove /path/to/pi-mission-control
 }
 ```
 
-允许关系按成员对检查：任一方明确允许另一方即可建立这对成员的通信。主 AI 始终可以和全部成员通信。成员通过 `team_message` 发送短消息；发送到 `lead` 时必须使用 `wait:false`，否则容易造成同步循环。通信由父 Pi 进程校验 ACL 和超时，成员不能通过消息扩大文件工作区或命令权限。
+允许关系按成员对检查：任一方明确允许另一方即可建立这对成员的通信。主 AI 始终可以和全部成员通信。成员通过 `team_message`（受限工作区中为 `workspace_team_message`）发送短消息；发送到 `lead` 时必须使用 `wait:false`，否则容易造成同步循环。通信由父 Pi 进程校验 ACL 和超时，成员不能通过消息扩大文件工作区或命令权限。
 
 ## 持久团队
 
 `team_spawn` 默认 `persistent:true`。主会话会保存成员名称、角色、模型、工作区、通信 ACL 和独立 child session ID。重启 Pi 或恢复同一个主会话时，团队扩展会重新启动持久成员并恢复其子会话上下文。正在执行的单次请求不能跨进程继续，恢复时会保留中断标记，主模型或 Goal 可以重新派发。
 
-设为 `persistent:false` 可以创建只在当前 Pi 进程存活的临时成员。`/reload` 会停止旧进程，再从当前会话里的 roster 记录尝试恢复持久成员；不要在持久成员正在执行关键写操作时随意重载。
+设为 `persistent:false` 可以创建只在当前 Pi 进程存活的临时成员。恢复时会先加载完整 roster，再等待成员启动，避免启动中写入部分 roster 覆盖其余成员。新成员使用 UUID；1.0.0 生成的 `team-父会话ID-成员名` 仍按原 ID 打开，保留原有子会话历史，无需手动替换快照里的 ID。`/reload` 会停止旧进程，再从当前会话里的 roster 记录尝试恢复持久成员；不要在持久成员正在执行关键写操作时随意重载。
 
 ## 会话内监督器
 
@@ -116,6 +118,8 @@ pi remove /path/to/pi-mission-control
 它只在 Pi 当前进程运行时存在，不写入系统计划任务。开启后，只有活动 Goal 或未完成团队任务时才每隔一段时间提醒主 AI检查进度。主 AI正在运行、有排队消息或已有监督检查时不会重复排队。主模型 provider 错误会触发有限次数的恢复检查。关闭终端或 Pi 进程崩溃后监督器不会运行；需要这种能力时使用 Windows 任务计划程序、cron 或 systemd。
 
 ## 重试策略
+
+Goal 只在整个重试链最终结束仍然失败时进入 `paused`，并记录 `pauseCause: provider-error`。重试期间或重试成功后保持运行。开启监督器后，这种上游失败暂停即使没有后台任务，也会继续获得周期检查；检查启动时在原预算内恢复 Goal。手动暂停、`blocked`、停止及预算耗尽均不会自动恢复。Goal 状态变化不会把周期定时器强行提前，避免错误风暴和重复排队。
 
 Pi 内置重试负责已识别的网络、限流和服务端错误。`retry-any` 扩展补足未被 Pi 分类的 assistant/provider 错误，例如中转站返回的随机 `upstream_error` 或模型选择错误。它读取 `settings.json` 的 `retry.maxRetries`，默认最多 5 次，并使用指数退避。
 
@@ -161,7 +165,7 @@ npm run check
 npm test
 ```
 
-`check` 验证六个扩展入口可加载；`test` 使用临时配置执行回归测试，不访问模型 API，也不修改用户全局设置。
+`check` 验证八个扩展入口可加载；`test` 使用临时配置执行单元及集成测试，不访问模型 API，也不修改用户全局设置。集成测试会实际启动 Pi 子进程，验证受限成员双向通信、组外拒绝、磁盘快照/旧成员历史恢复，以及真实 Pi 生命周期中的失败重试与监督恢复；模型由包内测试 fixture 提供确定性响应。
 
 有模型配置时可额外运行真实测试（会产生模型用量）：
 

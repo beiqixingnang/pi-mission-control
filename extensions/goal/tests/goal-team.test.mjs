@@ -121,6 +121,11 @@ test('completion cannot succeed while pending or if paused during verification',
 test('abort and provider failure pause instead of restarting the lead',async()=>{
   for(const outcome of ['aborted','error'])await withHarness(async h=>{
     await h.start();assert.equal(await h.boundary({outcome}),undefined);
+    if(outcome==='error') {
+      assert.equal((await h.state()).status,'running','before_settle must allow the retry extension to continue');
+      await h.emit('agent_settled',{aborted:false});
+      assert.equal((await h.state()).pauseCause,'provider-error');
+    }
     assert.equal((await h.state()).status,'paused');assert.equal(h.sent.length,0);
   });
 });

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { appendLog, BRIDGE_ENV, LogReader, MAX_MESSAGE_CHARS, MAX_TIMEOUT_MS, MEMBER_ENV, parseBridgeConfig, validMemberName, validRequestId, type BridgeConfig, type MessageRequest, type MessageResponse } from "./messaging.ts";
+import { POLICY_ENV } from "../workspace/policy.ts";
 
 interface Pending {
 	finish(response: MessageResponse): void;
@@ -79,7 +80,7 @@ export default function (pi: ExtensionAPI) {
 	if (!config) return;
 	const bridge = createBridgeClient(config);
 	pi.on("session_shutdown", () => bridge.stop());
-	const toolName = process.env.POLICY_ENV ? "workspace_team_message" : "team_message";
+	const toolName = process.env[POLICY_ENV] ? "workspace_team_message" : "team_message";
 	pi.registerTool({
 		name: toolName, label: "Team: message teammate",
 		description: "Send a self-contained message to an authorized teammate. The parent enforces the roster communication ACL. wait:true returns their reply; wait:false queues work and confirms acceptance. To inform the lead use to:'lead', wait:false. Messaging never grants additional file or execution access.",

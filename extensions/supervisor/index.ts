@@ -37,7 +37,9 @@ const clip = (text: string, limit: number): string => (text.length > limit ? `${
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 interface GoalView {
+	id?: string;
 	status?: string;
+	pauseCause?: string;
 	objective?: string;
 	pending: number;
 }
@@ -131,6 +133,8 @@ export default function (pi: ExtensionAPI) {
 		if (!data || typeof data !== "object") return undefined;
 		const value = data as Record<string, unknown>;
 		return {
+			id: typeof value.id === "string" ? value.id : undefined,
+			pauseCause: typeof value.pauseCause === "string" ? value.pauseCause : undefined,
 			status: typeof value.status === "string" ? value.status : undefined,
 			objective: typeof value.objective === "string" ? value.objective : undefined,
 			pending: Array.isArray(value.pending) ? value.pending.length : 0,
@@ -138,10 +142,12 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function workActive(): boolean {
-		if (pendingJobs.size > 0) return true;
 		const goal = readGoal();
+		// A deliberate pause/block must stay quiet even while its members finish.
+		const goalSuspended = goal && ["paused", "blocked", "stopped", "completed"].includes(goal.status ?? "") && goal.pauseCause !== "provider-error";
+		if ([...pendingJobs.values()].some(job => !goalSuspended || !job.goalId || job.goalId !== goal.id)) return true;
 		if (!goal) return false;
-		return goal.pending > 0 || goal.status === "running" || goal.status === "waiting";
+		return goal.status === "running" || goal.status === "waiting" || (goal.status === "paused" && goal.pauseCause === "provider-error");
 	}
 
 	function mainIdle(ctx: ExtensionContext): boolean {
@@ -373,7 +379,7 @@ export default function (pi: ExtensionAPI) {
 	// session entries rather than emitting events, so readGoal() is the primary
 	// source; if a future goal build emits `goal:state`, react promptly.
 	pi.events.on("goal:state", () => {
-		if (enabled && !dead) schedule(0);
+		if (enabled && !dead && !timer) schedule();
 	});
 
 	// -------------------------------------------------------------------

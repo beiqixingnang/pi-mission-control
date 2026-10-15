@@ -1,5 +1,6 @@
 /** Retry assistant provider errors with bounded exponential backoff. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 
 type UnknownRecord = Record<string, unknown>;
 type RetryConfig = { maxRetries: number; baseDelayMs: number; maxAgentDelayMs: number; coreRetryEnabled: boolean };
@@ -56,7 +57,7 @@ function readConfig(pi: ExtensionAPI, ctx: unknown): RetryConfig {
 	}
 	if (!raw) return { ...DEFAULT_CONFIG };
 	const coreRetryEnabled = raw.enabled === undefined ? DEFAULT_CONFIG.coreRetryEnabled : raw.enabled === true;
-	const maxRetries = parseBoundedInteger(raw.maxRetries, DEFAULT_CONFIG.maxRetries, HARD_MAX_RETRIES);
+	const maxRetries = raw.enabled === false ? 0 : parseBoundedInteger(raw.maxRetries, DEFAULT_CONFIG.maxRetries, HARD_MAX_RETRIES);
 	const baseDelayMs = parseBoundedInteger(raw.baseDelayMs, DEFAULT_CONFIG.baseDelayMs, HARD_MAX_DELAY_MS);
 	const maxAgentDelayMs = parseBoundedInteger(raw.maxAgentDelayMs, DEFAULT_CONFIG.maxAgentDelayMs, HARD_MAX_DELAY_MS);
 	if (maxRetries === undefined || baseDelayMs === undefined || maxAgentDelayMs === undefined) return { maxRetries: 0, baseDelayMs: 0, maxAgentDelayMs: 0, coreRetryEnabled };
@@ -75,18 +76,22 @@ function latestAssistantMessage(entries: unknown): UnknownRecord | undefined {
 	}
 	return undefined;
 }
-/** Mirrors Pi's built-in transient classifier so known errors are retried exactly by core. */
+/** Use the host's actual classifier rather than a second, drifting regex list. */
 function isBuiltInRetryable(text: string | undefined): boolean {
-	if (!text) return false;
-	if (/(insufficient_quota|out of budget|quota exceeded|billing|subscription_sharing_usage_limit_exceeded|GoUsageLimitError|FreeUsageLimitError)/i.test(text)) return false;
-	return /(overloaded|server.?busy|rate.?limit|too many requests|\b429\b|\b50[0-4]\b|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|fetch failed|ENOTFOUND|EAI_AGAIN|upstream.?connect|reset before headers|socket hang up|timed? out|timeout|terminated|websocket.?closed|websocket.?error|ended without|stream ended|retry your request|ResourceExhausted)/i.test(text);
+	return isRetryableAssistantError({ stopReason: "error", errorMessage: text } as any);
 }
 function backoffMs(retryNumber: number, config: RetryConfig): number {
 	if (config.baseDelayMs === 0 || config.maxAgentDelayMs === 0) return 0;
 	return Math.min(config.baseDelayMs * 2 ** Math.min(retryNumber - 1, 52), config.maxAgentDelayMs);
 }
-function wait(ms: number): Promise<void> {
-	return ms <= 0 ? Promise.resolve() : new Promise(resolve => setTimeout(resolve, ms));
+function wait(ms: number, signal?: AbortSignal): Promise<boolean> {
+	return new Promise(resolve => {
+		if (signal?.aborted) { resolve(false); return; }
+		const finish = (ok: boolean) => { clearTimeout(timer); signal?.removeEventListener("abort", abort); resolve(ok); };
+		const abort = () => finish(false);
+		const timer = setTimeout(() => finish(true), ms);
+		signal?.addEventListener("abort", abort, { once: true });
+	});
 }
 function hasPendingMessages(ctx: unknown): boolean {
 	if (!isRecord(ctx) || typeof ctx.hasPendingMessages !== "function") return true;
@@ -97,10 +102,12 @@ export default function (pi: ExtensionAPI) {
 	let retryCount = 0;
 	let assistantStatus: AssistantStatus;
 	let assistantError: string | undefined;
-	function reset() { retryCount = 0; assistantStatus = undefined; assistantError = undefined; }
+	let generation = 0;
+	function reset() { generation++; retryCount = 0; assistantStatus = undefined; assistantError = undefined; }
 	pi.on("session_start", reset);
 	pi.on("session_tree", reset);
 	pi.on("session_shutdown", reset);
+	pi.on("before_agent_start", reset);
 	pi.on("agent_start", () => { assistantStatus = undefined; assistantError = undefined; });
 	pi.on("message_end", event => {
 		if (event.message.role !== "assistant") return;
@@ -129,7 +136,8 @@ export default function (pi: ExtensionAPI) {
 		const nextRetry = retryCount + 1;
 		const delayMs = backoffMs(nextRetry, config);
 		retryCount = nextRetry;
-		await wait(delayMs);
+		const expected = generation;
+		if (!(await wait(delayMs, ctx.signal)) || generation !== expected) return;
 		if (hasPendingMessages(ctx)) { reset(); return; }
 		return {
 			entries: [...entries, { type: "custom_message" as const, customType: CUSTOM_TYPE, content: `The provider request failed. Retry the user's request now (retry ${nextRetry} of ${config.maxRetries}).`, display: true, details: { retry: nextRetry, maxRetries: config.maxRetries, delayMs, error: messageError } }],

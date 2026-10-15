@@ -227,8 +227,9 @@ export default function (pi: ExtensionAPI) {
 	const waitingFor = new Map<string, { from: string; to: string }>();
 	const restoreErrors = new Map<string, string>();
 
+	let restoreFailed = false;
 	function persist() {
-		if (!currentCtx) return;
+		if (!currentCtx || restoreFailed) return;
 		const snapshot: RosterSnapshot = {
 			version: 1,
 			members: [...definitions.values()].filter(member => member.persistent),
@@ -488,19 +489,27 @@ export default function (pi: ExtensionAPI) {
 		members.clear();
 	}
 
-	async function restoreRoster(ctx: any) {
+	async function restoreRoster(ctx: ExtensionContext) {
 		currentCtx = ctx;
+		restoreFailed = false;
+		restoreErrors.clear();
 		let snapshot: RosterSnapshot | undefined;
 		try { snapshot = readRoster(ctx.sessionManager.getBranch()); }
-		catch (error) { restoreErrors.set("roster", String((error as Error)?.message ?? error)); return; }
+		catch (error) { restoreFailed = true; restoreErrors.set("roster", String((error as Error)?.message ?? error)); return; }
 		if (!snapshot) return;
 		const pendingMembers = new Set(snapshot.pendingJobs.map(job => job.member));
 		history.push(...snapshot.completedJobs.slice(-100));
+		// Install the complete snapshot before any child can cause another write.
 		for (const definition of snapshot.members) {
 			definition.interrupted = pendingMembers.has(definition.name) || definition.interrupted;
-			if (members.has(definition.name) || spawning.has(definition.name)) continue;
 			definitions.set(definition.name, definition);
-			void spawnMember({ __definition: definition }, ctx).catch(error => restoreErrors.set(definition.name, String((error as Error)?.message ?? error)));
+		}
+		for (const definition of snapshot.members) {
+			if (members.has(definition.name) || spawning.has(definition.name)) continue;
+			try {
+				const result = await spawnMember({ __definition: definition }, ctx);
+				if (result.isError) restoreErrors.set(definition.name, result.content.map(item => item.text).join("\n"));
+			} catch (error) { restoreErrors.set(definition.name, String((error as Error)?.message ?? error)); }
 		}
 	}
 
@@ -626,8 +635,8 @@ export default function (pi: ExtensionAPI) {
 
 		const comm = communication(params.communication);
 		const persistent = params.__definition?.persistent ?? params.persistent !== false;
-		const sessionId = params.__definition?.sessionId ?? (persistent ? `team-${String(ctx.sessionManager?.getSessionId?.() ?? randomUUID()).replace(/[^A-Za-z0-9._-]/g, "_")}-${name}` : undefined);
-			const effectiveTools = params.tools ? [...new Set([...params.tools, ...(comm.allow.length ? ["team_message"] : [])])] : params.tools;
+		const sessionId = params.__definition?.sessionId ?? (persistent ? randomUUID() : undefined);
+			const effectiveTools = params.tools ? [...new Set([...params.tools, "team_message"])] : params.tools;
 
 			const systemPrompt = [
 				`You are "${name}", a member of an agent team led by another agent.`,
@@ -635,7 +644,7 @@ export default function (pi: ExtensionAPI) {
 				"You work in your own isolated context window. Work autonomously and completely on each task.",
 				"When you finish a task, reply with a concise, self-contained report: what you did, the files or commands involved, key findings, and any blocker.",
 				"That reply is the only thing the lead sees, so do not assume the lead has read your files or tool output.",
-				comm.allow.length ? `You may communicate with these teammates through team_message: ${comm.allow.join(", ")}. Do not message other members.` : "No teammate-to-teammate communication is enabled for this member; use the lead.",
+				"Use the provided team_message tool (workspace_team_message in restricted workspaces) to message allowed teammates or notify the lead with wait:false. The parent validates each pair's ACL.",
 				params.systemPrompt ?? "",
 			]
 				.filter((part) => part && part.trim())
@@ -709,9 +718,10 @@ export default function (pi: ExtensionAPI) {
 					workspace: memberWorkspace,
 					cwd: memberCwd,
 					promptFilePath,
-					createdAt: Date.now(),
+					createdAt: definition.createdAt,
 					lastActivityAt: Date.now(),
-					turns: 0,
+					turns: definition.turns ?? 0,
+					lastReply: definition.lastReply,
 					partial: "",
 					transcript: [],
 					queue: Promise.resolve(),
@@ -940,8 +950,8 @@ export default function (pi: ExtensionAPI) {
 		async execute() {
 			if (members.size === 0) {
 				return {
-					content: [{ type: "text" as const, text: "The team is empty. Use team_spawn to add members." }],
-					details: { count: 0 },
+					content: [{ type: "text" as const, text: restoreErrors.size ? `Team restoration failed: ${[...restoreErrors].map(([name, error]) => `${name}: ${error}`).join("\n")}` : "The team is empty. Use team_spawn to add members." }],
+					details: { count: 0, restoringErrors: Object.fromEntries(restoreErrors) },
 				};
 			}
 			const lines = Array.from(members.values()).map((member) => {
@@ -952,6 +962,8 @@ export default function (pi: ExtensionAPI) {
 					`turns=${member.turns}`,
 					`cwd=${member.cwd ?? "(lead cwd)"}`,
 					`workspace=${member.workspace ? `${member.workspace.root} (${member.workspace.access})` : "none"}`,
+					`persistent=${member.definition.persistent}, interrupted=${!!member.definition.interrupted}`,
+					`peers=${member.definition.communication.allow.join(",") || "none"}`,
 					`last=${member.turns ? nowIso(member.lastActivityAt) : "never"}`,
 				].join(", ");
 				const tail = member.error
@@ -969,7 +981,7 @@ export default function (pi: ExtensionAPI) {
 						text: `Roster (${members.size} members, ${open} open tasks, ${jobs.size} background jobs, auto-wake ${wakeEnabled ? "on" : "off"}):\n\n${lines.join("\n")}${deliveryError ? `\nDelivery error: ${deliveryError}` : ""}`,
 					},
 				],
-				details: { count: members.size, members: Array.from(members.values()).map((member) => ({ name: member.name, cwd: member.cwd, workspace: member.workspace })) },
+				details: { count: members.size, restoringErrors: Object.fromEntries(restoreErrors), members: Array.from(members.values()).map((member) => ({ name: member.name, cwd: member.cwd, workspace: member.workspace, persistent: member.definition.persistent, sessionId: member.definition.sessionId, interrupted: member.definition.interrupted, communication: member.definition.communication })) },
 			};
 		},
 	});

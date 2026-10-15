@@ -20,6 +20,8 @@ interface Goal {
 	criteria: string[];
 	verificationCommands: string[];
 	status: Status;
+	/** Only provider failures are eligible for an automatic supervisor recovery. */
+	pauseCause?: "provider-error";
 	reason?: string;
 	createdAt: number;
 	updatedAt: number;
@@ -56,6 +58,7 @@ export default function (pi: ExtensionAPI) {
 	let wakeTimer: ReturnType<typeof setTimeout> | undefined;
 	let finishing = false;
 	let generation = 0;
+	let providerFailed = false;
 
 	function clearTimers() {
 		if (deadline) clearTimeout(deadline);
@@ -77,12 +80,16 @@ export default function (pi: ExtensionAPI) {
 		if (currentCtx?.mode !== "tui") return;
 		currentCtx.ui.setStatus("goal", goal ? `Goal: ${goal.status} · ${goal.continuations}/${goal.maxContinuations} · ${goal.pending.length} jobs` : undefined);
 	}
+	function publishState() {
+		pi.events.emit("goal:state", goal ? { id: goal.id, status: goal.status, pauseCause: goal.pauseCause } : undefined);
+	}
 	function persist() {
 		if (!goal || !currentCtx) return;
 		goal.updatedAt = Date.now();
 		// Snapshots must not share mutable arrays with in-memory session entries.
 		pi.appendEntry(STATE_TYPE, JSON.parse(JSON.stringify(goal)));
 		updateUI();
+		publishState();
 	}
 	function budgetReason(checkContinuations = true): string | undefined {
 		if (!goal) return undefined;
@@ -91,9 +98,10 @@ export default function (pi: ExtensionAPI) {
 		if (checkContinuations && goal.continuations >= goal.maxContinuations) return "Goal automatic-continuation budget reached. Use /goal resume to grant a fresh budget.";
 		return undefined;
 	}
-	function pause(reason: string, status: "paused" | "blocked" = "paused") {
+	function pause(reason: string, status: "paused" | "blocked" = "paused", cause?: "provider-error") {
 		if (!goal || goal.status === "completed" || goal.status === "stopped") return;
 		goal.status = status;
+		goal.pauseCause = cause;
 		goal.reason = reason;
 		clearTimers();
 		persist();
@@ -152,6 +160,7 @@ export default function (pi: ExtensionAPI) {
 		generation++;
 		clearTimers();
 		finishing = false;
+		providerFailed = false;
 		currentCtx = ctx;
 		goal = undefined;
 		for (const entry of ctx.sessionManager.getBranch()) {
@@ -166,6 +175,7 @@ export default function (pi: ExtensionAPI) {
 			goal.pending = [];
 			if (goal.status !== "completed" && goal.status !== "stopped") {
 				goal.status = "paused";
+				goal.pauseCause = undefined;
 				goal.reason = "Session reloaded, restored, or branch changed. Previous background jobs cannot be resumed. Use /goal resume and redispatch unfinished work.";
 			}
 			persist();
@@ -202,13 +212,34 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
-	pi.on("session_shutdown", () => { generation++; clearTimers(); currentCtx = undefined; });
+	pi.on("session_shutdown", () => { generation++; providerFailed = false; clearTimers(); currentCtx = undefined; });
+	pi.on("before_agent_start", event => {
+		providerFailed = false;
+		if (event.messageType !== "custom" || event.message.customType !== "supervisor-check" || !goal || goal.status !== "paused" || goal.pauseCause !== "provider-error") return;
+		// A scheduled recovery reuses the original budget. It cannot unpause user
+		// decisions, blocked work, or an exhausted goal budget.
+		if (!enforceBudget()) return;
+		goal.status = "running";
+		goal.pauseCause = undefined;
+		goal.reason = undefined;
+		persist();
+		armDeadline();
+	});
+	pi.on("agent_settled", event => {
+		if (active(goal)) {
+			if (event.aborted) pause("Interrupted. Use /goal resume to continue.");
+			else if (providerFailed) pause("Main model failed after retries. The supervisor may retry while enabled, or use /goal resume.", "paused", "provider-error");
+		}
+		providerFailed = false;
+	});
 	pi.on("context", event => {
 		if (!active(goal)) return;
 		return { messages: [...event.messages, { role: "custom" as const, customType: "goal-context", content: reminder(), display: false, timestamp: Date.now() }] };
 	});
 	pi.on("message_end", event => {
-		if (!active(goal) || event.message.role !== "assistant") return;
+		if (event.message.role !== "assistant") return;
+		providerFailed = event.message.stopReason === "error";
+		if (!active(goal)) return;
 		goal.outputTokens += event.message.usage?.output ?? 0;
 	});
 	pi.on("turn_end", (_event, ctx) => {
@@ -224,9 +255,13 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_before_settle", (event, ctx) => {
 		if (!active(goal)) return;
 		if (event.outcome !== "completed") {
-			pause(event.outcome === "aborted" ? "Interrupted. Use /goal resume to continue." : "Main model failed. Use /goal resume after resolving the error.");
+			if (event.outcome === "aborted") pause("Interrupted. Use /goal resume to continue.");
+			else providerFailed = true;
+			// retry-any (before or after us) may still request a continuation.
+			// Only agent_settled can prove that the retry chain is over.
 			return;
 		}
+		providerFailed = false;
 		if (!enforceBudget()) return;
 		if (goal.pending.length) {
 			goal.status = "waiting";
@@ -240,6 +275,7 @@ export default function (pi: ExtensionAPI) {
 		const content = continueContent("The goal has not been accepted yet. Continue useful work or report a blocker with goal_pause.");
 		goal.updatedAt = Date.now();
 		updateUI();
+		publishState();
 		return { entries: [
 			...event.entries,
 			{ type: "custom" as const, customType: STATE_TYPE, data: JSON.parse(JSON.stringify(goal)) },
@@ -373,7 +409,7 @@ export default function (pi: ExtensionAPI) {
 					if (!ctx.isIdle()) ctx.abort();
 				} else if (command === "stop") {
 					if (goal && !["completed", "stopped"].includes(goal.status)) {
-						goal.status = "stopped"; goal.reason = rest || "Stopped by the user.";
+						goal.status = "stopped"; goal.pauseCause = undefined; goal.reason = rest || "Stopped by the user.";
 						clearTimers(); persist();
 						pi.events.emit("team:cancel-goal", { goalId: goal.id });
 						if (!ctx.isIdle()) ctx.abort();
@@ -381,6 +417,7 @@ export default function (pi: ExtensionAPI) {
 				} else if (command === "resume") {
 					if (!goal || ["completed", "stopped"].includes(goal.status)) throw new Error("No unfinished goal to resume.");
 					goal.status = goal.pending.length ? "waiting" : "running";
+					goal.pauseCause = undefined;
 					goal.reason = undefined; goal.continuations = 0; goal.outputTokens = 0; goal.budgetStartedAt = Date.now();
 					persist(); armDeadline();
 					if (!goal.pending.length) wake("The user resumed this goal with a fresh budget. Continue from saved progress.");
