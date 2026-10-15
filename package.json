@@ -1,0 +1,32 @@
+{
+  "name": "pi-mission-control",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pi team agents, completion wakeups, Goal mode, compact TUI monitor, workspace policies and compaction routing.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "engines": { "node": ">=22.19.0" },
+  "files": ["extensions", "agents", "scripts", "README.md", "LICENSE", "NOTICE.md"],
+  "pi": {
+    "extensions": [
+      "./extensions/agent-monitor/index.ts",
+      "./extensions/compaction-model/index.ts",
+      "./extensions/goal/index.ts",
+      "./extensions/subagent/index.ts",
+      "./extensions/team/index.ts",
+      "./extensions/workspace/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "check": "node scripts/check.mjs"
+  }
+}

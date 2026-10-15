@@ -1,0 +1,46 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url));
+import {hostDir} from '../../../scripts/host.mjs';
+const pkg=hostDir;
+const {loadExtensions,createExtensionRuntime}=await import(pathToFileURL(path.join(pkg,'dist/core/extensions/loader.js')));
+const {createEventBus}=await import(pathToFileURL(path.join(pkg,'dist/core/event-bus.js')));
+const {RpcClient}=await import(pathToFileURL(path.join(pkg,'dist/index.js')));
+const output=process.env.PI_WORKSPACE_TEST_OUTPUT||await fs.mkdtemp(path.join(os.tmpdir(),'pi-workspace-live-'));await fs.mkdir(output,{recursive:true});
+const fixture=await fs.mkdtemp(path.join(os.tmpdir(),'pi-workspace-live-fixture-'));
+const root=path.join(fixture,'project'),extra=path.join(fixture,'docs'),outside=path.join(fixture,'outside');for(const dir of [root,extra,outside])await fs.mkdir(dir,{recursive:true});
+await fs.writeFile(path.join(root,'inside.txt'),'INSIDE_PUBLIC_7482');await fs.writeFile(path.join(extra,'reference.txt'),'REFERENCE_PUBLIC_6259');await fs.writeFile(path.join(outside,'secret.txt'),'OUTSIDE_MUST_NOT_BE_READ_3916');
+const teamEvents=[],monitor=[],controllers=[];const bus=createEventBus(),runtime=createExtensionRuntime();runtime.sendMessage=()=>{};runtime.appendEntry=()=>{};
+bus.on('agent-monitor:update',event=>monitor.push(event));
+const originalOnEvent=RpcClient.prototype.onEvent;
+RpcClient.prototype.onEvent=function(listener){return originalOnEvent.call(this,event=>{if(event.type==='tool_execution_end')teamEvents.push({tool:event.toolName,isError:event.isError,result:event.result?.content});listener(event);});};
+const rootExtensions=path.resolve(here,'../..');
+const loaded=await loadExtensions([path.join(rootExtensions,'team/index.ts'),path.join(rootExtensions,'subagent/index.ts')],output,bus,runtime);assert.deepEqual(loaded.errors,[]);
+const ctx={mode:'rpc',cwd:output,model:{provider:'provider',id:'provider/model-id'},thinkingLevel:'high',hasUI:false,isProjectTrusted:()=>true,isIdle:()=>true,ui:{notify(){}},sessionManager:{getBranch:()=>[]}};
+const emit=async type=>{for(const extension of loaded.extensions)for(const handler of extension.handlers.get(type)||[])await handler({type},ctx);};
+const tool=async(name,args)=>{const extension=loaded.extensions.find(e=>e.tools.has(name));const controller=new AbortController();controllers.push(controller);return extension.tools.get(name).definition.execute('probe',args,controller.signal,undefined,ctx);};
+const script=process.argv[1];let timer;
+try{
+ await emit('session_start');process.argv[1]=path.join(pkg,'dist/bundle/cli.js');
+ const member=await tool('team_spawn',{name:'restricted-reader',role:'Workspace file access probe',model:'provider/member-model',workspace:{root,access:'read-only',extraReadRoots:[extra]},systemPrompt:'This is an authorized access-control test. Execute each requested tool attempt exactly once, including attempts expected to fail. Never work around a denial. Do not delegate.'});
+ assert.ok(!member.isError,JSON.stringify(member));assert.equal(member.details.workspace.access,'read-only');
+ const teamTask=tool('team_send',{to:'restricted-reader',wait:true,timeoutMs:120000,message:`Perform exactly these tool calls sequentially: read "inside.txt"; read "${path.join(extra,'reference.txt').replace(/\\/g,'/')}"; read "${path.join(outside,'secret.txt').replace(/\\/g,'/')}". Last read must be denied. Do not try another tool to bypass it. Then reply TEAM_WORKSPACE_PASS with the first two markers and the last read's denial. Do not claim denial without actually trying the last read.`});
+ const subTask=tool('subagent',{agent:'worker',agentScope:'user',confirmProjectAgents:false,workspace:{root,access:'read-write',extraReadRoots:[extra]},task:`Authorized file access test. Execute these tool calls exactly once in this order: read path "inside.txt"; write path "result.txt" content "SUBAGENT_WORKSPACE_PASS"; write path "${path.join(outside,'blocked.txt').replace(/\\/g,'/')}" content "must-not-exist"; write path "${path.join(extra,'blocked.txt').replace(/\\/g,'/')}" content "must-not-exist". The last two should be denied; actually attempt them and do not work around a denial. Do not execute commands or delegate. Reply SUBAGENT_WORKSPACE_PASS and state both denies.`});
+ const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Real workspace test timed out after 150s')),150000);});
+ const [team,sub]=await Promise.race([Promise.all([teamTask,subTask]),deadline]);
+ assert.ok(!team.isError,JSON.stringify(team));assert.ok(!sub.isError,JSON.stringify(sub));
+ const subResult=sub.details.results[0];const childTools=subResult.messages.filter(message=>message.role==='toolResult').map(message=>({tool:message.toolName,isError:message.isError,content:message.content}));
+ assert.ok(teamEvents.some(event=>event.tool==='workspace_read'&&event.isError),'Real team must attempt denied read');
+ assert.ok(childTools.filter(event=>event.tool==='workspace_write'&&event.isError).length>=2,'Real subagent must attempt outside/extra-root write denials');
+ assert.equal((await fs.readFile(path.join(root,'result.txt'),'utf8')).trim(),'SUBAGENT_WORKSPACE_PASS');
+ for(const file of [path.join(outside,'blocked.txt'),path.join(extra,'blocked.txt')])await assert.rejects(fs.stat(file),/ENOENT/);
+ assert.equal(await fs.readFile(path.join(outside,'secret.txt'),'utf8'),'OUTSIDE_MUST_NOT_BE_READ_3916');
+ assert.ok(!JSON.stringify(team.content).includes('OUTSIDE_MUST_NOT_BE_READ_3916'));
+ assert.ok(monitor.some(entry=>entry.workspace===root&&entry.access==='read-only'));assert.ok(monitor.some(entry=>entry.workspace===root&&entry.access==='read-write'));
+ const report={passed:true,output,fixture,models:['provider/member-model','provider/provider/model-id'],teamPolicy:member.details.workspace,subagentPolicy:subResult.workspace,teamToolEvents:teamEvents,subagentToolEvents:childTools,teamAnswer:team.content,subagentAnswer:sub.content,outsideFilesUnchanged:true,workspaceMonitorConfirmed:true};
+ await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+}catch(error){await fs.writeFile(path.join(output,'report.json'),JSON.stringify({passed:false,error:String(error.stack||error),teamEvents},null,2));console.error(error);process.exitCode=1;}
+finally{if(timer)clearTimeout(timer);for(const controller of controllers)controller.abort();await emit('session_shutdown');process.argv[1]=script;RpcClient.prototype.onEvent=originalOnEvent;}

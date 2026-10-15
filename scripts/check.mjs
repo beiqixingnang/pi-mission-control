@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {hostDir} from './host.mjs';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const manifest=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+const {loadExtensions}=await import(pathToFileURL(path.join(hostDir,'dist/core/extensions/loader.js')));
+const result=await loadExtensions(manifest.pi.extensions.map(file=>path.resolve(root,file)),root);
+const report={name:manifest.name,version:manifest.version,host:hostDir,node:process.version,platform:process.platform,errors:result.errors,resources:result.extensions.map(extension=>({file:path.relative(root,extension.path),tools:[...extension.tools.keys()],commands:[...extension.commands.keys()]}))};
+console.log(JSON.stringify(report,null,2));if(result.errors.length)process.exitCode=1;
