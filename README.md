@@ -2,12 +2,13 @@
 
 这是一个非官方的 Pi 扩展包，与 Pi 上游项目没有隶属或背书关系。
 
-当前版本 **1.2.0** 增加全局停止、成员定向取消、普通子智能体定向取消、消息时间、宽屏侧栏和成员对话查看；详见 [界面与中断说明](docs/ui-and-interruption-1.1.0.md)。1.0.1 的集成修复记录仍保留在 [验证记录](docs/verification-1.0.1.md)。
+当前版本 **1.3.0** 增加工作区重命名、切换和对话延续，支持手动操作及一次性授权 AI 执行；详见 [工作区迁移说明](extensions/project/README.md)。全局停止、成员取消、宽屏侧栏等见 [界面与中断说明](docs/ui-and-interruption-1.1.0.md)。历史验证记录保留在 [验证记录](docs/verification-1.0.1.md)。
 
 适用于 Pi 1.3.0 的本地功能包，并保留 Pi 1.2.0 的历史兼容记录；1.3.0 已在 Windows 与 Debian WSL 实际安装并通过兼容测试，见 [升级评估](docs/pi-1.3.0-compatibility.md)。支持 Windows 与 WSL/Linux，包含：
 
 | 功能 | 用法 |
 | --- | --- |
+| 工作区重命名与对话延续 | `/project rename`、`switch`；AI 需先经 `/project allow` 一次性授权 |
 | 持久智能体团队 | `team_spawn`、`team_send`、`team_broadcast`、`team_disband` |
 | 后台完成后唤醒 | 异步派活 `wait:false`；完成/失败自动送回主对话 |
 | Goal 模式 | `/goal start`、`status`、`pause`、`resume`、`stop` |
@@ -55,13 +56,25 @@ pi list
 pi remove /path/to/pi-mission-control
 ```
 
-`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.2.0.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
+`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.3.0.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
 
 ## 已经安装散装扩展时
 
 不要同时启用原来的散装目录和本包，否则相同的工具/命令可能重复注册。当前这台电脑的 Windows 与 Debian WSL 共用同一个 agent 配置目录（WSL 的 `~/.pi/agent` 是符号链接），在一边改个人配置会影响另一边。
 
 本次导入验证使用独立的测试配置，未自动迁移或覆盖你正在用的散装扩展。迁移时先备份并移走旧的 `agent-monitor`、`compaction-model`、`goal`、`subagent`、`team`、`workspace` 六个扩展目录，再安装本包。
+
+## 工作区改名后继续对话
+
+默认手动执行，例如将当前 `D:/projects/1` 改名为同级的 `2`：
+
+```text
+/project rename 2
+```
+
+当前窗口会延续原有对话；以后从 `D:/projects/2` 打开终端运行 `pi -r`，可找到延续会话。切换到已有目录使用 `/project switch "D:/projects/other"`。若要让 AI 代办，先 `/project allow rename 2`，再告诉 AI 继续；授权仅限这一次目标，十分钟后过期，可用 `/project revoke` 撤销。
+
+迁移会保存原会话和备份、重建成员进程并保留记忆；Goal 暂停、Supervisor 关闭。插件安装目录必须位于待重命名的业务项目之外。详见 [工作区迁移说明](extensions/project/README.md)。
 
 ## 模型与默认设置
 
@@ -167,6 +180,7 @@ Windows 使用 `C:/projects/example` 这类原生路径；WSL 使用 `/home/...`
 
 - [Goal 与唤醒](extensions/goal/README.md)
 - [TUI 状态区](extensions/agent-monitor/README.md)
+- [工作区重命名与对话延续](extensions/project/README.md)
 - [工作区访问限制](extensions/workspace/README.md)
 
 ## Pi 源码参考
@@ -182,7 +196,7 @@ npm run check
 npm test
 ```
 
-`check` 验证九个扩展入口可加载；`test` 使用临时配置执行单元及集成测试，不访问模型 API，也不修改用户全局设置。集成测试会实际启动 Pi 子进程，验证受限成员双向通信、组外拒绝、磁盘快照/旧成员历史恢复，以及真实 Pi 生命周期中的失败重试与监督恢复；模型由包内测试 fixture 提供确定性响应。
+`check` 验证十个扩展入口可加载；`test` 使用临时配置执行单元及集成测试，不访问模型 API，也不修改用户全局设置。集成测试会实际启动 Pi 子进程，验证受限成员双向通信、组外拒绝、磁盘快照/旧成员历史恢复，以及真实 Pi 生命周期中的失败重试与监督恢复；模型由包内测试 fixture 提供确定性响应。
 
 有模型配置时可额外运行真实测试（会产生模型用量）：
 

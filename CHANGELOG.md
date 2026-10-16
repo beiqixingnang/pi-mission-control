@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+
+- Added `/project rename` and `/project switch` to keep conversation history while rebuilding Pi's runtime for the new directory. Continued sessions are discoverable from the target directory on restart.
+- Added manual-only defaults and exact-target, single-use, ten-minute AI grants via `/project allow`, `project_status`, and `project_apply`.
+- Preserved the current branch and historical message bodies, added durable backups/recovery journals, and migrated persistent member paths and saved conversations on rename.
+- Workspace changes stop current work and leave Goal/Supervisor paused. Existing destinations, ephemeral sessions and renaming the installed plugin directory are rejected.
+- Added isolated offline runtime/process regressions for rename, switch, restart, authorization, member history, custom session storage and rollback.
+
 ## 1.2.0 - 2026-10-16
 
 - Added global stop, targeted team and subagent cancellation, and held-input handling.

@@ -556,8 +556,29 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => { closing = false; await restoreRoster(ctx); });
+	pi.events.on("project:prepare", data => {
+		const request = data as { pending: Promise<unknown>[]; childFiles: Record<string, string>; emptyChildren: string[] };
+		// Close idle clients too: Windows keeps their cwd handles open.
+		closing = true;
+		request.pending.push((async () => {
+			for (const member of members.values()) {
+				if (!member.definition.persistent || member.stopped) continue;
+				const state = await member.client.getState();
+				if (state.sessionFile) request.childFiles[member.name] = state.sessionFile;
+				if (state.messageCount === 0) request.emptyChildren.push(member.name);
+			}
+			persist();
+			await disposeAll(true);
+		})());
+	});
+	pi.events.on("project:resume", data => {
+		if (currentCtx) {
+			closing = false;
+			(data as { pending: Promise<unknown>[] }).pending.push(restoreRoster(currentCtx));
+		}
+	});
 	pi.on("session_shutdown", async () => {
-		persist();
+		if (!closing) persist();
 		closing = true;
 		await disposeAll(true);
 	});

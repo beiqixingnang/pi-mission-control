@@ -24,6 +24,8 @@ Do not include API keys, auth files, session transcripts, or private project con
 - `workspace` policies are extension-level file-tool checks. They are not an OS sandbox.
 - `execution: "sandbox"` is rejected when no sandbox backend is available; it does not silently become unrestricted execution.
 - `goal_finish` may run configured commands through the active `bash` tool.
+- Workspace rename/switch is manual by default. `/project allow` creates one exact-target grant that expires in ten minutes; `project_apply` cannot grant itself permission. This does not sandbox unrestricted shell tools.
+- Migration snapshots contain full private transcripts and are stored under `<agent-dir>/project-migrations/`. Treat them like ordinary session files; never upload them in a public report.
 - Unrestricted members and subagents may use the tools granted by Pi and may modify files in their workspace.
 - The supervisor can create additional model turns and therefore additional model usage.
 - The extension does not provide a separate credential store or isolation layer for Pi providers.
