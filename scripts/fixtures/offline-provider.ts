@@ -7,7 +7,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerProvider("workbench-fixture", {
 		baseUrl: "http://127.0.0.1/unused", api: "workbench-fixture", apiKey: "test-only",
 		models: [{ id: "model", name: "Offline integration fixture", reasoning: false, input: ["text"], contextWindow: 64000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
-		streamSimple(model, context) {
+		streamSimple(model, context, options) {
 			const stream = createAssistantMessageEventStream();
 			queueMicrotask(() => {
 				const textOf = (message: any) => typeof message.content === "string" ? message.content : (message.content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("");
@@ -17,6 +17,12 @@ export default function (pi: ExtensionAPI) {
 				try {
 					const command = JSON.parse(commandText.slice(commandText.indexOf("PROBE:") + 6));
 					const last = context.messages.at(-1);
+					if(command.op==="hang"){
+						stream.push({type:"start",partial:message});
+						const abort=()=>{message.stopReason="aborted";message.errorMessage="Cancelled fixture";stream.push({type:"error",reason:"aborted",error:message});stream.end();};
+						if(options?.signal?.aborted)abort();else options?.signal?.addEventListener("abort",abort,{once:true});
+						return;
+					}
 					if (command.op === "failure-sequence") {
 						const count = (attempts.get(commandText) ?? 0);
 						attempts.set(commandText, count + 1);

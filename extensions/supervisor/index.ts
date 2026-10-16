@@ -99,6 +99,7 @@ export default function (pi: ExtensionAPI) {
 	let lastCheckAt: number | undefined;
 	let lastOutcome: string | undefined;
 	let lastError: string | undefined;
+	let nextCheckAt:number|undefined;
 	let pendingError: string | undefined;
 	let pendingAborted = false;
 	const pendingJobs = new Map<string, PendingJob>();
@@ -110,6 +111,7 @@ export default function (pi: ExtensionAPI) {
 	function stopTimer() {
 		if (timer) clearTimeout(timer);
 		timer = undefined;
+		nextCheckAt=undefined;
 	}
 
 	function resetRuntime() {
@@ -175,12 +177,14 @@ export default function (pi: ExtensionAPI) {
 		if (dead || !enabled || !currentCtx) return;
 		const expected = generation;
 		stopTimer();
+		nextCheckAt=Date.now()+Math.max(0,delay);
 		timer = setTimeout(() => {
 			timer = undefined;
 			if (expected !== generation || dead || !enabled) return;
 			tick();
 		}, Math.max(0, delay));
 		timer.unref?.();
+		updateUI();
 	}
 
 	function tick() {
@@ -277,6 +281,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function updateUI() {
+		pi.events.emit("supervisor:state",{enabled,intervalMs,nextCheckAt,checking:checkInFlight});
 		const ctx = currentCtx;
 		if (!ctx || ctx.mode !== "tui") return;
 		try {
@@ -304,6 +309,9 @@ export default function (pi: ExtensionAPI) {
 	// Lifecycle
 	// -------------------------------------------------------------------
 
+	pi.events.on("workbench:stop", () => {
+		generation++; enabled=false;stopTimer();resetRuntime();updateUI();
+	});
 	pi.on("session_start", (_event, ctx) => {
 		generation++;
 		stopTimer();

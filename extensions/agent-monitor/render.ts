@@ -1,3 +1,4 @@
+import { clock } from "./history.ts";
 import { stripTerminalSequences, truncateToWidth } from "@earendil-works/pi-tui";
 
 export type AgentStatus = "starting" | "working" | "idle" | "done" | "error" | "stopped";
@@ -14,6 +15,7 @@ export interface AgentSnapshot {
 	alive?: boolean;
 	startedAt: number;
 	updatedAt: number;
+	lastMessageAt?: number;
 	finishedAt?: number;
 }
 export const isWorking = (entry: AgentSnapshot) => entry.status === "starting" || entry.status === "working";
@@ -55,7 +57,7 @@ export function renderMonitor(entries: AgentSnapshot[], width: number, now = Dat
 		const rawOutput = entry.output?.trim().split(/\r?\n/).filter(line => line.trim()).at(-1) || "";
 		const output = cleanText(rawOutput);
 		const location = entry.workspace ? ` · ${entry.access === "read-only" ? "只读" : "可写"}:${cleanText(entry.workspace.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) || entry.workspace, 24)}` : "";
-		const prefix = `${icon} ${kind} ${cleanText(entry.name, 64)}${location} · ${status}${detail && detail !== labels[entry.status] ? ` · ${detail}` : ""}`;
+		const prefix = `${icon} ${kind} ${cleanText(entry.name, 64)}${location} · ${status} · 消息 ${clock(entry.lastMessageAt,now)}${detail && detail !== labels[entry.status] ? ` · ${detail}` : ""}`;
 		rows.push(truncateToWidth(paint(entry.status === "error" ? "error" : working ? "accent" : entry.status === "done" ? "success" : "muted", prefix) + (output ? paint("muted", ` │ ${output}`) : ""), width));
 	}
 	return rows;

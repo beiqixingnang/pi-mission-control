@@ -19,6 +19,7 @@ export interface MemberDefinition {
 	interrupted?: boolean;
 	turns?: number;
 	lastReply?: string;
+	lastMessageAt?: number;
 }
 export interface SavedCompletion {
 	id: string;

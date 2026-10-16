@@ -24,7 +24,7 @@ test('package supplies worker/planner/scout/reviewer without editing user agent 
 
 test('manifest includes only runtime entry points and does not auto-load test drivers',async()=>{
  const manifest=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
- assert.equal(manifest.pi.extensions.length,8);
+ assert.equal(manifest.pi.extensions.length,9);
  for(const file of manifest.pi.extensions){assert.ok(file.endsWith('/index.ts'));assert.ok(!file.includes('/tests/'));await fs.access(path.join(root,file));}
  for(const name of ['@earendil-works/pi-coding-agent','@earendil-works/pi-ai','@earendil-works/pi-tui','typebox']){assert.equal(manifest.peerDependencies[name],'*');assert.ok(!manifest.dependencies?.[name]);}
 });

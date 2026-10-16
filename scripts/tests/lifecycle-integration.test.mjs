@@ -14,7 +14,7 @@ async function harness(fn){
  const errors=[];const events=[];
  const settings=SettingsManager.inMemory({retry:{enabled:true,maxRetries:5,baseDelayMs:0,maxAgentDelayMs:0},cacheWarming:'off'});
  const resources=new DefaultResourceLoader({cwd,agentDir:process.env.PI_CODING_AGENT_DIR,settingsManager:settings,noExtensions:true,noSkills:true,noPromptTemplates:true,noContextFiles:true,noThemes:true,additionalExtensionPaths:[
-  path.join(root,'extensions/goal/index.ts'),path.join(root,'extensions/retry-any/index.ts'),path.join(root,'extensions/supervisor/index.ts'),path.join(root,'scripts/fixtures/offline-provider.ts'),
+  path.join(root,'extensions/goal/index.ts'),path.join(root,'extensions/run-control/index.ts'),path.join(root,'extensions/retry-any/index.ts'),path.join(root,'extensions/supervisor/index.ts'),path.join(root,'scripts/fixtures/offline-provider.ts'),
  ]});
  try{
   await resources.reload();
@@ -53,6 +53,17 @@ test('after six provider failures with no background jobs the supervisor wakes a
  });
  assert.ok(h.events.some(event=>event.type==='message_end'&&event.message?.customType==='supervisor-check'));
  assert.equal(h.goal().status,'completed');
+}));
+
+test('stop aborts a real active provider and leaves the main session usable for a new instruction',{timeout:8000},async()=>harness(async h=>{
+ let started;const ready=new Promise(resolve=>{started=resolve;});const off=h.session.subscribe(event=>{if(event.type==='message_start'&&event.message?.role==='assistant')started();});
+ await h.session.prompt('/supervisor on 1');
+ const running=h.session.prompt('PROBE:{"op":"hang"}');await ready;
+ await h.session.prompt('/stop');await running;off();assert.equal(h.session.isIdle,true);assert.equal(h.goal().status,'paused');
+ await h.session.prompt('PROBE:{"op":"remember","token":"AFTER_GLOBAL_STOP"}');
+ assert.match(h.session.getLastAssistantText(),/AFTER_GLOBAL_STOP/);assert.equal(h.session.isIdle,true);
+ await new Promise(resolve=>setTimeout(resolve,1100));
+ assert.equal(h.events.some(event=>event.type==='message_end'&&event.message?.customType==='supervisor-check'),false,'global stop must disable scheduled recovery');
 }));
 
 test('an explicit blocked Goal stays blocked after provider retry and supervisor ticks',async()=>harness(async h=>{

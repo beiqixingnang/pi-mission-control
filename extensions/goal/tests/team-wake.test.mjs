@@ -64,6 +64,14 @@ test('team-wake off retains notifications, on delivers once, history survives la
   const history=await h.tool('team_collect',{jobIds:[dispatched.details.jobId]});assert.equal(history.details.results[0].reply,'held result');
 }));
 
+test('global stop skips queued member work and suppresses wakes without removing roster',async()=>withTeam(async h=>{
+  const a=await h.spawn('a');
+  await h.tool('team_send',{to:'a',message:'running',wait:false});await h.tool('team_send',{to:'a',message:'queued',wait:false});await delay(0);
+  const request={reason:'test global stop',pending:[]};h.bus.emit('workbench:stop',request);await Promise.allSettled(request.pending);await delay(0);
+  assert.equal(a.probe.messages.length,1);assert.equal(h.events.length,2);assert.equal(h.sent.length,0);
+  const newTask=h.tool('team_send',{to:'a',message:'after stop'});await delay(0);h.settle(a,'new task');assert.equal((await newTask).isError,undefined);
+}));
+
 test('cancel-goal aborts the active job, skips queued jobs, never wakes',async()=>withTeam(async h=>{
   const a=await h.spawn('a');h.bus.on('team:scope',scope=>{scope.goalId='goal-one';});
   await h.tool('team_send',{to:'a',message:'running',wait:false});await h.tool('team_send',{to:'a',message:'queued',wait:false});await delay(0);

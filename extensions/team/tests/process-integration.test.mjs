@@ -36,7 +36,7 @@ async function harness(manager,peers){
  const emit=async(type)=>{for(const handler of extension.handlers.get(type)||[])await handler({type},ctx);};
  const tool=(name,args)=>extension.tools.get(name).definition.execute('integration',args,undefined,undefined,ctx);
  await emit('session_start');
- return {tool,close:()=>emit('session_shutdown'),manager};
+ return {bus,tool,close:()=>emit('session_shutdown'),manager};
 }
 function unpack(result){assert.ok(!result.isError,JSON.stringify(result));const text=result.content[0].text;return JSON.parse(text.slice(text.indexOf('\n\n')+2));}
 async function send(h,to,command){return unpack(await h.tool('team_send',{to,message:'PROBE:'+JSON.stringify(command),timeoutMs:15000}));}
@@ -69,6 +69,11 @@ test('real restricted children expose the message tool, enforce ACL both ways, a
   const denied=await send(h,'cpu-supervisor',{tool:'workspace_team_message',args:{to:'gpu-builder',message:'PROBE:{"op":"remember","token":"forbidden"}',wait:true,timeoutMs:10000}});
   assert.equal(denied.isError,true);assert.match(denied.content[0].text,/ACL denied/);
   const memory=await send(h,'gpu-builder',{op:'recall'});assert.ok(!JSON.stringify(memory).includes('forbidden'));
+  const ready=new Promise(resolve=>peers[1].onEvent(event=>{if(event.type==='agent_start')resolve();}));
+  const hanging=h.tool('team_send',{to:'cpu-builder',message:'PROBE:{"op":"hang"}',wait:true,timeoutMs:15000});await ready;
+  const stopping={reason:'integration stop',pending:[]};h.bus.emit('workbench:stop',stopping);await Promise.allSettled(stopping.pending);
+  assert.equal((await hanging).isError,true);assert.equal((await h.tool('team_list',{})).details.count,3);
+  await send(h,'cpu-builder',{op:'remember',token:'AFTER_STOP_REUSE'});
   const savedFile=manager.getSessionFile();const firstPids=peers.map(p=>p.process?.pid);
   await h.close();h=undefined;
   assert.ok(peers.every(peer=>peer.process===null),'all original children must stop before restart');

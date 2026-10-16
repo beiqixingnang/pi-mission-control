@@ -157,6 +157,7 @@ interface UsageStats {
 }
 
 interface SingleResult {
+	runId?:string;
 	agent: string;
 	agentSource: "package" | "user" | "project" | "unknown";
 	task: string;
@@ -304,6 +305,7 @@ interface MonitorUpdate {
 	output?: string;
 	startedAt?: number;
 	updatedAt?: number;
+	lastMessageAt?: number;
 	/** True while the subagent process is running; false on every terminal state. */
 	alive?: boolean;
 	cwd?: string;
@@ -311,15 +313,46 @@ interface MonitorUpdate {
 	access?: string;
 }
 
+interface ActiveSubagent {
+	id:string;
+	invocationId?:string;
+	agent:string;
+	status:MonitorStatus;
+	controller:AbortController;
+	done:Promise<void>;
+	startedAt:number;
+}
 interface DispatchDefaults {
+	runId?:string;
+	invocationId?:string;
+	registerRun?:(run:ActiveSubagent)=>(()=>void);
 	model?: string;
 	thinkingLevel?: ThinkingLevel;
 	/** Invocation-level workspace; per-step values override it, agent presets are the fallback. */
 	workspace?: WorkspaceOptions;
 	report?: (update: MonitorUpdate) => void;
+	conversation?: (id:string,messages:unknown[])=>void;
 }
 
 async function runSingleAgent(
+	defaultCwd:string, defaults:DispatchDefaults, agents:AgentConfig[], agentName:string, task:string,
+	cwd:string|undefined, workspace:WorkspaceOptions|undefined, step:number|undefined,
+	signal:AbortSignal|undefined,onUpdate:OnUpdateCallback|undefined,makeDetails:(results:SingleResult[])=>SubagentDetails,
+):Promise<SingleResult>{
+	const id=randomUUID(),controller=new AbortController();
+	const abort=()=>controller.abort();signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
+	let markDone:()=>void=()=>{};const done=new Promise<void>(resolve=>{markDone=resolve;});
+	const remove=defaults.registerRun?.({id,invocationId:defaults.invocationId,agent:agentName,status:"starting",controller,done,startedAt:Date.now()});
+	try{return {...await runSingleAgentBody(defaultCwd,{...defaults,runId:id},agents,agentName,task,cwd,workspace,step,controller.signal,onUpdate,makeDetails),runId:id};}
+	catch(error){
+		// A targeted child cancellation is a failed result for that child, not a
+		// rejection that abandons still-running siblings in a parallel invocation.
+		if(!controller.signal.aborted||signal?.aborted)throw error;
+		return {runId:id,agent:agentName,agentSource:agents.find(agent=>agent.name===agentName)?.source??"unknown",task,exitCode:1,messages:[],stderr:"Subagent task was cancelled.",stopReason:"aborted",errorMessage:"Subagent task was cancelled.",usage:{input:0,output:0,cacheRead:0,cacheWrite:0,cost:0,contextTokens:0,turns:0},step};
+	}finally{remove?.();signal?.removeEventListener("abort",abort);markDone();}
+}
+
+async function runSingleAgentBody(
 	defaultCwd: string,
 	dispatchDefaults: DispatchDefaults,
 	agents: AgentConfig[],
@@ -335,9 +368,10 @@ async function runSingleAgent(
 	const agent = agents.find((a) => a.name === agentName);
 	const model = agent?.model ?? dispatchDefaults.model;
 
-	const monitorId = randomUUID();
+	const monitorId = dispatchDefaults.runId ?? randomUUID();
 	const monitorName = step !== undefined ? `${agentName} (step ${step})` : agentName;
 	let monitorStartedAt: number | undefined;
+	let monitorMessageAt:number|undefined;
 	let monitorTerminal = false;
 	let monitorCwd: string | undefined;
 	let monitorWorkspace: string | undefined;
@@ -361,6 +395,7 @@ async function runSingleAgent(
 			output: extra?.output !== undefined ? boundMonitorOutput(extra.output) : undefined,
 			startedAt: monitorStartedAt,
 			updatedAt: now,
+			lastMessageAt:monitorMessageAt,
 			alive: !terminal,
 			cwd: monitorCwd,
 			workspace: monitorWorkspace,
@@ -369,6 +404,8 @@ async function runSingleAgent(
 	};
 
 	report("starting", { model });
+	if(signal?.aborted){report("stopped");throw new Error("Subagent was aborted");}
+	dispatchDefaults.conversation?.(monitorId,[{role:"user",content:task,timestamp:Date.now()}]);
 
 	if (!agent) {
 		const available = agents.map((a) => `"${a.name}"`).join(", ") || "none";
@@ -502,6 +539,7 @@ async function runSingleAgent(
 					const ame = event.assistantMessageEvent;
 					if (ame?.type === "text_delta" && typeof ame.delta === "string") {
 						streamedText = boundMonitorOutput(streamedText + ame.delta);
+						monitorMessageAt=Date.now();
 						report("working", { activity: "输出中", output: streamedText });
 					} else if (ame?.type === "thinking_start" || ame?.type === "thinking_delta") {
 						// Thinking metadata only: never forward thinking text.
@@ -522,6 +560,7 @@ async function runSingleAgent(
 
 				if (event.type === "message_end" && event.message) {
 					const msg = event.message as Message;
+					dispatchDefaults.conversation?.(monitorId,[msg]);
 					currentResult.messages.push(msg);
 
 					if (msg.role === "assistant") {
@@ -539,6 +578,7 @@ async function runSingleAgent(
 						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
 						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
 						streamedText = getAssistantText(msg);
+						if(streamedText.trim())monitorMessageAt=msg.timestamp??Date.now();
 						report("working", { output: streamedText });
 					}
 					emitUpdate();
@@ -574,10 +614,18 @@ async function runSingleAgent(
 			if (signal) {
 				killProc = () => {
 					wasAborted = true;
+					const pid = proc.pid;
+					if (pid && process.platform === "win32") {
+						const systemRoot = process.env.SystemRoot || "C:\\Windows";
+						const taskkill = spawn(path.join(systemRoot, "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+						taskkill.once("error", () => {});
+					} else if (pid) {
+						try { process.kill(-pid, "SIGTERM"); } catch { /* fallback below */ }
+					}
 					proc.kill("SIGTERM");
 					killTimer = setTimeout(() => {
 						if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
-					}, 5000);
+					}, 1500);
 				};
 				if (signal.aborted) killProc();
 				else signal.addEventListener("abort", killProc, { once: true });
@@ -639,8 +687,12 @@ const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
 });
 
 const SubagentParams = Type.Object({
+	wait:Type.Optional(Type.Boolean({default:true,description:"Default true waits for the result. Set false to run in the background so the lead can continue, inspect or cancel it; completion wakes the lead."})),
+	notify:Type.Optional(StringEnum(["batch","off"] as const,{description:"For background invocations: batch (default) sends one completion; off only stores the result."})),
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
+	wait: Type.Optional(Type.Boolean({ default: true, description: "Default true waits for the invocation. Set false to run in background; completion wakes the lead." })),
+	notify: Type.Optional(StringEnum(["batch", "off"] as const, { description: "Background notification policy; default batch." })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
 	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
 	agentScope: Type.Optional(AgentScopeSchema),
@@ -655,16 +707,51 @@ export default function (pi: ExtensionAPI) {
 	// Monitor generation: bumped when the session tears down or the tree moves so
 	// late callbacks from a previous generation cannot repopulate the monitor.
 	let monitorEpoch = 0;
+	const controllers=new Map<AbortController,Promise<void>>();
+	const invocations=new Map<string,AbortController>();
+	const activeRuns=new Map<string,ActiveSubagent>();
+	const completed=new Map<string,AgentToolResult<SubagentDetails>>();
+	let cancellationEpoch=0;
+	const stopRuns=()=>{cancellationEpoch++;for(const controller of controllers.keys())controller.abort();};
+	pi.events.on("workbench:stop",data=>{stopRuns();(data as {pending?:Promise<unknown>[]})?.pending?.push(...controllers.values());});
 	pi.on("session_shutdown", () => {
+		completed.clear();
+		stopRuns();
 		monitorEpoch++;
 	});
 	pi.on("session_tree", () => {
+		stopRuns();
 		monitorEpoch++;
 	});
+
+	pi.registerTool({name:"subagent_list",label:"Subagent: active runs",description:"List active ordinary subagents and their runId/invocationId. Use subagent_cancel to interrupt one; this does not disband persistent team members.",parameters:Type.Object({}),async execute(){
+		const runs=[...activeRuns.values()].map(({id,invocationId,agent,status,startedAt})=>({runId:id,invocationId,agent,status,startedAt}));
+		return {content:[{type:"text" as const,text:JSON.stringify({runs,invocations:[...invocations.keys()]},null,2)}],details:{runs,invocations:[...invocations.keys()]}};
+	}});
+	async function cancelRuns(params:{runId?:string;invocationId?:string;agent?:string}){
+		if(Number(!!params.runId)+Number(!!params.invocationId)+Number(!!params.agent)!==1)return {content:[{type:"text" as const,text:"Specify exactly one of runId, invocationId or agent."}],details:undefined,isError:true};
+		if(params.invocationId){
+			const controller=invocations.get(params.invocationId);
+			if(!controller)return {content:[{type:"text" as const,text:"Unknown or finished invocation."}],details:undefined,isError:true};
+			const done=controllers.get(controller);controller.abort();await done;
+			return {content:[{type:"text" as const,text:`Cancelled invocation ${params.invocationId}.`}],details:{invocationId:params.invocationId,cancelled:true}};
+		}
+		const matches=params.runId?[activeRuns.get(params.runId)].filter((run):run is ActiveSubagent=>!!run):[...activeRuns.values()].filter(run=>run.agent===params.agent);
+		if(matches.length!==1)return {content:[{type:"text" as const,text:matches.length?"Multiple runs have this agent name; use a runId from subagent_list.":"Unknown or already finished subagent."}],details:undefined,isError:true};
+		const run=matches[0];run.controller.abort();await run.done;
+		return {content:[{type:"text" as const,text:`Cancelled ${run.agent} run ${run.id}; unrelated runs continue.`}],details:{runId:run.id,cancelled:true}};
+	}
+	pi.registerTool({name:"subagent_cancel",label:"Subagent: cancel task",executionMode:"parallel",description:"Interrupt a running ordinary subagent by runId, one unambiguous agent name, or a whole invocationId. Other invocations/parallel siblings keep running. Use subagent_list for IDs.",parameters:Type.Object({runId:Type.Optional(Type.String()),invocationId:Type.Optional(Type.String()),agent:Type.Optional(Type.String())}),async execute(_id,params){return cancelRuns(params);}});
+	pi.registerTool({name:"subagent_collect",label:"Subagent: background result",description:"Read the completed result of a background ordinary subagent invocation, or report pending without polling/waiting. Last 100 results retained.",parameters:Type.Object({invocationId:Type.String()}),async execute(_id,params){
+		const result=completed.get(params.invocationId);if(result)return result;
+		return {content:[{type:"text" as const,text:invocations.has(params.invocationId)?"Invocation is still running; wait for automatic completion.":"Unknown or expired invocation."}],details:{invocationId:params.invocationId,pending:invocations.has(params.invocationId)}};
+	}});
+	pi.registerCommand("subagent-cancel",{description:"Cancel a run/invocation by ID: /subagent-cancel <id>",handler:async(args,ctx)=>{const id=args.trim();const result=await cancelRuns(invocations.has(id)?{invocationId:id}:{runId:id});ctx.ui.notify(result.content.map(item=>item.text).join("\n"),result.isError?"warning":"info");}});
 
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
+		executionMode:"parallel",
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
@@ -674,14 +761,30 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: ["When the user asks a subagent to stay within a directory, set workspace.root and access. cwd alone only changes the default directory. Restricted subagents have file tools only, no host shell or nested delegation."],
 		parameters: SubagentParams,
 
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+		async execute(_toolCallId, params, parentSignal, onUpdate, ctx) {
+			if(invocations.has(_toolCallId))throw new Error("Duplicate active subagent invocation ID.");
+			const invocationEpoch=cancellationEpoch;
+			const ownedParentSignal=params.wait===false?undefined:parentSignal;
+			let markDone:()=>void=()=>{};
+			const done=new Promise<void>(resolve=>{markDone=resolve;});
+			const controller=new AbortController();controllers.set(controller,done);invocations.set(_toolCallId,controller);
+			const abort=()=>controller.abort();ownedParentSignal?.addEventListener("abort",abort,{once:true});if(ownedParentSignal?.aborted)abort();
+			const signal=controller.signal;
+			pi.events.emit("subagent:run-start",{id:_toolCallId});
+			const monitorGeneration=monitorEpoch;
+			const runInvocation=async()=>{
+			try {
 			const agentScope: AgentScope = params.agentScope ?? "user";
-			const epoch = monitorEpoch;
+			const epoch = monitorGeneration;
 			const dispatchDefaults: DispatchDefaults = {
+				invocationId:_toolCallId,
+				registerRun:run=>{activeRuns.set(run.id,run);return ()=>activeRuns.delete(run.id);},
 				model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
 				thinkingLevel: ctx.thinkingLevel,
 				workspace: params.workspace,
+				conversation:(id,messages)=>{if(epoch===monitorEpoch)pi.events.emit("agent-monitor:conversation",{id,messages});},
 				report: (update) => {
+					const active=activeRuns.get(update.id);if(active)active.status=update.status;
 					if (epoch !== monitorEpoch) return;
 					try {
 						pi.events.emit("agent-monitor:update", update);
@@ -925,6 +1028,22 @@ export default function (pi: ExtensionAPI) {
 				content: [{ type: "text", text: `Invalid parameters. Available agents: ${available}` }],
 				details: makeDetails("single")([]),
 			};
+			}finally{controllers.delete(controller);invocations.delete(_toolCallId);markDone();ownedParentSignal?.removeEventListener("abort",abort);pi.events.emit("subagent:run-end",{id:_toolCallId});}
+			};
+			if(params.wait!==false)return runInvocation();
+			const scope:{goalId?:string}={};pi.events.emit("team:scope",scope);
+			const member=`subagent:${params.agent??"workflow"}`;
+			pi.events.emit("team:job-start",{id:_toolCallId,member,goalId:scope.goalId});
+			const finish=(result:AgentToolResult<SubagentDetails>)=>{
+				completed.set(_toolCallId,result);if(completed.size>100)completed.delete(completed.keys().next().value!);
+				if(monitorGeneration!==monitorEpoch||invocationEpoch!==cancellationEpoch)return;
+				const ok=!result.isError&&!result.details?.results.some(isFailedResult);
+				const reply=result.content.filter(block=>block.type==="text").map(block=>block.text).join("\n");
+				pi.events.emit("team:job-end",{id:_toolCallId,member,goalId:scope.goalId,ok,reply:ok?reply:undefined,error:ok?undefined:reply});
+				if(!scope.goalId&&params.notify!=="off")pi.sendMessage({customType:"subagent-results",content:`Background invocation ${_toolCallId} ${ok?"completed":"failed or cancelled"}:\n${reply.slice(0,20000)}`,display:true,details:{invocationId:_toolCallId}},{triggerTurn:true,deliverAs:"followUp"});
+			};
+			void runInvocation().then(finish,error=>finish({content:[{type:"text",text:String((error as Error)?.message??error)}],details:{mode:"single",agentScope:params.agentScope??"user",projectAgentsDir:null,results:[]},isError:true}));
+			return {content:[{type:"text" as const,text:`Started background invocation ${_toolCallId}. Use subagent_cancel to interrupt it; completion wakes the lead unless notifications are off.`}],details:{invocationId:_toolCallId,background:true}};
 		},
 
 		renderCall(args, theme, _context) {

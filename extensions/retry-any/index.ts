@@ -103,7 +103,9 @@ export default function (pi: ExtensionAPI) {
 	let assistantStatus: AssistantStatus;
 	let assistantError: string | undefined;
 	let generation = 0;
-	function reset() { generation++; retryCount = 0; assistantStatus = undefined; assistantError = undefined; }
+	let backoffAbort: AbortController | undefined;
+	function reset() { backoffAbort?.abort();backoffAbort=undefined;generation++; retryCount = 0; assistantStatus = undefined; assistantError = undefined; }
+	pi.events.on("workbench:stop", reset);
 	pi.on("session_start", reset);
 	pi.on("session_tree", reset);
 	pi.on("session_shutdown", reset);
@@ -137,7 +139,15 @@ export default function (pi: ExtensionAPI) {
 		const delayMs = backoffMs(nextRetry, config);
 		retryCount = nextRetry;
 		const expected = generation;
-		if (!(await wait(delayMs, ctx.signal)) || generation !== expected) return;
+		const controller = new AbortController();
+		backoffAbort = controller;
+		const abort = () => controller.abort();
+		ctx.signal?.addEventListener("abort", abort, { once:true });
+		if (ctx.signal?.aborted) controller.abort();
+		let waited: boolean;
+		try { waited = await wait(delayMs, controller.signal); }
+		finally { ctx.signal?.removeEventListener("abort",abort);if(backoffAbort===controller)backoffAbort=undefined; }
+		if (!waited || generation !== expected) return;
 		if (hasPendingMessages(ctx)) { reset(); return; }
 		return {
 			entries: [...entries, { type: "custom_message" as const, customType: CUSTOM_TYPE, content: `The provider request failed. Retry the user's request now (retry ${nextRetry} of ${config.maxRetries}).`, display: true, details: { retry: nextRetry, maxRetries: config.maxRetries, delayMs, error: messageError } }],

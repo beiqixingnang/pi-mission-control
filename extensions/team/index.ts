@@ -75,6 +75,7 @@ interface TeamMember {
 	workStartedAt?: number;
 	monitorActivity?: string;
 	lastActivityAt: number;
+	lastMessageAt?: number;
 	lastReply?: string;
 	error?: string;
 	turns: number;
@@ -84,7 +85,10 @@ interface TeamMember {
 	queue: Promise<void>;
 	activeJobId?: string;
 	waitAbort?: AbortController;
+	activeDone?: Promise<void>;
 	stopped?: boolean;
+	/** Incrementing this cancels this member's queued work without affecting peers. */
+	cancellationGeneration?: number;
 	onPartial?: (text: string) => void;
 }
 
@@ -222,6 +226,9 @@ export default function (pi: ExtensionAPI) {
 	let wakeEnabled = true;
 	let epoch = 0;
 	let closing = false;
+	let taskGeneration = 0;
+	let wakeSuppressed = false;
+	const messageAborts = new Set<AbortController>();
 	let deliveryError: string | undefined;
 	let currentCtx: ExtensionContext | undefined;
 	const waitingFor = new Map<string, { from: string; to: string }>();
@@ -247,13 +254,13 @@ export default function (pi: ExtensionAPI) {
 			model: member.model, alive: true, activity: member.monitorActivity,
 			workspace: member.workspace?.root, access: member.workspace?.access, cwd: member.cwd,
 			output: (member.partial || (member.status === "idle" ? member.lastReply || "" : "")).slice(-1000),
-			startedAt: member.workStartedAt ?? member.createdAt, updatedAt: Date.now(),
+			startedAt: member.workStartedAt ?? member.createdAt, updatedAt: member.lastActivityAt, lastMessageAt:member.lastMessageAt,
 		});
 	}
 	function removeMember(name: string) { pi.events.emit("agent-monitor:remove", { id: `team:${name}` }); }
 
 	function deliver(results: Completion[]): boolean {
-		if (closing || !wakeEnabled || !results.length) return false;
+		if (closing || wakeSuppressed || !wakeEnabled || !results.length) return false;
 		const request = { results };
 		pi.events.emit("team:before-wake", request);
 		if (!request.results.length) return true;
@@ -280,7 +287,7 @@ export default function (pi: ExtensionAPI) {
 		if (history.length > 100) history.splice(0, history.length - 100);
 		persist();
 		pi.events.emit("team:job-end", completion);
-		if (!suppress && job.notify !== "off") {
+		if (!suppress && !wakeSuppressed && job.notify !== "off") {
 			if (job.notify !== "immediate" || !deliver([completion])) notifications.push(completion);
 		}
 		flush();
@@ -311,6 +318,23 @@ export default function (pi: ExtensionAPI) {
 		const goalId = (data as { goalId?: string } | undefined)?.goalId;
 		if (!goalId) return;
 		for (const job of [...jobs.values()]) if (job.goalId === goalId) cancelJob(job, "Goal stopped by the user.");
+	});
+
+	pi.events.on("agent-monitor:history",data=>{
+		const request=data as {id?:string;promise?:Promise<unknown[]>};
+		const member=members.get(request?.id?.replace(/^team:/,"")??"");
+		if(member)request.promise=member.client.getMessages();
+	});
+	pi.events.on("workbench:stop", data => {
+		taskGeneration++;wakeSuppressed=true;notifications=[];
+		for(const controller of messageAborts)controller.abort();
+		for(const job of [...jobs.values()])cancelJob(job,"用户全局停止");
+		for(const member of members.values())member.waitAbort?.abort();
+		const pending=Promise.allSettled([...members.values()].map(member=>member.queue));
+		(data as {pending?:Promise<unknown>[]})?.pending?.push(pending);
+	});
+	pi.on("input", event => {
+		if(event.source!=="extension" && !event.text.startsWith("/"))wakeSuppressed=false;
 	});
 
 	pi.registerCommand("team-wake", {
@@ -360,6 +384,11 @@ export default function (pi: ExtensionAPI) {
 		});
 		member.client.onEvent((event: any) => {
 			if (closing || member.stopped || members.get(member.name) !== member) return;
+			member.lastActivityAt=Date.now();
+			if (event?.type === "message_end" && event.message) {
+				pi.events.emit("agent-monitor:conversation",{id:`team:${member.name}`,messages:[event.message]});
+				if(event.message.role==="assistant"&&event.message.content?.some((block:any)=>block.type==="text"&&block.text.trim()))member.lastMessageAt=event.message.timestamp??Date.now();
+			}
 			if (event?.type === "agent_start") {
 				member.status = "working";
 				member.partial = "";
@@ -369,6 +398,7 @@ export default function (pi: ExtensionAPI) {
 				event.assistantMessageEvent?.type === "text_delta"
 			) {
 				member.partial += event.assistantMessageEvent.delta ?? "";
+				member.lastMessageAt=Date.now();
 				member.onPartial?.(member.partial);
 				reportMember(member, "输出中");
 			} else if (event?.type === "message_update" && ["thinking_start", "thinking_delta"].includes(event.assistantMessageEvent?.type)) {
@@ -392,9 +422,14 @@ export default function (pi: ExtensionAPI) {
 		signal?: AbortSignal,
 		job?: BackgroundJob,
 	): Promise<{ ok: boolean; reply?: string; error?: string }> {
+		const queuedGeneration = taskGeneration;
+		const queuedMemberGeneration = member.cancellationGeneration ?? 0;
 		const run = member.queue.then(async () => {
-			if (closing || member.stopped || members.get(member.name) !== member || signal?.aborted || (job && (job.cancelled || job.epoch !== epoch))) return { ok: false, error: "Team task was cancelled." };
+			if (queuedMemberGeneration !== (member.cancellationGeneration ?? 0) || queuedGeneration !== taskGeneration || closing || member.stopped || members.get(member.name) !== member || signal?.aborted || (job && (job.cancelled || job.epoch !== epoch))) return { ok: false, error: "Team task was cancelled." };
 			member.activeJobId = job?.id;
+			let markActiveDone:()=>void=()=>{};
+			const activeDone=new Promise<void>(resolve=>{markActiveDone=resolve;});
+			member.activeDone=activeDone;
 			member.status = "working";
 			member.partial = "";
 			member.error = undefined;
@@ -431,15 +466,21 @@ export default function (pi: ExtensionAPI) {
 				// releasing the member queue, so the next task cannot overlap it.
 				let forcedStop = false;
 				if (!member.stopped) {
-					try { await member.client.abort(); }
-					catch { member.stopped = true; forcedStop = true; await member.client.stop().catch(() => {}); }
+					let deadline: ReturnType<typeof setTimeout> | undefined;
+					try {
+						await Promise.race([member.client.abort(),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error("Member abort timed out")),2000);})]);
+					} catch { member.stopped = true; forcedStop = true; member.definition.interrupted = true;await member.client.stop().catch(() => {}); }
+					finally { if(deadline)clearTimeout(deadline); }
 				}
-				member.status = "error";
-				member.error = String((error as Error)?.message ?? error);
+				const cancelled = waitAbort.signal.aborted || job?.cancelled;
+				member.status = cancelled && !member.stopped ? "idle" : "error";
+				member.error = cancelled && !member.stopped ? undefined : String((error as Error)?.message ?? error);
 				if (forcedStop && !closing && members.get(member.name) === member) pi.events.emit("agent-monitor:update", { id: `team:${member.name}`, kind: "team", name: member.name, status: "error", alive: false, activity: "连接失败", output: member.error });
-				else reportMember(member, "任务失败");
-				return { ok: false, error: member.error };
+				else reportMember(member, cancelled ? "任务已取消 · 等待新任务" : "任务失败");
+				return { ok: false, error: cancelled ? "Team task was cancelled." : member.error };
 			} finally {
+				markActiveDone();
+				if(member.activeDone===activeDone)member.activeDone=undefined;
 				signal?.removeEventListener("abort", abort);
 				if (member.waitAbort === waitAbort) member.waitAbort = undefined;
 				if (member.activeJobId === job?.id) member.activeJobId = undefined;
@@ -448,6 +489,7 @@ export default function (pi: ExtensionAPI) {
 				if (!closing && members.get(member.name) === member) {
 					member.definition.interrupted = member.stopped || waitAbort.signal.aborted;
 					member.definition.turns = member.turns;
+					member.definition.lastMessageAt=member.lastMessageAt;
 					member.definition.lastReply = member.lastReply ? truncate(member.lastReply, 12000) : undefined;
 					persist();
 				}
@@ -544,6 +586,7 @@ export default function (pi: ExtensionAPI) {
 				},
 			],
 			details: { error: "not_found", name },
+			isError:true,
 		};
 	}
 
@@ -590,6 +633,7 @@ export default function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------
 
 	async function routeMemberMessage(from: string, request: MessageRequest, signal: AbortSignal): Promise<{ ok: boolean; reply?: string; error?: string; jobId?: string }> {
+		if(wakeSuppressed || closing || signal.aborted)return {ok:false,error:"Team is globally stopped; the lead must issue new work."};
 		if (request.to === "lead") {
 			if (request.wait) return { ok: false, error: "Messages to the lead require wait:false." };
 			try {
@@ -602,11 +646,14 @@ export default function (pi: ExtensionAPI) {
 		const roster = new Map([...members].map(([name, member]) => [name, { communication: member.definition.communication }]));
 		if (!sender || !recipient || !mayCommunicate(from, request.to, roster)) return { ok: false, error: "TEAM_MESSAGE_DENIED: communication ACL denied." };
 		const forwarded = `[Message from teammate ${from}]\n\n${request.message}`;
+		const controller=new AbortController();messageAborts.add(controller);
+		const abort=()=>controller.abort();signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort();
+		const resultPromise=dispatch(recipient, forwarded, Math.max(1, request.expiresAt - Date.now()), undefined, controller.signal).finally(()=>{messageAborts.delete(controller);signal.removeEventListener("abort",abort);});
 		if (!request.wait) {
-			void dispatch(recipient, forwarded, Math.max(1, request.expiresAt - Date.now()), undefined, signal).catch(() => {});
+			void resultPromise.catch(() => {});
 			return { ok: true, jobId: request.id };
 		}
-		const result = await dispatch(recipient, forwarded, Math.max(1, request.expiresAt - Date.now()), undefined, signal);
+		const result = await resultPromise;
 		return result.ok ? { ok: true, reply: result.reply } : { ok: false, error: result.error };
 	}
 
@@ -722,6 +769,7 @@ export default function (pi: ExtensionAPI) {
 					lastActivityAt: Date.now(),
 					turns: definition.turns ?? 0,
 					lastReply: definition.lastReply,
+					lastMessageAt:definition.lastMessageAt,
 					partial: "",
 					transcript: [],
 					queue: Promise.resolve(),
@@ -771,6 +819,47 @@ export default function (pi: ExtensionAPI) {
 			} finally { spawning.delete(name); }
 		}
 
+	async function cancelMember(name: string, reason: string) {
+		const member = members.get(name);
+		if (!member) return memberNotFound(name);
+		member.cancellationGeneration = (member.cancellationGeneration ?? 0) + 1;
+		const pending = member.queue;
+		for (const job of [...jobs.values()]) if (job.member === member) cancelJob(job, reason);
+		member.waitAbort?.abort(reason);
+		await pending;
+		persist();
+		return { content:[{type:"text" as const,text:`Cancelled current and queued work for ${name}. Member identity and conversation are retained.`}],details:{name,cancelled:true,retained:true,processAlive:!member.stopped,sessionId:member.definition.sessionId} };
+	}
+	pi.registerTool({
+		name:"team_cancel",label:"Team: cancel work",executionMode:"parallel",
+		description:"Cancel a member's current and queued work by name, or one async job by jobId, without disbanding the member or deleting its conversation. Other members continue.",
+		promptGuidelines:["Use team_cancel to interrupt or replace a member task. Reserve team_disband for removing members. team_send with wait:false leaves the lead free to call team_cancel."],
+		parameters:Type.Object({name:Type.Optional(Type.String()),jobId:Type.Optional(Type.String()),reason:Type.Optional(Type.String({maxLength:2000}))}),
+		async execute(_id,params){
+			if(Number(!!params.name)+Number(!!params.jobId)!==1)return {content:[{type:"text" as const,text:"Specify exactly one of name or jobId."}],details:undefined,isError:true};
+			const reason=params.reason||"Task cancelled by the lead.";
+			if(params.name)return cancelMember(params.name,reason);
+			const job=jobs.get(params.jobId!);
+			if(!job)return {content:[{type:"text" as const,text:"Unknown or already finished job."}],details:{jobId:params.jobId},isError:true};
+			const active=job.member.activeJobId===job.id;
+			const pending=job.member.activeDone;
+			cancelJob(job,reason);
+			if(active)await pending;
+			return {content:[{type:"text" as const,text:`Cancelled job ${job.id}; member ${job.member.name} retained.`}],details:{jobId:job.id,name:job.member.name,cancelled:true,retained:true}};
+		},
+	});
+	pi.registerCommand("team-cancel",{description:"Cancel a member's current/queued tasks without removing it: /team-cancel <name>",handler:async(args,ctx)=>{const result=await cancelMember(args.trim(),"Task cancelled with /team-cancel");ctx.ui.notify(result.content.map(item=>item.text).join("\n"),"info");}});
+
+	async function reusableMember(name:string){
+		const existing=members.get(name);
+		if(!existing?.stopped)return existing;
+		await existing.bridge?.stop().catch(()=>{});
+		removePromptFile(existing);members.delete(name);
+		const restored=await spawnMember({__definition:existing.definition},currentCtx!);
+		if(restored.isError)return undefined;
+		return members.get(name);
+	}
+
 	pi.registerTool({
 		name: "team_send",
 		label: "Team: send to member",
@@ -796,11 +885,12 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, signal, onUpdate) {
-			const member = members.get(params.to);
+			const member = await reusableMember(params.to);
 			if (!member) return memberNotFound(params.to);
 			const timeout = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
 			if (params.wait === false) {
+				wakeSuppressed=false;
 				const jobId = background(member, params.message, timeout, params.notify ?? "batch");
 				return {
 					content: [
@@ -861,6 +951,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, signal) {
 			const all = Array.from(members.values());
+			wakeSuppressed=false;
 			if (all.length === 0) {
 				return {
 					content: [{ type: "text" as const, text: "No team members. Use team_spawn first." }],

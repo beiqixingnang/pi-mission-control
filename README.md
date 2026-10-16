@@ -1,15 +1,18 @@
 # Pi Mission Control
 
-当前版本 **1.0.1** 修复受限成员消息工具不可达、旧成员 ID 无法恢复，以及 Goal/重试/监督器状态冲突。详见 [修复验证记录](docs/verification-1.0.1.md)。
+当前版本 **1.2.0** 增加全局停止、成员定向取消、普通子智能体定向取消、消息时间、宽屏侧栏和成员对话查看；详见 [界面与中断说明](docs/ui-and-interruption-1.1.0.md)。1.0.1 的集成修复记录仍保留在 [验证记录](docs/verification-1.0.1.md)。
 
-适用于 Pi 1.2.0 的本地功能包。支持 Windows 与 WSL/Linux，包含：
+适用于 Pi 1.2.0 / 1.3.0 的本地功能包；1.3.0 已在 Debian WSL 实际升级并通过兼容测试，见 [升级评估](docs/pi-1.3.0-compatibility.md)。支持 Windows 与 WSL/Linux，包含：
 
 | 功能 | 用法 |
 | --- | --- |
 | 持久智能体团队 | `team_spawn`、`team_send`、`team_broadcast`、`team_disband` |
 | 后台完成后唤醒 | 异步派活 `wait:false`；完成/失败自动送回主对话 |
 | Goal 模式 | `/goal start`、`status`、`pause`、`resume`、`stop` |
-| 紧凑 TUI 状态区 | 默认最多 3 行；`/agents on|off|status` |
+| 自适应 TUI 状态区 | 窄屏最多 3 行，宽屏右侧分栏；`/agents auto|compact|wide` |
+| 成员消息时间与历史 | `Alt+J` 选择、`Alt+O` 查看；`/agents view 名称` |
+| 成员定向取消 | `team_cancel` / `team-cancel` 取消成员任务但保留成员；`subagent_cancel` 取消普通子智能体 |
+| 全局停止 | Esc 或 `/stop` 同时取消主请求和成员任务、暂停自动推进 |
 | 成员工作区限制 | `workspace.root`、`access`、`extraReadRoots` |
 | 普通子智能体 | `subagent` 的单次、并行和链式模式 |
 | 上游错误重试 | `retry-any` 扩展补足未被 Pi 内置分类的 provider 错误 |
@@ -50,7 +53,7 @@ pi list
 pi remove /path/to/pi-mission-control
 ```
 
-`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.0.1.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
+`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.2.0.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
 
 ## 已经安装散装扩展时
 
@@ -125,6 +128,16 @@ Pi 内置重试负责已识别的网络、限流和服务端错误。`retry-any`
 
 为避免已知错误被内置层和扩展层重复重试，已知 429、5xx、timeout 等模式交给 Pi 内置重试；扩展主要处理其余 provider error。额度、账单和用户主动中断不会被无限重试。若需要统一测试，请在目标 settings 中启用 retry，并确认 `maxRetries`。
 
+## 停止与插话
+
+运行中按 **Esc** 或输入 `/stop`，会同时停止主 AI 和成员当前/排队任务、暂停 Goal、关闭监督器并取消插件重试；保留成员身份与历史。停止尚未收束时的新普通输入会暂存，等停止完成后发送。
+
+普通 Enter 保留 Pi 原生 **steer 插话**：当前响应/工具结束后优先交接。它不是任务全部结束后的 follow-up；显式追加仍使用 Windows/WSL 的 Ctrl+Q 或其他终端的 Alt+Enter。输入区提供相应提示。
+
+宽屏自动显示右栏，Alt+J 选择成员、Alt+O 查看只读对话；Esc 在执行任务时优先全局停止，完全空闲时只退出查看器。详见 [界面与全局停止](docs/ui-and-interruption-1.1.0.md)。
+
+成员定向取消：`team_cancel` 按成员名或 jobId 取消，保留成员身份和历史；`subagent_list` 查看 runId/invocationId，`subagent_cancel` 可按 runId、invocationId 或唯一 agent 名取消普通子智能体，`subagent_collect` 读取后台结果。
+
 ## 快速使用
 
 ```text
@@ -169,7 +182,7 @@ npm run check
 npm test
 ```
 
-`check` 验证八个扩展入口可加载；`test` 使用临时配置执行单元及集成测试，不访问模型 API，也不修改用户全局设置。集成测试会实际启动 Pi 子进程，验证受限成员双向通信、组外拒绝、磁盘快照/旧成员历史恢复，以及真实 Pi 生命周期中的失败重试与监督恢复；模型由包内测试 fixture 提供确定性响应。
+`check` 验证九个扩展入口可加载；`test` 使用临时配置执行单元及集成测试，不访问模型 API，也不修改用户全局设置。集成测试会实际启动 Pi 子进程，验证受限成员双向通信、组外拒绝、磁盘快照/旧成员历史恢复，以及真实 Pi 生命周期中的失败重试与监督恢复；模型由包内测试 fixture 提供确定性响应。
 
 有模型配置时可额外运行真实测试（会产生模型用量）：
 
@@ -189,7 +202,7 @@ PI_TEST_PACKAGE_DIR=/home/me/.local/lib/node_modules/@earendil-works/pi-coding-a
 
 ## 限制与兼容性
 
-- 已针对 Pi 1.2.0 验证。依赖该版本的扩展 API、RPC 与生命周期行为；升级 Pi 后应重新运行测试。
+- 已针对 Pi 1.2.0 与 1.3.0 验证，后者在 Debian WSL 实际安装中通过 91 项测试。依赖 Pi 的扩展 API、RPC 与生命周期行为；进一步升级后应重新运行测试。
 - 等待时主模型不持续推理，但 Pi 进程必须保持运行。退出 Pi 后不会继续运行后台团队。
 - 恢复未完成 Goal 时会暂停，需 `/goal resume` 并重新派发中断工作。
 - 本包团队调用使用安全 RPC 等待封装，规避 Pi 1.2.0 的未处理超时拒绝缺陷；不会修改 Pi 安装包。

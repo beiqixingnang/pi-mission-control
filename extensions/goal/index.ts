@@ -210,6 +210,10 @@ export default function (pi: ExtensionAPI) {
 		return goal;
 	}
 
+	pi.events.on("workbench:stop", () => {
+		providerFailed = false;
+		pause("用户全局停止。使用 /goal resume 明确恢复。");
+	});
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
 	pi.on("session_shutdown", () => { generation++; providerFailed = false; clearTimers(); currentCtx = undefined; });
