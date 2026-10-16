@@ -49,6 +49,10 @@ test('launch binds cwd, disables commands/resources, and passes immutable policy
  assert.equal(plan.args[plan.args.indexOf('--tools')+1],'workspace_read,workspace_ls,workspace_find,workspace_grep,workspace_team_message,workspace_team_wait,workspace_team_task_status,workspace_team_task_cancel');assert.equal(JSON.parse(plan.env[POLICY_ENV]).root,plan.cwd);
  await assert.rejects(prepareWorkspaceLaunch({baseCwd:f.base,cwd:f.outside,workspace:{root:f.root}}),/cwd must be inside/);
 }));
+test('trusted host execution keeps the member workspace cwd but exposes plain host tools only by explicit profile',()=>fixture(async f=>{
+ const plan=await prepareWorkspaceLaunch({baseCwd:f.base,workspace:{root:f.root,access:'read-write',execution:'host'},tools:['read','bash']});
+ assert.equal(plan.workspace.execution,'host');assert.ok(JSON.parse(plan.env[POLICY_ENV]).execution==='host');assert.deepEqual(plan.args.slice(plan.args.indexOf('--tools')+1),['read,bash']);
+}));
 test('unrestricted cwd remains compatible; unsupported sandbox and unsafe tools fail before spawn',()=>fixture(async f=>{
  const legacy=await prepareWorkspaceLaunch({baseCwd:f.base,cwd:'project',tools:['bash','read']});assert.deepEqual(legacy.args,['--tools','bash,read']);assert.deepEqual(legacy.env,{});
  await assert.rejects(prepareWorkspaceLaunch({baseCwd:f.base,workspace:{root:f.root},tools:['bash']}),/not available/);
@@ -120,7 +124,7 @@ test('present but malformed agent presets never disappear into unrestricted defa
 }));
 
 test('invalid policy, overlapping read roots, inherited delegation and Windows aliases fail closed',()=>fixture(async f=>{
- for(const workspace of [null,[],{root:''},{root:f.root,access:'typo'},{root:f.root,execution:'host'},{root:f.root,extraReadRoots:[f.base]}])await assert.rejects(prepareWorkspaceLaunch({baseCwd:f.base,workspace}));
+ for(const workspace of [null,[],{root:''},{root:f.root,access:'typo'},{root:f.root,extraReadRoots:[f.base]}])await assert.rejects(prepareWorkspaceLaunch({baseCwd:f.base,workspace}));
  const prior=process.env[POLICY_ENV];process.env[POLICY_ENV]='{}';try{await assert.rejects(prepareWorkspaceLaunch({baseCwd:f.base}),/cannot create nested/);}finally{if(prior===undefined)delete process.env[POLICY_ENV];else process.env[POLICY_ENV]=prior;}
  if(process.platform==='win32')for(const p of ['C:relative.txt','C:/temp/x:stream','\\\\server\\share\\x','\\\\?\\C:\\x','NUL.txt','CONIN$','CONOUT$','PROGRA~1/x','file. '])assert.throws(()=>resolveInput(p,f.root),/WORKSPACE_DENIED/);
 }));

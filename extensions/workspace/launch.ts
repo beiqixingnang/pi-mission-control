@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
-import { POLICY_ENV, allowedTools, toolAlias, inside, resolveInput, resolveWorkspace, type WorkspaceOptions, type ResolvedWorkspace } from "./policy.ts";
+import { POLICY_ENV, allowedTools, readableTools, writableTools, toolAlias, inside, resolveInput, resolveWorkspace, type WorkspaceOptions, type ResolvedWorkspace } from "./policy.ts";
 export type { WorkspaceOptions, ResolvedWorkspace } from "./policy.ts";
 
 export const SandboxSchema=Type.Object({engine:Type.Literal("podman"),image:Type.String({minLength:1,maxLength:512}),cpus:Type.Optional(Type.Number({minimum:0.01,maximum:64})),memoryMb:Type.Optional(Type.Integer({minimum:64,maximum:65536})),pidsLimit:Type.Optional(Type.Integer({minimum:16,maximum:32768})),maxSeconds:Type.Optional(Type.Integer({minimum:1,maximum:3600}))},{additionalProperties:false});
@@ -11,7 +11,7 @@ export const WorkspaceSchema = Type.Object({
 	access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("read-write")], { description: "File access in the primary workspace; default read-write." })),
 	extraReadRoots: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 20, description: "Additional separate directories that are always read-only." })),
 	sandbox:Type.Optional(SandboxSchema),
-	execution: Type.Optional(Type.Union([Type.Literal("disabled"), Type.Literal("sandbox")], { description: "Default disabled: no host commands or delegation. Sandbox requires a configured backend; unavailable backends fail instead of running on the host." })),
+	execution: Type.Optional(Type.Union([Type.Literal("disabled"), Type.Literal("sandbox"),Type.Literal("host")], { description: "Default disabled. sandbox uses Podman; host is explicit trusted host execution with no OS sandbox." })),
 }, { additionalProperties: false });
 
 export async function prepareWorkspaceLaunch(options: { baseCwd: string; cwd?: string; workspace?: WorkspaceOptions; tools?: string[] }): Promise<{ cwd: string; args: string[]; env: Record<string, string>; workspace?: ResolvedWorkspace }> {
@@ -27,13 +27,15 @@ export async function prepareWorkspaceLaunch(options: { baseCwd: string; cwd?: s
 	const { WorkspaceAccess } = await import("./policy.ts");
 	await new WorkspaceAccess(workspace, workspace.root).authorize(cwd);
 	if (!(await fs.stat(cwd)).isDirectory()) throw new Error("Restricted member cwd must be a directory.");
+	const hostExecution=workspace.execution==="host";
+	const mapped=(tool:string)=>hostExecution&&[...readableTools,...writableTools,"bash"].includes(tool)?tool:toolAlias(tool);
 	const permitted = allowedTools(workspace);
 	const requested = options.tools ?? permitted;
 	for (const tool of requested) if (!permitted.includes(tool)) throw new Error(`WORKSPACE_DENIED: tool '${tool}' is not available in restricted mode. Allowed: ${permitted.join(", ")}.`);
 	const guard = fileURLToPath(new URL("./index.ts", import.meta.url));
 	return {
 		cwd, workspace,
-		args: ["--no-extensions", "--extension", guard, "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", ...(requested.length ? ["--tools", requested.map(toolAlias).join(",")] : ["--no-tools"])],
+		args: ["--no-extensions", "--extension", guard, "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", ...(requested.length ? ["--tools", requested.map(mapped).join(",")] : ["--no-tools"])],
 		env: { [POLICY_ENV]: JSON.stringify(workspace) },
 	};
 }

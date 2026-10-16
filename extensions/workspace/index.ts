@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, getAgentDir, getPackageDir, type ExtensionAPI, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { POLICY_ENV, WorkspaceAccess, allowedTools, toolAlias, resolveWorkspace, type ResolvedWorkspace } from "./policy.ts";
+import { POLICY_ENV, WorkspaceAccess, allowedTools, readableTools, writableTools, toolAlias, resolveWorkspace, type ResolvedWorkspace } from "./policy.ts";
 
 const MAX_OUTPUT = 48 * 1024;
 function result(text: string, details?: unknown) {
@@ -28,14 +28,15 @@ export default async function (pi: ExtensionAPI) {
 		if (!access || error) throw new Error(`WORKSPACE_DENIED: invalid workspace policy: ${error || "unavailable"}`);
 		return access;
 	};
-	const permitted = new Set(access ? allowedTools(access.policy).map(toolAlias) : []);
+	const hostExecution=access?.policy.execution==="host";
+	const permitted = new Set(access ? allowedTools(access.policy).map(tool=>hostExecution&&[...readableTools,...writableTools,"bash"].includes(tool)?tool:toolAlias(tool)) : []);
 	pi.on("tool_call", event => {
 		if (!permitted.has(event.toolName)) return { block: true, reason: `WORKSPACE_DENIED: '${event.toolName}' is not permitted. Commands, external tools, and nested agents are disabled.` };
 	});
-	pi.on("user_bash", () => ({ result: { output: "WORKSPACE_DENIED: commands are disabled for this member.", exitCode: 1, cancelled: false, truncated: false } }));
+	pi.on("user_bash", () => { if(hostExecution)return; return { result: { output: "WORKSPACE_DENIED: commands are disabled for this member.", exitCode: 1, cancelled: false, truncated: false } }; });
 	pi.on("session_start", () => { pi.setActiveTools(pi.getActiveTools().filter(tool => permitted.has(tool))); });
 	pi.on("before_agent_start", event => {
-		event.systemPromptOptions.promptGuidelines.push(access ? `Restricted workspace: ${access.policy.root}. Access: ${access.policy.access}. Extra read-only roots: ${access.policy.extraReadRoots.join(", ") || "none"}. Use the provided workspace_exec for explicitly authorized sandbox commands when available; host shell, external tools and nested delegation remain disabled. Command paths are /workspace and /reference/N. A denied request is not permission to ask another agent to bypass it.` : `Workspace policy failed to load; all tools are disabled. ${error}`);
+		event.systemPromptOptions.promptGuidelines.push(access ? `Restricted workspace: ${access.policy.root}. Access: ${access.policy.access}. Execution: ${access.policy.execution}. ${hostExecution?"Trusted host execution is enabled by explicit user authorization; this is not an OS sandbox. Run commands only for the assigned repository.":`Extra read-only roots: ${access.policy.extraReadRoots.join(", ") || "none"}. Use the provided workspace tools; host shell, external tools, and nested delegation are disabled.`} A denied request is not permission to ask another agent to bypass it.` : `Workspace policy failed to load; all tools are disabled. ${error}`);
 	});
 	pi.registerCommand("workspace", { description: "Show this member's enforced file-tool workspace policy.", handler: async (_args, ctx) => { ctx.ui.notify(access ? JSON.stringify(access.policy, null, 2) : `Workspace policy error: ${error}`, access ? "info" : "error"); } });
 

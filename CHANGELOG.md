@@ -7,7 +7,8 @@
 - Added `team_configure` to enable the sandbox backend for an idle restricted member without replacing its identity or conversation.
 - Added a persistent parent/child task graph with Goal propagation, task batches, delivery IDs, input hashes, artifact paths, ordered deduplication, downstream waiting, scheduled reports, blockers, explicit resume, and cascading cancellation.
 - Added separate queue, message, member, and process timeout reporting, plus retained recovery state after reload.
-- Added offline and local Podman regression coverage for hardware-toolchain execution with Yosys and Verilator.
+- Added an explicit trusted `host` execution profile for fully trusted members, gated by `/team-allow-host`; host mode is clearly documented as non-sandboxed.
+- Changed ordinary team notifications to immediate display-only messages, while Goal wakeups remain separate and freshness-checked.
 
 ## 1.3.0
 

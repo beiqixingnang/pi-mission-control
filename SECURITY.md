@@ -23,6 +23,7 @@ Do not include API keys, auth files, session transcripts, or private project con
 
 - `workspace` policies are extension-level file-tool checks. They are not an OS sandbox.
 - `execution: "sandbox"` uses a preinstalled local Podman image when configured; without a working Podman backend or local image it is rejected and never silently becomes unrestricted host execution.
+- `execution: "host"` is a separate trusted mode. It requires a one-use user command grant and gives the member ordinary host command access; it is not an OS sandbox.
 - `goal_finish` may run configured commands through the active `bash` tool.
 - Workspace rename/switch is manual by default. `/project allow` creates one exact-target grant that expires in ten minutes; `project_apply` cannot grant itself permission. This does not sandbox unrestricted shell tools.
 - Migration snapshots contain full private transcripts and are stored under `<agent-dir>/project-migrations/`. Treat them like ordinary session files; never upload them in a public report.

@@ -51,7 +51,7 @@ function parseDefinition(value: unknown): MemberDefinition {
 	// A malformed policy must never be restored as an unrestricted member.
 	if (member.workspace !== undefined) {
 		const workspace = member.workspace;
-		if (!workspace || typeof workspace.root !== "string" || !path.isAbsolute(workspace.root) || !["read-only", "read-write"].includes(workspace.access) || !["disabled","sandbox"].includes(workspace.execution) || !Array.isArray(workspace.extraReadRoots) || workspace.extraReadRoots.some(root => typeof root !== "string" || !path.isAbsolute(root))) throw new Error("Invalid persisted team workspace policy.");
+		if (!workspace || typeof workspace.root !== "string" || !path.isAbsolute(workspace.root) || !["read-only", "read-write"].includes(workspace.access) || !["disabled","sandbox","host"].includes(workspace.execution) || !Array.isArray(workspace.extraReadRoots) || workspace.extraReadRoots.some(root => typeof root !== "string" || !path.isAbsolute(root))) throw new Error("Invalid persisted team workspace policy.");
 		if(workspace.execution==="sandbox"&&(!workspace.sandbox||workspace.sandbox.engine!=="podman"||typeof workspace.sandbox.image!=="string"))throw new Error("Invalid persisted sandbox configuration.");
 	}
 	return { ...JSON.parse(JSON.stringify(member)), communication: communication(member.communication) };

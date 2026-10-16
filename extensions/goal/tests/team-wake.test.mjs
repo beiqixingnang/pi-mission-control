@@ -43,7 +43,7 @@ test('async batch wakes exactly once after both members finish; sync calls never
   const a=await h.spawn('a'),b=await h.spawn('b');
   const first=await h.tool('team_send',{to:'a',message:'first',wait:false});const second=await h.tool('team_send',{to:'b',message:'second',wait:false});
   await delay(0);h.settle(a,'first result');await delay(0);assert.equal(h.sent.length,0);
-  h.settle(b,'second result');await delay(0);assert.equal(h.sent.length,1);assert.equal(h.sent[0].options.triggerTurn,true);assert.equal(h.events.length,2);
+  h.settle(b,'second result');await delay(0);assert.equal(h.sent.length,1);assert.equal(h.sent[0].options.triggerTurn,false);assert.equal(h.events.length,2);
   const history=await h.tool('team_collect',{jobIds:[first.details.jobId,second.details.jobId]});assert.equal(history.details.results.length,2);assert.equal(history.details.results[0].reply,'first result');
   const sync=h.tool('team_send',{to:'a',message:'sync'});await delay(0);h.settle(a,'sync result');assert.equal((await sync).isError,undefined);assert.equal(h.sent.length,1);
 }));

@@ -8,14 +8,14 @@ export interface WorkspaceOptions {
 	root: string;
 	access?: "read-only" | "read-write";
 	extraReadRoots?: string[];
-	execution?: "disabled" | "sandbox";
+	execution?: "disabled" | "sandbox" | "host";
 	sandbox?:SandboxConfig;
 }
 export interface ResolvedWorkspace {
 	root: string;
 	access: "read-only" | "read-write";
 	extraReadRoots: string[];
-	execution: "disabled" | "sandbox";
+	execution: "disabled" | "sandbox" | "host";
 	sandbox?:SandboxConfig;
 }
 export const POLICY_ENV = "PI_AGENT_WORKSPACE_POLICY";
@@ -23,7 +23,7 @@ export const readableTools = ["read", "ls", "find", "grep"];
 export const writableTools = ["write", "edit"];
 export const bridgeTools = ["team_message", "team_wait", "team_task_status", "team_task_cancel"];
 export const toolAlias = (name: string) => `workspace_${name}`;
-export const allowedTools = (policy: ResolvedWorkspace) => [...readableTools, ...(policy.access === "read-write" ? writableTools : []), ...(policy.execution==="sandbox"?["exec","exec_status"]:[]), ...bridgeTools];
+export const allowedTools = (policy: ResolvedWorkspace) => [...readableTools, ...(policy.access === "read-write" ? writableTools : []), ...(policy.execution==="sandbox"?["exec","exec_status"]:policy.execution==="host"?["bash"]:[]), ...bridgeTools];
 export function inside(root: string, target: string) {
 	const relative = path.relative(root, target);
 	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
@@ -57,13 +57,15 @@ async function canonicalDirectory(input: string, cwd: string) {
 export async function resolveWorkspace(options: WorkspaceOptions, baseCwd: string): Promise<ResolvedWorkspace> {
 	if (!options || typeof options !== "object" || typeof options.root !== "string") throw new Error("Workspace requires a root directory.");
 	if (options.access !== undefined && !["read-only", "read-write"].includes(options.access)) throw new Error("Invalid workspace access mode.");
-	if (options.execution !== undefined && !["disabled", "sandbox"].includes(options.execution)) throw new Error("Invalid workspace execution mode.");
+	if (options.execution !== undefined && !["disabled", "sandbox","host"].includes(options.execution)) throw new Error("Invalid workspace execution mode.");
 	let sandbox:SandboxConfig|undefined;
 	if (options.execution === "sandbox") {
 		if(!options.sandbox)throw new Error("Workspace sandbox execution is unavailable: configure workspace.sandbox with a local Podman image. Host commands are never a fallback.");
 		const {probeSandbox}=await import("./sandbox.ts");const probe=await probeSandbox(options.sandbox);
 		if(!probe.available||!probe.imageId)throw new Error(`Workspace sandbox backend unavailable: ${probe.error}`);
 		sandbox={...options.sandbox,image:probe.imageId};
+	}else if(options.execution==="host"){
+		if(options.sandbox!==undefined)throw new Error("Host execution cannot include a sandbox profile.");
 	}else if(options.sandbox!==undefined)throw new Error("Set execution:sandbox to authorize a command backend.");
 	if (options.extraReadRoots !== undefined && (!Array.isArray(options.extraReadRoots) || options.extraReadRoots.length > 20 || options.extraReadRoots.some(root => typeof root !== "string"))) throw new Error("extraReadRoots must be an array of at most 20 directory paths.");
 	const root = await canonicalDirectory(options.root, baseCwd);
@@ -71,7 +73,7 @@ export async function resolveWorkspace(options: WorkspaceOptions, baseCwd: strin
 	for (const extra of extraReadRoots) {
 		if (inside(root, extra) || inside(extra, root)) throw new Error("Extra read roots must be separate from the primary workspace; overlapping roots are ambiguous.");
 	}
-	return { root, access: options.access ?? "read-write", extraReadRoots, execution: sandbox?"sandbox":"disabled",...(sandbox?{sandbox}:{}) };
+	return { root, access: options.access ?? "read-write", extraReadRoots, execution: sandbox?"sandbox":options.execution??"disabled",...(sandbox?{sandbox}:{}) };
 }
 
 /** Checks at the point of filesystem access; a file-tool policy, not an OS sandbox. */

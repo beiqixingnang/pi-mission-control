@@ -259,6 +259,11 @@ export default function (pi: ExtensionAPI) {
 	const queuedDeliveries = new Set<string>();
 	const waitingFor = new Map<string, { from: string; to: string }>();
 	const restoreErrors = new Map<string, string>();
+	const hostGrants = new Map<string, number>();
+	function hostGranted(name:string){const expires=hostGrants.get(name);if(!expires)return false;if(Date.now()>=expires){hostGrants.delete(name);return false;}return true;}
+	function grantHost(name:string){hostGrants.set(name,Date.now()+600_000);}
+	function jobsHasMember(name:string){return [...jobs.values()].some(job=>job.member.name===name);}
+
 
 	let restoreFailed = false;
 	function persist() {
@@ -297,7 +302,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			pi.sendMessage({ customType: "team-results", display: true, details: { results: request.results, deliveryIds: request.results.map(item=>item.deliveryId).filter(Boolean) },
 				content: "Background team work finished. Review the results and continue the user's task.\n\n" + request.results.map(result => `Member ${result.member}, job ${result.id}, batch ${result.batchId}, delivery ${result.deliveryId}, input ${result.inputHash}, artifacts ${(result.resultPaths??[]).join(", ")||"none"}: ${result.ok ? "completed" : "FAILED"}\n${truncate(result.ok ? result.reply || "(empty reply)" : result.error || "Unknown failure", 12000)}`).join("\n\n"),
-			}, { triggerTurn: true, deliverAs: "followUp" });
+			}, { triggerTurn: false });
 			for(const item of request.results)if(item.deliveryId)queuedDeliveries.add(item.deliveryId);
 			deliveryError = undefined;
 			return true;
@@ -365,7 +370,8 @@ export default function (pi: ExtensionAPI) {
 		if(event.source!=="extension" && !event.text.startsWith("/"))wakeSuppressed=false;
 	});
 
-	pi.registerCommand("team-wake", {
+	pi.registerCommand("team-allow-host",{description:"Grant one-time trusted host execution to an idle restricted member: /team-allow-host <name>",handler:async(args,ctx)=>{const name=args.trim();const member=members.get(name);if(!member)return ctx.ui.notify(`No team member named "${name}".`,"error");if(!member.workspace)return ctx.ui.notify("Host execution can only be granted to a restricted member.","error");if(member.status==="working"||jobsHasMember(name))return ctx.ui.notify("Member must be idle before host execution is granted.","error");grantHost(name);ctx.ui.notify(`Trusted host execution granted to ${name} for ten minutes. The next host configuration consumes it.`,"warning");}});
+	pi.registerCommand("team-wake",{
 		description: "Automatic team notifications: on|off|status. Goal-mode jobs use their Goal controller.",
 		handler: async (args, ctx) => {
 			const value = args.trim() || "status";
@@ -713,7 +719,7 @@ export default function (pi: ExtensionAPI) {
 				const owner=parent.record.parentId?jobs.get(parent.record.parentId):undefined;
 				const blocked={id:parent.id,deliveryId:delivery.id,sequence:delivery.sequence,ok:false,error:`Blocked: ${request.blockedReason}`};
 				if(owner)graph.note(owner,blocked,true);
-				else if(wakeEnabled){pi.sendMessage({customType:"team-member-message",display:true,content:`Task ${parent.id} blocked: ${request.blockedReason}`,details:{deliveryIds:[delivery.id],taskId:parent.id}},{triggerTurn:true,deliverAs:"followUp"});}
+				else if(wakeEnabled){pi.sendMessage({customType:"team-member-message",display:true,content:`Task ${parent.id} blocked: ${request.blockedReason}`,details:{deliveryIds:[delivery.id],taskId:parent.id}},{triggerTurn:false});}
 				pi.events.emit("team:blocked",{goalId:parent.goalId,taskId:parent.id,reason:request.blockedReason});persist();
 			}
 			const pending=[...jobs.values()].filter(job=>job.id!==parent.id&&allowed.has(job.id)).map(job=>({id:job.id,member:job.member.name,state:job.record.state}));
@@ -726,7 +732,7 @@ export default function (pi: ExtensionAPI) {
 			const identity=parent?.record;
 			const delivery:Delivery={id:request.id,taskId:identity?.id??request.id,parentId:identity?.parentId,batchId:identity?.batchId??request.id,inputHash:identity?.inputHash??"note",resultPaths:identity?.resultPaths??[],from,to:"lead",sequence:++deliverySequence,createdAt:Date.now(),delivered:false};
 			deliveries.push(delivery);persist();
-			try{pi.sendMessage({customType:"team-member-message",content:`Message from ${from}; task ${delivery.taskId}; delivery ${delivery.id}; sequence ${delivery.sequence}:\n\n${request.message}`,display:true,details:{...delivery,deliveryIds:[delivery.id]}},{triggerTurn:true,deliverAs:"followUp"});queuedDeliveries.add(delivery.id);return {ok:true,jobId:request.id};}catch(error){return {ok:false,error:String(error)};}
+			try{pi.sendMessage({customType:"team-member-message",content:`Message from ${from}; task ${delivery.taskId}; delivery ${delivery.id}; sequence ${delivery.sequence}:\n\n${request.message}`,display:true,details:{...delivery,deliveryIds:[delivery.id]}},{triggerTurn:false});queuedDeliveries.add(delivery.id);return {ok:true,jobId:request.id};}catch(error){return {ok:false,error:String(error)};}
 		}
 		const recipient=await reusableMember(request.to);
 		const roster=new Map([...members].map(([name,member])=>[name,{communication:member.definition.communication}]));
@@ -774,7 +780,9 @@ export default function (pi: ExtensionAPI) {
 		const comm = communication(params.communication);
 		const persistent = params.__definition?.persistent ?? params.persistent !== false;
 		const sessionId = params.__definition?.sessionId ?? (persistent ? randomUUID() : undefined);
-			const effectiveTools = params.tools ? [...new Set([...params.tools, ...bridgeTools])] : params.tools;
+			if(params.workspace?.execution==="host"&&!params.__trustedHost&&!hostGranted(name))return {content:[{type:"text" as const,text:`Trusted host execution for "${name}" requires /team-allow-host ${name} first.`}],details:{error:"host_not_authorized",name},isError:true};
+		if(params.workspace?.execution==="host"&&!params.__trustedHost){params={...params,__trustedHost:true};consumeHost(name);}
+		const effectiveTools = params.tools ? [...new Set([...params.tools, ...bridgeTools, ...(params.workspace?.execution==="host"?["bash"]:[])])] : params.tools;
 
 			const systemPrompt = [
 				`You are "${name}", a member of an agent team led by another agent.`,
@@ -953,19 +961,21 @@ export default function (pi: ExtensionAPI) {
 		return members.get(name);
 	}
 
-	pi.registerTool({name:"team_configure",label:"Team: configure execution",executionMode:"sequential",description:"Enable an isolated command backend or disable execution for an idle restricted member. Preserves its workspace roots, file access, identity and conversation; never grants unrestricted host tools.",parameters:Type.Object({name:Type.String(),execution:Type.Union([Type.Literal("disabled"),Type.Literal("sandbox")]),sandbox:Type.Optional(SandboxSchema)}),
+	pi.registerTool({name:"team_configure",label:"Team: configure execution",executionMode:"sequential",description:"Enable an isolated command backend or disable execution for an idle restricted member. Preserves its workspace roots, file access, identity and conversation; never grants unrestricted host tools.",parameters:Type.Object({name:Type.String(),execution:Type.Union([Type.Literal("disabled"),Type.Literal("sandbox"),Type.Literal("host")]),sandbox:Type.Optional(SandboxSchema)}),
 		async execute(_id,args,_signal,_update,ctx){
 			const member=members.get(args.name);if(!member)return memberNotFound(args.name);
 			if(!member.workspace)return {content:[{type:"text" as const,text:"This tool configures restricted members only."}],details:undefined,isError:true};
 			if([...jobs.values()].some(job=>job.member===member)||member.status==="working")return {content:[{type:"text" as const,text:"Finish or cancel this member's tasks before changing its execution backend."}],details:undefined,isError:true};
 			try{
-				const workspace={...member.workspace,execution:args.execution,sandbox:args.execution==="sandbox"?args.sandbox:undefined};
-				const tools=member.definition.tools?member.definition.tools.filter(tool=>tool!=="exec"):undefined;
-				if(tools&&args.execution==="sandbox")tools.push("exec");
+				if(args.execution==="host"&&!consumeHost(args.name))return {content:[{type:"text" as const,text:`Trusted host execution requires /team-allow-host ${args.name} immediately before configuration.`}],details:{error:"host_not_authorized"},isError:true};
+			const workspace={...member.workspace,execution:args.execution,sandbox:args.execution==="sandbox"?args.sandbox:undefined};
+				const tools=member.definition.tools?member.definition.tools.filter(tool=>tool!=="exec"&&tool!=="bash"):undefined;
+				if(tools&&(args.execution==="sandbox"))tools.push("exec");
+				if(tools&&(args.execution==="host"))tools.push("bash");
 				const plan=await prepareWorkspaceLaunch({baseCwd:ctx.cwd,cwd:member.cwd,workspace,tools});
 				const saved=JSON.parse(JSON.stringify(member.definition));const updated={...saved,workspace:plan.workspace,tools};
 				member.stopped=true;await member.bridge?.stop();await member.client.stop();removePromptFile(member);members.delete(member.name);
-				const changed=await spawnMember({__definition:updated},ctx);
+				const changed=await spawnMember({__definition:updated,__trustedHost:args.execution==="host"},ctx);
 				if(changed.isError){await spawnMember({__definition:saved},ctx);return changed;}
 				return changed;
 			}catch(error){return {content:[{type:"text" as const,text:String((error as Error).message)}],details:undefined,isError:true};}
@@ -994,9 +1004,9 @@ export default function (pi: ExtensionAPI) {
 			"Send a task or message to one team member and, by default, wait for its reply.",
 			"Work is serialized per member: messages to the same member run one after another.",
 			"To run members in parallel, issue several team_send calls in the same turn (they run concurrently), or use team_broadcast.",
-			"For long jobs use wait=false; completion automatically wakes the lead when the background batch drains. No polling is needed.",
+			"For long jobs use wait=false; completion is displayed immediately with task and delivery identity. Goal-owned jobs wake their Goal controller; ordinary notifications do not queue a stale model turn.",
 		].join(" "),
-		promptGuidelines: ["Use team_send or team_broadcast with wait:false to let members work while the lead ends its turn. Completion wakes the lead automatically; do not repeatedly poll team_list/team_collect. In Goal mode call goal_wait alone after dispatch."],
+		promptGuidelines: ["Use team_send or team_broadcast with wait:false to let members work while the lead ends its turn. Ordinary completion notifications appear immediately; Goal-owned work is handled by goal_wait and the Goal controller. Do not repeatedly poll team_list/team_collect. In Goal mode call goal_wait alone after dispatch."],
 		parameters: Type.Object({
 			to: Type.String({ description: "Roster name of the member." }),
 			message: Type.String({ description: "The task or message. Be specific and self-contained." }),
@@ -1024,7 +1034,7 @@ export default function (pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text" as const,
-							text: `Dispatched job ${jobId} to "${params.to}" (async). Completion wakes the lead automatically unless notifications are off.`,
+							text: `Dispatched job ${jobId} to "${params.to}" (async). Completion will be displayed immediately with its task identity.`,
 						},
 					],
 					details: { to: params.to, async: true, jobId },
@@ -1089,7 +1099,7 @@ export default function (pi: ExtensionAPI) {
 				const jobIds = all.map(member => background(member, params.message, timeout, params.notify ?? "batch",timeout,batchId));
 				return {
 					content: [
-						{ type: "text" as const, text: `Broadcast ${jobIds.length} async jobs. Completion wakes the lead automatically unless notifications are off.` },
+						{ type: "text" as const, text: `Broadcast ${jobIds.length} async jobs. Completion will be displayed immediately with task identities.` },,
 					],
 					details: { count: all.length, async: true, jobIds },
 				};
