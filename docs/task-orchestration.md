@@ -41,14 +41,8 @@ AI 可调用 `project_resolve({path:"D:/projects/Unifier/logs/result.txt"})`，�
 
 镜像必须已经存在于本地 Podman 引擎；插件在授权时解析为不可变镜像 ID，不拉取镜像、不安装工具链、不自动启动虚拟机，不在后端不可用时回退宿主执行。Python、Yosys、Verilator 等需要安装在该镜像中。WSL 中安装的命令不等于容器已经包含这些命令。
 
-`execution: "host"` 是可选的可信宿主机模式。它要求用户先执行 `/team-allow-host <member>`，授权只对下一次该成员的 host 配置有效，十分钟后失效。host 模式可以使用普通 `bash` 和文件工具，适合你完全信任的仓库执行员；它不提供目录、网络、凭据或进程级隔离。成员仍受任务超时、输出上限、进程树取消和收据记录约束。
-已经存在的空闲受限成员可以用 `team_configure` 更新后端，保留成员身份、上下文、原有目录和读写权限。Sandbox 需要先配置 Podman 镜像；host 需要先手动授权：
-
-```text
-/team-allow-host executor
-```
-
-随后让主 AI 调用 `team_configure` 配置 `execution:"host"`。
+`execution: "host"` 是可选的可信宿主机模式。主对话可以直接通过 `team_spawn` 或 `team_configure` 为指定成员启用它；host 模式可以使用普通 `bash` 和文件工具，适合你完全信任的仓库执行员；它不提供目录、网络、凭据或进程级隔离。成员仍受任务超时、输出上限、进程树取消和收据记录约束。
+已经存在的空闲受限成员可以用 `team_configure` 更新后端，保留成员身份、上下文、原有目录和读写权限。
   "sandbox": { "engine": "podman", "image": "your-local-hardware-image:tag", "maxSeconds": 1800 }
 }
 ```

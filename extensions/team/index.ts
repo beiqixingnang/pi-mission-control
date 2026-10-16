@@ -259,10 +259,6 @@ export default function (pi: ExtensionAPI) {
 	const queuedDeliveries = new Set<string>();
 	const waitingFor = new Map<string, { from: string; to: string }>();
 	const restoreErrors = new Map<string, string>();
-	const hostGrants = new Map<string, number>();
-	function hostGranted(name:string){const expires=hostGrants.get(name);if(!expires)return false;if(Date.now()>=expires){hostGrants.delete(name);return false;}return true;}
-	function grantHost(name:string){hostGrants.set(name,Date.now()+600_000);}
-	function consumeHost(name:string){if(!hostGranted(name))return false;hostGrants.delete(name);return true;}
 	function jobsHasMember(name:string){return [...jobs.values()].some(job=>job.member.name===name);}
 
 
@@ -371,7 +367,6 @@ export default function (pi: ExtensionAPI) {
 		if(event.source!=="extension" && !event.text.startsWith("/"))wakeSuppressed=false;
 	});
 
-	pi.registerCommand("team-allow-host",{description:"Grant one-time trusted host execution to an idle restricted member: /team-allow-host <name>",handler:async(args,ctx)=>{const name=args.trim();const member=members.get(name);if(!member)return ctx.ui.notify(`No team member named "${name}".`,"error");if(!member.workspace)return ctx.ui.notify("Host execution can only be granted to a restricted member.","error");if(member.status==="working"||jobsHasMember(name))return ctx.ui.notify("Member must be idle before host execution is granted.","error");grantHost(name);ctx.ui.notify(`Trusted host execution granted to ${name} for ten minutes. The next host configuration consumes it.`,"warning");}});
 	pi.registerCommand("team-wake",{
 		description: "Automatic team notifications: on|off|status. Goal-mode jobs use their Goal controller.",
 		handler: async (args, ctx) => {
@@ -781,8 +776,7 @@ export default function (pi: ExtensionAPI) {
 		const comm = communication(params.communication);
 		const persistent = params.__definition?.persistent ?? params.persistent !== false;
 		const sessionId = params.__definition?.sessionId ?? (persistent ? randomUUID() : undefined);
-			if(params.workspace?.execution==="host"&&!params.__trustedHost&&!hostGranted(name))return {content:[{type:"text" as const,text:`Trusted host execution for "${name}" requires /team-allow-host ${name} first.`}],details:{error:"host_not_authorized",name},isError:true};
-		if(params.workspace?.execution==="host"&&!params.__trustedHost){params={...params,__trustedHost:true};consumeHost(name);}
+		if(params.workspace?.execution==="host"){params={...params,__trustedHost:true};}
 		const effectiveTools = params.tools ? [...new Set([...params.tools, ...bridgeTools, ...(params.workspace?.execution==="host"?["bash"]:[])])] : params.tools;
 
 			const systemPrompt = [
@@ -968,8 +962,7 @@ export default function (pi: ExtensionAPI) {
 			if(!member.workspace)return {content:[{type:"text" as const,text:"This tool configures restricted members only."}],details:undefined,isError:true};
 			if([...jobs.values()].some(job=>job.member===member)||member.status==="working")return {content:[{type:"text" as const,text:"Finish or cancel this member's tasks before changing its execution backend."}],details:undefined,isError:true};
 			try{
-				if(args.execution==="host"&&!consumeHost(args.name))return {content:[{type:"text" as const,text:`Trusted host execution requires /team-allow-host ${args.name} immediately before configuration.`}],details:{error:"host_not_authorized"},isError:true};
-			const workspace={...member.workspace,execution:args.execution,sandbox:args.execution==="sandbox"?args.sandbox:undefined};
+				const workspace={...member.workspace,execution:args.execution,sandbox:args.execution==="sandbox"?args.sandbox:undefined};
 				const tools=member.definition.tools?member.definition.tools.filter(tool=>tool!=="exec"&&tool!=="bash"):undefined;
 				if(tools&&(args.execution==="sandbox"))tools.push("exec");
 				if(tools&&(args.execution==="host"))tools.push("bash");
