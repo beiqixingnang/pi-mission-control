@@ -1,0 +1,31 @@
+name: offline tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22.x, 24.x]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install Pi host
+        run: npm install --global --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0
+      - name: Check extension entry points
+        run: npm run check
+      - name: Run offline tests
+        run: npm test

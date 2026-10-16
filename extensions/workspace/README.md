@@ -12,7 +12,7 @@
 可以直接对主模型说：
 
 ```text
-派一个 DeepSeek 成员，只读 D:/projects/backend，另外可以读取 D:/projects/shared-docs，不允许访问其他目录。
+派一个已配置的成员，只读 D:/projects/backend，另外可以读取 D:/projects/shared-docs，不允许访问其他目录。
 ```
 
 创建团队成员对应的参数：
@@ -21,7 +21,7 @@
 {
   "name": "reviewer",
   "role": "后端只读审阅",
-  "model": "provider/provider/model-id",
+  "model": "provider/model-id",
   "workspace": {
     "root": "D:/projects/backend",
     "access": "read-only",
@@ -69,7 +69,7 @@
 ---
 name: backend-reviewer
 description: 后端只读审阅
-model: provider/provider/model-id
+model: provider/model-id
 workspace:
   root: D:/projects/backend
   access: read-only
@@ -100,4 +100,4 @@ node --unhandled-rejections=strict --test ~/.pi/agent/extensions/workspace/tests
 node --unhandled-rejections=strict ~/.pi/agent/extensions/workspace/tests/live-workspace.mjs
 ```
 
-真实模型测试创建临时工作区，让 Luna 团队成员执行成功/拒绝的读取，让 DeepSeek 普通子智能体执行成功/拒绝的写入，检查工具事件和外部文件是否变化。测试消耗模型用量。可用 `PI_WORKSPACE_TEST_OUTPUT` 指定报告目录；测试工作区始终放在系统临时目录，避免测试写入 Pi 配置目录。
+真实模型测试创建临时工作区，让配置的团队成员执行成功/拒绝的读取，让配置的普通子智能体执行成功/拒绝的写入，检查工具事件和外部文件是否变化。测试消耗模型用量；运行前设置 `PI_LIVE_MEMBER_MODEL`。可用 `PI_WORKSPACE_TEST_OUTPUT` 指定报告目录；测试工作区始终放在系统临时目录，避免测试写入 Pi 配置目录。

@@ -9,8 +9,12 @@ const packageDir=hostDir;
 const {RpcClient}=await import(pathToFileURL(path.join(packageDir,'dist/modes/rpc/rpc-client.js')));
 const {promptAndWaitSafely}=await import(pathToFileURL(path.resolve(here,'../../team/rpc.ts')));
 const outputDir=process.env.PI_GOAL_TEST_OUTPUT||fs.mkdtempSync(path.join(os.tmpdir(),'pi-goal-team-live-'));
+const leadModel=process.env.PI_LIVE_LEAD_MODEL;
+const memberAModel=process.env.PI_LIVE_MEMBER_MODEL_A||process.env.PI_LIVE_MEMBER_MODEL;
+const memberBModel=process.env.PI_LIVE_MEMBER_MODEL_B||process.env.PI_LIVE_MEMBER_MODEL;
+if(!leadModel||!memberAModel||!memberBModel)throw new Error('Set PI_LIVE_LEAD_MODEL and PI_LIVE_MEMBER_MODEL (or PI_LIVE_MEMBER_MODEL_A/B) before running the live Goal test.');
 fs.mkdirSync(outputDir,{recursive:true});
-const client=new RpcClient({cliPath:path.join(packageDir,'dist/bundle/cli.js'),cwd:outputDir,args:['--no-session','--no-skills','--no-prompt-templates','--no-context-files','--model','provider/lead-model','--extension',path.join(here,'integration-driver.ts'),'--tools','probe_dispatch,probe_checkpoint,goal_start,goal_status,goal_finish,goal_wait,goal_pause,team_spawn,team_send,team_broadcast,team_disband,bash']});
+const client=new RpcClient({cliPath:path.join(packageDir,'dist/bundle/cli.js'),cwd:outputDir,args:['--no-session','--no-skills','--no-prompt-templates','--no-context-files','--model',leadModel,'--extension',path.join(here,'integration-driver.ts'),'--tools','probe_dispatch,probe_checkpoint,goal_start,goal_status,goal_finish,goal_wait,goal_pause,team_spawn,team_send,team_broadcast,team_disband,bash']});
 const lifecycle=[];const tools=[];const errors=[];let accepted=false;let finalText='';let timer;let finish;let fail;
 const done=new Promise((resolve,reject)=>{finish=resolve;fail=reject;});
 // The promise is observed immediately even if startup/prompt acceptance fails.
@@ -42,8 +46,8 @@ try {
   assert.ok(settles.length>=2,'Expected initial idle settlement and post-wake settlement');
   assert.ok(settles[0].at<=starts[1].at,'Lead must settle before its automatic wake');
   assert.ok(accepted,'Goal was not accepted');
-  assert.equal(fs.readFileSync(path.join(outputDir,'luna.txt'),'utf8').trim(),'323');
-  assert.equal(fs.readFileSync(path.join(outputDir,'deepseek.txt'),'utf8').trim(),'667');
+  assert.equal(fs.readFileSync(path.join(outputDir,'member-a.txt'),'utf8').trim(),'323');
+  assert.equal(fs.readFileSync(path.join(outputDir,'member-b.txt'),'utf8').trim(),'667');
   assert.equal(tools.filter(t=>['team_collect','team_list'].includes(t.name)).length,0,'Lead must not poll');
   const entries=await client.getEntries();
   const states=entries.entries.filter(e=>e.type==='custom'&&e.customType==='goal-state').map(e=>e.data);
@@ -52,7 +56,7 @@ try {
   assert.ok(entries.entries.some(e=>e.type==='custom_message'&&e.customType==='goal-continue'),'Goal must append a real continuation message');
   assert.equal(completed.verification[0].ok,true);assert.match(completed.verification[0].output,/ARTIFACTS_VERIFIED/);
   assert.ok(states.some(s=>s.status==='waiting'&&s.pending.length===2),'Must persist both pending jobs before idle');
-  const report={passed:true,outputDir,leadModel:'provider/lead-model',memberModels:['provider/member-model','provider/provider/model-id'],leadRuns:starts.length,settlements:settles.length,automaticContinuations:completed.continuations,goalStatus:completed.status,verification:completed.verification,tools,errors,finalText,lifecycle};
+  const report={passed:true,outputDir,leadModel,memberModels:[memberAModel,memberBModel],leadRuns:starts.length,settlements:settles.length,automaticContinuations:completed.continuations,goalStatus:completed.status,verification:completed.verification,tools,errors,finalText,lifecycle};
   fs.writeFileSync(path.join(outputDir,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }catch(error){
   const report={passed:false,outputDir,error:String(error.stack||error),lifecycle,tools,errors,finalText};

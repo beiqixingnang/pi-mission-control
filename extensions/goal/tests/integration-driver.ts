@@ -19,17 +19,20 @@ export default function (pi: ExtensionAPI) {
 				return result.result;
 			};
 			await call("goal_start", {
-				objective: "Have Luna and DeepSeek compute independently, save their answers, and verify both artifacts after automatic wakeup.",
-				criteria: ["Luna writes luna.txt containing exactly 323 for 17 * 19.", "DeepSeek writes deepseek.txt containing exactly 667 for 23 * 29."],
-				verificationCommands: ["node -e 'const fs=require(\"fs\");if(fs.readFileSync(\"luna.txt\",\"utf8\").trim()!==\"323\"||fs.readFileSync(\"deepseek.txt\",\"utf8\").trim()!==\"667\")process.exit(1);console.log(\"ARTIFACTS_VERIFIED\")'"],
+				objective: "Have two configured members compute independently, save their answers, and verify both artifacts after automatic wakeup.",
+				criteria: ["Member A writes member-a.txt containing exactly 323 for 17 * 19.", "Member B writes member-b.txt containing exactly 667 for 23 * 29."],
+				verificationCommands: ["node -e 'const fs=require(\"fs\");if(fs.readFileSync(\"member-a.txt\",\"utf8\").trim()!==\"323\"||fs.readFileSync(\"member-b.txt\",\"utf8\").trim()!==\"667\")process.exit(1);console.log(\"ARTIFACTS_VERIFIED\")'"],
 				maxContinuations: 5, maxMinutes: 5, maxOutputTokens: 12000,
 			});
-			for (const [name, model] of [["luna", "provider/member-model"], ["deepseek", "provider/provider/model-id"]]) {
+			const memberAModel = process.env.PI_LIVE_MEMBER_MODEL_A || process.env.PI_LIVE_MEMBER_MODEL;
+			const memberBModel = process.env.PI_LIVE_MEMBER_MODEL_B || process.env.PI_LIVE_MEMBER_MODEL;
+			if (!memberAModel || !memberBModel) throw new Error("Set PI_LIVE_MEMBER_MODEL (or PI_LIVE_MEMBER_MODEL_A/B) before running the live Goal test.");
+			for (const [name, model] of [["member-a", memberAModel], ["member-b", memberBModel]]) {
 				await call("team_spawn", { name, model, cwd: ctx.cwd, role: "Arithmetic and artifact verification probe", tools: ["write"],
 					systemPrompt: "Only do the exact arithmetic/file task from the lead. Use the write tool once with the requested absolute path. Do not delegate. After writing, reply with the result and the file path." });
 			}
-			await call("team_send", { to: "luna", wait: false, timeoutMs: 90000, message: `Compute 17 * 19. Write only the numeric result and a newline to ${ctx.cwd.replace(/\\/g, "/")}/luna.txt using write. Then report the answer.` });
-			await call("team_send", { to: "deepseek", wait: false, timeoutMs: 90000, message: `Compute 23 * 29. Write only the numeric result and a newline to ${ctx.cwd.replace(/\\/g, "/")}/deepseek.txt using write. Then report the answer.` });
+			await call("team_send", { to: "member-a", wait: false, timeoutMs: 90000, message: `Compute 17 * 19. Write only the numeric result and a newline to ${ctx.cwd.replace(/\\/g, "/")}/member-a.txt using write. Then report the answer.` });
+			await call("team_send", { to: "member-b", wait: false, timeoutMs: 90000, message: `Compute 23 * 29. Write only the numeric result and a newline to ${ctx.cwd.replace(/\\/g, "/")}/member-b.txt using write. Then report the answer.` });
 			return { content: [{ type: "text", text: "Both real member tasks were dispatched. This lead run now ends; member completion must wake it without any new user prompt or polling." }], details: {}, terminate: true };
 		},
 	});

@@ -1,0 +1,16 @@
+# Generated files and local-only data
+node_modules/
+dist/
+coverage/
+*.log
+*.tgz
+
+# Local credentials and provider configuration
+.env
+.env.*
+!.env.example
+
+# Pi runtime data and local test output
+.pi/
+.pi-agent/
+compaction-summary.json

@@ -29,7 +29,7 @@ import {
 	serializeConversation,
 } from "@earendil-works/pi-coding-agent";
 
-const DEFAULT_MODEL = "provider/provider/model-id";
+const DEFAULT_MODEL = "";
 const CONFIG_FILE = "compaction-summary.json";
 const LOG_FILE = "compaction-summary.log";
 const DEFAULT_MAX_TOKENS = 8192;
@@ -59,12 +59,12 @@ function writeConfig(config: SummaryConfig): void {
 	fs.writeFileSync(configPath(), `${JSON.stringify(config, null, 2)}\n`, "utf-8");
 }
 
-function modelSpec(): string {
+function modelSpec(): string | undefined {
 	const fromEnv = process.env.PI_COMPACTION_SUMMARY_MODEL?.trim();
 	if (fromEnv) return fromEnv;
 	const fromFile = readConfig().model?.trim();
 	if (fromFile) return fromFile;
-	return DEFAULT_MODEL;
+	return DEFAULT_MODEL || undefined;
 }
 
 function maxTokens(): number {
@@ -72,7 +72,8 @@ function maxTokens(): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_TOKENS;
 }
 
-function parseSpec(spec: string): [string, string] | undefined {
+function parseSpec(spec: string | undefined): [string, string] | undefined {
+	if (!spec) return undefined;
 	const slash = spec.indexOf("/");
 	if (slash <= 0 || slash >= spec.length - 1) return undefined;
 	return [spec.slice(0, slash), spec.slice(slash + 1)];
@@ -153,7 +154,7 @@ export default function (pi: ExtensionAPI) {
 			const arg = (args ?? "").trim();
 			if (!arg) {
 				ctx.ui.notify(
-					`Compaction summary model: ${modelSpec()}  (config: ${configPath()})`,
+					`Compaction summary model: ${modelSpec() ?? "Pi default"}  (config: ${configPath()})`,
 					"info",
 				);
 				return;

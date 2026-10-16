@@ -85,4 +85,4 @@ node --unhandled-rejections=strict ~/.pi/agent/extensions/goal/tests/live-team.m
 
 Windows 默认从 `%APPDATA%/npm/node_modules/@earendil-works/pi-coding-agent` 加载 Pi；其他位置可设置 `PI_TEST_PACKAGE_DIR`。
 
-真实集成测试会消耗模型用量：Sol 作为主模型，Luna 与 DeepSeek 为成员，分别写入临时文件。测试强制主模型先结束回合，检查完成后自动唤醒，再刻意结束一次未完成目标的回合，检查 Goal 自动续跑，最后执行文件内容检查并验收。只记录生命周期、工具结果和最终答案，不导出 thinking 正文。
+真实集成测试会消耗模型用量：配置的主模型和两个成员模型分别执行独立任务，写入临时文件并由 Goal 验收。测试强制主模型先结束回合，检查完成后自动唤醒，再刻意结束一次未完成目标的回合，检查 Goal 自动续跑，最后执行文件内容检查并验收。只记录生命周期、工具结果和最终答案，不导出 thinking 正文。运行前设置 `PI_LIVE_LEAD_MODEL` 和 `PI_LIVE_MEMBER_MODEL`。

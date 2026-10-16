@@ -5,9 +5,12 @@
   "description": "Pi team agents, completion wakeups, Goal mode, compact TUI monitor, workspace policies and compaction routing.",
   "type": "module",
   "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/beiqixingnang/pi-mission-control.git" },
+  "homepage": "https://github.com/beiqixingnang/pi-mission-control",
+  "bugs": { "url": "https://github.com/beiqixingnang/pi-mission-control/issues" },
   "keywords": ["pi-package"],
   "engines": { "node": ">=22.19.0" },
-  "files": ["extensions", "agents", "scripts", "docs", "README.md", "LICENSE", "NOTICE.md"],
+  "files": ["extensions", "agents", "scripts", "docs", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "LICENSE", "NOTICE.md"],
   "pi": {
     "extensions": [
       "./extensions/agent-monitor/index.ts",

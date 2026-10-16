@@ -23,8 +23,8 @@
 | 修复代理同一流块同时返回 reasoning/content 的显示顺序 | 对 OpenAI 兼容中转站有用 |
 | 切换模型时丢弃其他模型的 thinking 块，不再作为正文发给新模型 | 减少模型把旧思考内容当作回复继续输出的问题 |
 | GPT-6 API key 调整思考等级保留 prompt cache | 官方 OpenAI API 场景有收益；不能由此保证当前自定义中转站的缓存命中或计费 |
-| Kimi Code 改为 Chat Completions，baseUrl 必须包含 `/v1` | 当前自定义 provider/provider 配置不属于该提供商；若以后使用需调整 |
-| 官方 `openai-codex/gpt-6.1-sol` 上下文窗口更新到 500K | 不等于修改自定义 `provider` provider 的配置 |
+| Kimi Code 改为 Chat Completions，baseUrl 必须包含 `/v1` | 自定义 provider 不属于该提供商；若以后使用需按 Pi 文档调整 |
+| 官方 `openai-codex/gpt-6.1-sol` 上下文窗口更新到 500K | 不等于修改任意自定义 provider 的配置 |
 | codemode 取消/超时与残留 worker 修复 | 使用 codemode 时有益，不代替我们的团队/普通子智能体全局取消 |
 
 ## 静态对比
@@ -41,10 +41,10 @@
 
 ## 实际升级
 
-升级对象：Debian WSL 用户级全局 npm 安装，前缀 `/home/user/.local`。
+升级对象：Debian WSL 用户级全局 npm 安装，使用用户自己的 Node.js 前缀。
 
 ```bash
-npm install -g --prefix /home/user/.local --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0
+npm install -g --prefix "$PI_NODE_PREFIX" --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0
 pi --version
 ```
 
@@ -55,9 +55,9 @@ WSL 的 `~/.pi/agent` 链接到 Windows 的配置目录。本次升级前后比�
 ## 测试
 
 ```bash
-cd /path/to/Documents/pi-mission-control
-PI_TEST_PACKAGE_DIR=/home/user/.local/lib/node_modules/@earendil-works/pi-coding-agent node scripts/check.mjs
-PI_TEST_PACKAGE_DIR=/home/user/.local/lib/node_modules/@earendil-works/pi-coding-agent node scripts/test.mjs
+cd /path/to/pi-mission-control
+PI_TEST_PACKAGE_DIR="$PI_NODE_PREFIX/lib/node_modules/@earendil-works/pi-coding-agent" node scripts/check.mjs
+PI_TEST_PACKAGE_DIR="$PI_NODE_PREFIX/lib/node_modules/@earendil-works/pi-coding-agent" node scripts/test.mjs
 ```
 
 环境：Debian WSL，Node v22.23.3，实际全局 Pi 1.3.0，插件 1.1.0。

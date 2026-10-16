@@ -1,8 +1,10 @@
 # Pi Mission Control
 
+这是一个非官方的 Pi 扩展包，与 Pi 上游项目没有隶属或背书关系。
+
 当前版本 **1.2.0** 增加全局停止、成员定向取消、普通子智能体定向取消、消息时间、宽屏侧栏和成员对话查看；详见 [界面与中断说明](docs/ui-and-interruption-1.1.0.md)。1.0.1 的集成修复记录仍保留在 [验证记录](docs/verification-1.0.1.md)。
 
-适用于 Pi 1.2.0 / 1.3.0 的本地功能包；1.3.0 已在 Debian WSL 实际升级并通过兼容测试，见 [升级评估](docs/pi-1.3.0-compatibility.md)。支持 Windows 与 WSL/Linux，包含：
+适用于 Pi 1.3.0 的本地功能包，并保留 Pi 1.2.0 的历史兼容记录；1.3.0 已在 Windows 与 Debian WSL 实际安装并通过兼容测试，见 [升级评估](docs/pi-1.3.0-compatibility.md)。支持 Windows 与 WSL/Linux，包含：
 
 | 功能 | 用法 |
 | --- | --- |
@@ -63,17 +65,11 @@ pi remove /path/to/pi-mission-control
 
 ## 模型与默认设置
 
-本包不包含 API 密钥、models.json、auth.json、settings.json、会话记录或测试输出。导入目标 Pi 应自行配置所需模型。
+本包不包含 API 密钥、models.json、auth.json、settings.json、会话记录或测试输出。导入目标 Pi 应自行配置所需模型。包内示例使用通用的 `provider/model-id` 形式，不假设某个特定 provider 已安装。
 
-团队成员可以使用该 Pi 已配置的任何兼容聊天模型。现有真实模型测试使用：
+团队成员可以使用该 Pi 已配置的任何兼容聊天模型。压缩摘要模型可以通过 `/compaction-model provider/model-id`、`PI_COMPACTION_SUMMARY_MODEL` 或配置文件设置；没有设置时使用 Pi 的正常压缩。
 
-- `provider/lead-model`
-- `provider/member-model`
-- `provider/provider/model-id`
-
-压缩模型默认值是 `provider/provider/model-id`。没有该模型时会回退到 Pi 的正常压缩。也可以通过 `/compaction-model provider/model-id` 设置适合目标环境的模型。
-
-重试设置由目标 Pi 自己管理，**安装包不会修改全局重试、模型或思考等级**。若需要此前使用的“最多重试 5 次”，手动合并以下设置到目标的 settings.json：
+重试设置由目标 Pi 自己管理，**安装包不会修改全局重试、模型或思考等级**。若需要最多重试 5 次，手动合并以下设置到目标的 settings.json：
 
 ```json
 {
@@ -86,6 +82,10 @@ pi remove /path/to/pi-mission-control
   }
 }
 ```
+
+## 安全边界
+
+这是运行在本地 Pi 进程中的自动化扩展，不是操作系统沙箱。工作区限制只约束成员可调用的文件工具；`execution: "sandbox"` 在没有沙箱后端时会拒绝启动。`goal_finish` 可以通过当前会话的 `bash` 工具执行配置的验证命令，不受限成员也可以使用 Pi 授予的工具。详见 [安全政策](SECURITY.md)。
 
 ## 成员间通信
 
@@ -147,7 +147,7 @@ Pi 内置重试负责已识别的网络、限流和服务端错误。`retry-any`
 /compaction-model
 ```
 
-可以直接告诉模型：“创建一个 DeepSeek 成员，只读这个目录”。创建成员的工作区参数示例：
+可以直接告诉模型：“创建一个已配置的成员，只读这个目录”。创建成员的工作区参数示例：
 
 ```json
 {
@@ -171,7 +171,7 @@ Windows 使用 `C:/projects/example` 这类原生路径；WSL 使用 `/home/...`
 
 ## Pi 源码参考
 
-仓库内的 [vendor/pi-1.2.0](vendor/pi-1.2.0) 保存用户提供的 Pi 1.2.0 完整源码快照，方便查阅插件依赖的底层 API。来源、归档校验值和许可证见 [vendor/README.md](vendor/README.md)。该目录不参与插件自动加载，也不包含在 npm 功能包中；运行插件仍需单独安装 Pi。
+仓库内的 [vendor/pi-1.3.0](vendor/pi-1.3.0) 保存 Pi 1.3.0 源码快照，方便查阅插件依赖的底层 API。来源、归档校验值和许可证见 [vendor/README.md](vendor/README.md)。该目录不参与插件自动加载，也不包含在 npm 功能包中；运行插件仍需单独安装 Pi。
 
 ## 验证
 
@@ -192,7 +192,7 @@ node extensions/agent-monitor/tests/live-monitor.mjs
 node extensions/workspace/tests/live-workspace.mjs
 ```
 
-真实测试使用 Pi 当前配置与上述模型名。测试会把报告放到系统临时目录，支持 `PI_GOAL_TEST_OUTPUT`、`PI_MONITOR_TEST_OUTPUT`、`PI_WORKSPACE_TEST_OUTPUT` 覆盖。
+真实测试使用通过环境变量配置的 Pi 模型，并会产生模型用量。设置 `PI_LIVE_LEAD_MODEL` 和 `PI_LIVE_MEMBER_MODEL`（或各测试文件说明的更细分变量）后再运行；测试会把报告放到系统临时目录，支持 `PI_GOAL_TEST_OUTPUT`、`PI_MONITOR_TEST_OUTPUT`、`PI_WORKSPACE_TEST_OUTPUT` 覆盖。
 
 如果自动查找不到 Pi 安装目录，设置 `PI_TEST_PACKAGE_DIR`，例如：
 
@@ -202,7 +202,7 @@ PI_TEST_PACKAGE_DIR=/home/me/.local/lib/node_modules/@earendil-works/pi-coding-a
 
 ## 限制与兼容性
 
-- 已针对 Pi 1.2.0 与 1.3.0 验证，后者在 Debian WSL 实际安装中通过 91 项测试。依赖 Pi 的扩展 API、RPC 与生命周期行为；进一步升级后应重新运行测试。
+- 已针对 Pi 1.3.0 验证，另保留 Pi 1.2.0 的历史兼容记录。依赖 Pi 的扩展 API、RPC 与生命周期行为；进一步升级后应重新运行测试。
 - 等待时主模型不持续推理，但 Pi 进程必须保持运行。退出 Pi 后不会继续运行后台团队。
 - 恢复未完成 Goal 时会暂停，需 `/goal resume` 并重新派发中断工作。
 - 本包团队调用使用安全 RPC 等待封装，规避 Pi 1.2.0 的未处理超时拒绝缺陷；不会修改 Pi 安装包。
