@@ -262,6 +262,7 @@ export default function (pi: ExtensionAPI) {
 	const hostGrants = new Map<string, number>();
 	function hostGranted(name:string){const expires=hostGrants.get(name);if(!expires)return false;if(Date.now()>=expires){hostGrants.delete(name);return false;}return true;}
 	function grantHost(name:string){hostGrants.set(name,Date.now()+600_000);}
+	function consumeHost(name:string){if(!hostGranted(name))return false;hostGrants.delete(name);return true;}
 	function jobsHasMember(name:string){return [...jobs.values()].some(job=>job.member.name===name);}
 
 
