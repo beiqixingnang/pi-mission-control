@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { StartParams, UpdateParams, goalSettings, type GoalPatch, type GoalSettings } from "./settings.ts";
 
 type Status = "running" | "waiting" | "paused" | "blocked" | "completed" | "stopped";
 interface Completion {
@@ -42,14 +43,6 @@ const clip = (text: string, limit = 6000) => text.length > limit ? `${text.slice
 const textResult = (text: string, details: unknown, isError = false) => ({
 	content: [{ type: "text" as const, text }], details: details === undefined ? undefined : JSON.parse(JSON.stringify(details)), ...(isError ? { isError: true } : {}),
 });
-const StartParams = Type.Object({
-	objective: Type.String({ minLength: 1, maxLength: 12000 }),
-	criteria: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4000 }), { minItems: 1, maxItems: 30 })),
-	verificationCommands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4000 }), { maxItems: 10 })),
-	maxContinuations: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
-	maxMinutes: Type.Optional(Type.Number({ minimum: 1, maximum: 1440 })),
-	maxOutputTokens: Type.Optional(Type.Integer({ minimum: 100, maximum: 2000000 })),
-});
 
 export default function (pi: ExtensionAPI) {
 	let goal: Goal | undefined;
@@ -66,6 +59,8 @@ export default function (pi: ExtensionAPI) {
 		deadline = undefined;
 		wakeTimer = undefined;
 	}
+	function settingsFromGoal(value: Goal): GoalSettings { return { objective:value.objective, criteria:value.criteria, verificationCommands:value.verificationCommands, maxContinuations:value.maxContinuations, maxMinutes:value.maxMinutes, maxOutputTokens:value.maxOutputTokens }; }
+	function applyGoalSettings(value: Goal, settings: GoalSettings) { value.objective=settings.objective;value.criteria=settings.criteria;value.verificationCommands=settings.verificationCommands;value.maxContinuations=settings.maxContinuations;value.maxMinutes=settings.maxMinutes;value.maxOutputTokens=settings.maxOutputTokens; }
 	function statusText() {
 		if (!goal) return "No goal. Use /goal start <objective>.";
 		return [
@@ -316,6 +311,20 @@ export default function (pi: ExtensionAPI) {
 		request.results = request.results.filter(result => !result.goalId);
 	});
 
+	pi.registerTool({
+		name:"goal_update",label:"Goal: update",description:"Update an active Goal's objective, acceptance criteria, verification commands or budgets. Prior evidence and results are cleared because they belong to the previous definition.",executionMode:"sequential",parameters:UpdateParams,
+		async execute(_id,params){
+			if(!goal||["completed","stopped"].includes(goal.status)||params.goalId!==goal.id)return textResult("Goal ID does not match an unfinished active goal.",goal??null,true);
+			try{const settings=goalSettings(params as GoalPatch,settingsFromGoal(goal));applyGoalSettings(goal,settings);goal.evidence=undefined;goal.verification=undefined;goal.results=[];goal.reason="Goal definition updated; prior evidence was cleared.";goal.pauseCause=undefined;persist();armDeadline();return textResult(`Goal updated.\n${reminder()}`,goal);}catch(error){return textResult(String((error as Error).message),goal,true);}
+		},
+	});
+	pi.registerTool({
+		name:"goal_stop",label:"Goal: stop",description:"Stop the active Goal, cancel its team jobs, suppress future automatic continuation and retain its history for inspection.",executionMode:"sequential",parameters:Type.Object({goalId:Type.String(),reason:Type.Optional(Type.String({maxLength:2000}))}),
+		async execute(_id,params){
+			if(!goal||["completed","stopped"].includes(goal.status)||params.goalId!==goal.id)return textResult("Goal ID does not match an unfinished active goal.",goal??null,true);
+			goal.status="stopped";goal.pauseCause=undefined;goal.reason=params.reason||"Stopped by the lead.";clearTimers();persist();pi.events.emit("team:cancel-goal",{goalId:goal.id});return textResult(`Goal stopped. Team identity and history are retained.\n${statusText()}`,goal);
+		},
+	});
 	pi.registerTool({
 		name: "goal_start", label: "Goal: start", description: "Start persistent Goal mode when the user requests autonomous work toward a goal. Define acceptance criteria and optional verification shell commands. Do not replace an existing goal.",
 		promptGuidelines: ["When the user requests Goal mode, use goal_start. Do not start Goal mode for ordinary questions.", "In Goal mode, delegate background work with wait:false, then use goal_wait. Results wake the lead automatically. Never poll team_list in a loop.", "Use goal_finish with evidence for every criterion; use goal_pause when blocked or when user input is needed."],

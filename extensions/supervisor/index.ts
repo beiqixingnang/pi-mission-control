@@ -20,6 +20,7 @@
  *   - recovery nudges only for provider/assistant errors, only while work is
  *     active, and only a bounded number of consecutive attempts.
  */
+import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_ENABLED = false;
@@ -391,64 +392,31 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// -------------------------------------------------------------------
-	// Control command
-	// -------------------------------------------------------------------
+	pi.registerTool({
+		name: "supervisor_control", label: "Supervisor: control", description: "Enable, disable, inspect or change the session-only supervisor watchdog.", executionMode: "sequential",
+		parameters: Type.Object({ action: Type.Union([Type.Literal("on"), Type.Literal("off"), Type.Literal("status"), Type.Literal("interval")]), seconds: Type.Optional(Type.Number({ minimum: 1, maximum: 3600 })) }),
+		async execute(_id, params, _signal, _update, ctx) {
+			currentCtx = ctx; dead = false;
+			if (params.action === "off") { enabled = false; stopTimer(); updateUI(); return { content: [{ type: "text" as const, text: "Supervisor disabled for this session." }], details: { enabled } }; }
+			if (params.action === "status") return { content: [{ type: "text" as const, text: statusText() }], details: { enabled, intervalMs, checks, nextCheckAt, checking: checkInFlight } };
+			if (params.seconds !== undefined) { const candidate = Math.round(params.seconds * 1000); if (candidate < MIN_INTERVAL_MS || candidate > MAX_INTERVAL_MS) return { content: [{ type: "text" as const, text: "Supervisor interval must be between 1 and 3600 seconds." }], isError: true }; intervalMs = candidate; }
+			if (params.action === "on") { enabled = true; schedule(); updateUI(); return { content: [{ type: "text" as const, text: "Supervisor enabled for this session." }], details: { enabled, intervalMs } }; }
+			if (params.action === "interval") { if (enabled) schedule(); updateUI(); return { content: [{ type: "text" as const, text: `Supervisor interval set to ${Math.round(intervalMs / 1000)}s.` }], details: { enabled, intervalMs } }; }
+			return { content: [{ type: "text" as const, text: "Unknown supervisor action." }], isError: true };
+		},
+	});
 
 	pi.registerCommand("supervisor", {
 		description: "Session-only supervisor watchdog: on|off|status|interval <seconds>. When on, it wakes the main model on an interval while a Goal or team jobs are active.",
 		handler: async (args, ctx) => {
-			currentCtx = ctx;
-			dead = false;
-			const parts = args.trim().split(/\s+/).filter(Boolean);
-			const command = parts[0] ?? "status";
-			const value = parts[1];
-
-			const applyInterval = (raw: string): boolean => {
-				const seconds = Number(raw);
-				if (!Number.isFinite(seconds)) {
-					ctx.ui.notify(`Invalid supervisor interval: ${raw}`, "warning");
-					return false;
-				}
-				const candidate = Math.round(seconds * 1000);
-				if (candidate < MIN_INTERVAL_MS || candidate > MAX_INTERVAL_MS) {
-					ctx.ui.notify(`Supervisor interval must be between ${MIN_INTERVAL_MS / 1000}s and ${MAX_INTERVAL_MS / 1000}s.`, "warning");
-					return false;
-				}
-				intervalMs = candidate;
-				if (enabled) schedule();
-				return true;
-			};
-
-			if (command === "on") {
-				enabled = true;
-				if (value !== undefined) applyInterval(value);
-				schedule();
-				updateUI();
-				ctx.ui.notify(statusText(), "info");
-				return;
-			}
-			if (command === "off") {
-				enabled = false;
-				stopTimer();
-				updateUI();
-				ctx.ui.notify("Supervisor disabled for this session.", "info");
-				return;
-			}
-			if (command === "interval") {
-				if (value === undefined) {
-					ctx.ui.notify(`Current supervisor interval: ${Math.round(intervalMs / 1000)}s.`, "info");
-					return;
-				}
-				applyInterval(value);
-				updateUI();
-				return;
-			}
-			if (command !== "status") {
-				ctx.ui.notify("Usage: /supervisor on|off|status|interval <seconds>", "warning");
-				return;
-			}
-			ctx.ui.notify(statusText(), "info");
-			updateUI();
+			currentCtx = ctx; dead = false;
+			const parts = args.trim().split(/\s+/).filter(Boolean); const command = parts[0] ?? "status"; const value = parts[1];
+			const applyInterval = (raw: string): boolean => { const seconds = Number(raw); const candidate = Math.round(seconds * 1000); if (!Number.isFinite(seconds) || candidate < MIN_INTERVAL_MS || candidate > MAX_INTERVAL_MS) { ctx.ui.notify(`Supervisor interval must be between ${MIN_INTERVAL_MS / 1000}s and ${MAX_INTERVAL_MS / 1000}s.`, "warning"); return false; } intervalMs = candidate; if (enabled) schedule(); return true; };
+			if (command === "on") { enabled = true; if (value !== undefined) applyInterval(value); schedule(); updateUI(); ctx.ui.notify(statusText(), "info"); return; }
+			if (command === "off") { enabled = false; stopTimer(); updateUI(); ctx.ui.notify("Supervisor disabled for this session.", "info"); return; }
+			if (command === "interval") { if (value === undefined) ctx.ui.notify(`Current supervisor interval: ${Math.round(intervalMs / 1000)}s.`, "info"); else { applyInterval(value); updateUI(); } return; }
+			if (command !== "status") { ctx.ui.notify("Usage: /supervisor on|off|status|interval <seconds>", "warning"); return; }
+			ctx.ui.notify(statusText(), "info"); updateUI();
 		},
 	});
 }

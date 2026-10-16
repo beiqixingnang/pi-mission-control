@@ -1,6 +1,6 @@
 /** Adaptive local TUI monitor: compact widget, optional Pi 1.2 split layout, read-only histories. */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey,wrapTextWithAnsi,truncateToWidth,type TUI } from "@earendil-works/pi-tui";
+import { matchesKey,wrapTextWithAnsi,truncateToWidth,visibleWidth,type TUI } from "@earendil-works/pi-tui";
 import { cleanText,isTerminal,renderMonitor,type AgentSnapshot,type AgentStatus } from "./render.ts";
 import { installSidebar,type SidebarCleanup } from "./layout.ts";
 import { clock,boxed,visibleHistory,linesForHistory,type HistoryItem } from "./history.ts";
@@ -38,19 +38,29 @@ export default function(pi:ExtensionAPI){
 		if(histories.size>100)for(const id of histories.keys()){if(!entries.has(id))histories.delete(id);if(histories.size<=100)break;}
 	}
 	function sidebar(width:number):string[]{
-		const height=Math.max(4,tui?.terminal.rows??30),half=Math.floor(height/2),g=goal();
-		const upper=[`主AI最后消息 ${clock(mainMessageAt)}`,`最后活动 ${clock(mainActivityAt)}`,`主AI停稳 ${clock(mainEndedAt)}`,"",g?`目标 [${g.status}]`:"尚无目标",...(g?.objective?wrapTextWithAnsi(cleanText(g.objective,2000),Math.max(1,width-4)).slice(0,3):[]),...((g?.criteria??[]).slice(0,2).map((item:string,i:number)=>`${i+1}. ${cleanText(item,150)}`)),"",`定时监督 ${supervisor?.enabled?"开启":"关闭"}`];
-		if(supervisor?.enabled){
-			upper.push(`周期 ${Math.round((supervisor.intervalMs??0)/1000)}s`);
-			upper.push(supervisor.checking?"正在检查":supervisor.nextCheckAt?`下次 ${clock(supervisor.nextCheckAt)} · ${Math.max(0,Math.ceil((supervisor.nextCheckAt-Date.now())/1000))}s`:"等待主模型空闲");
-		}
+		const height=Math.max(4,tui?.terminal.rows??30),half=Math.floor(height/2),g=goal(),theme=ctx!.ui.theme;
+		const panel=(bg:"userMessageBg"|"toolPendingBg"|"customMessageBg")=>({
+			title:(text:string)=>theme.style(text,{fg:"accent",bg:"selectedBg",bold:true}),
+			body:(text:string,filled:boolean)=>filled?theme.style(text,{bg}):text,
+		});
+		const goalLines=[g?`状态 ${g.status}`:"尚无目标",...(g?.objective?wrapTextWithAnsi(cleanText(g.objective,2000),Math.max(1,width-4)).slice(0,3):[]),...((g?.criteria??[]).slice(0,2).map((item:string,i:number)=>`${i+1}. ${cleanText(item,150)}`))];
+		const timerLines=[`主AI最后消息 ${clock(mainMessageAt)}`,`最后活动 ${clock(mainActivityAt)}`,`主AI停稳 ${clock(mainEndedAt)}`];
+		if(supervisor?.enabled){timerLines.push(`状态 ${supervisor.checking?"正在检查":"开启"}`,`周期 ${Math.round((supervisor.intervalMs??0)/1000)}s`,supervisor.nextCheckAt?`下次 ${clock(supervisor.nextCheckAt)} · ${Math.max(0,Math.ceil((supervisor.nextCheckAt-Date.now())/1000))}s`:"等待主模型空闲");}else timerLines.push("状态 关闭");
+		const goalHeight=Math.max(4,Math.floor(half*.58)),timerHeight=Math.max(3,half-goalHeight);
 		const list=[...entries.values()];selected=Math.min(selected,Math.max(0,list.length-1));
+		const memberStyle=panel("customMessageBg");
+		const stateFg=(status:AgentStatus):"accent"|"muted"|"success"|"error"|"warning"=>status==="error"?"error":status==="done"?"success":status==="working"||status==="starting"?"accent":status==="stopped"?"warning":"muted";
 		const lower=["Alt+J 选择 · Alt+O 查看", "Esc 全局停止 · 查看器 Esc 返回",""];
 		const visibleCount=Math.max(1,Math.floor((height-half-5)/3));
 		const first=Math.floor(selected/visibleCount)*visibleCount;
-		for (const [offset,entry]of list.slice(first,first+visibleCount).entries()){const index=first+offset;lower.push(`${index===selected?">":" "} ${entry.name} [${entry.status}]`,`  消息 ${clock(entry.lastMessageAt)} · 活动 ${clock(entry.updatedAt)}`,`  ${cleanText(entry.output||entry.activity||"",Math.max(1,width-6))}`);}
-		if(!list.length)lower.push("当前没有成员");
-		return [...boxed(upper,width,half," 目标 / 定时 "),...boxed(lower,width,height-half," 智能体 ")];
+		for (const [offset,entry]of list.slice(first,first+visibleCount).entries()){
+			const index=first+offset;
+			const location=entry.workspace?` · ${entry.access==="read-only"?"只读":"可写"}:${cleanText(entry.workspace.replace(/\\/g,"/").split("/").filter(Boolean).at(-1)||entry.workspace,20)}`:"";
+			const header=theme.style(`${index===selected?">":" "} ${entry.name}${location}`,{fg:"accent",bg:"customMessageBg",bold:index===selected})+" "+theme.style(`[${entry.status}]`,{fg:stateFg(entry.status),bg:"customMessageBg",bold:true});
+			lower.push(header,theme.style(`  消息 ${clock(entry.lastMessageAt)} · 活动 ${clock(entry.updatedAt)}`,{fg:"muted",bg:"customMessageBg"}),theme.style(`  ${cleanText(entry.output||entry.activity||"",Math.max(1,width-6))}`,{fg:"text",bg:"customMessageBg"}));
+		}
+		if(!list.length)lower.push(theme.style("当前没有成员",{fg:"muted",bg:"customMessageBg"}));
+		return [...boxed(goalLines,width,goalHeight," 目标 ",panel("userMessageBg")),...boxed(timerLines,width,timerHeight," 监督器 ",panel("toolPendingBg")),...boxed(lower,width,height-half," 智能体 ",memberStyle)];
 	}
 	function refresh(){
 		prune();if(!enabled||ctx?.mode!=="tui"){detach();return;}
@@ -83,17 +93,24 @@ export default function(pi:ExtensionAPI){
 		if(expected!==lifecycle)return;
 		openingViewer=false;
 		let scroll=0,follow=true;
-		try{await context.ui.custom<void>((host,_theme,_keys,done)=>{
+		try{await context.ui.custom<void>((host,theme,_keys,done)=>{
 			viewerDone=()=>done();viewerRefresh=()=>host.requestRender();
+			const paintHistory=(role:string,text:string,width:number,header:boolean)=>{
+				const clipped=truncateToWidth(text,width),fill=clipped+" ".repeat(Math.max(0,width-visibleWidth(clipped)));
+				const isUser=role==="user",isTool=role.startsWith("工具结果"),bg=isUser?"userMessageBg":isTool?"toolPendingBg":"customMessageBg",fg=header?(isUser?"accent":isTool?"warning":"customMessageLabel"):(isUser?"userMessageText":isTool?"toolOutput":"customMessageText");
+				return theme.style(fill,{fg,bg,bold:header});
+			};
+			const paintHeader=(role:string,text:string,width:number)=>paintHistory(role,text,width,true);
+			const paintBody=(role:string,text:string,width:number)=>paintHistory(role,text,width,false);
 			return {render:(width:number)=>{
 				const height=Math.max(6,Math.floor(host.terminal.rows*.85)),inner=Math.max(1,width-4);
 				const history=histories.get(id)??[];
-				const output=linesForHistory(history,inner);
+				const output=linesForHistory(history,inner,{header:paintHeader,body:paintBody});
 				const live=entries.get(id)?.output;
-				if(live&&!history.at(-1)?.content.endsWith(live))output.push("[实时预览]",...wrapTextWithAnsi(live,inner));
-				if(!output.length)output.push("尚无可见消息。已结束的临时子任务可通过 /agents view 名称查看缓存。");
+				if(live&&!history.at(-1)?.content.endsWith(live))output.push(paintHistory("assistant","[实时输出]",inner,true),...wrapTextWithAnsi(live,inner).map(line=>paintBody("assistant",line,inner)));
+				if(!output.length)output.push(paintHistory("custom","尚无可见消息。已结束的临时子任务可通过 /agents view 名称查看缓存。",inner,false));
 				const count=height-3;if(follow)scroll=Math.max(0,output.length-count);scroll=Math.min(scroll,Math.max(0,output.length-count));
-				return boxed(["只读 · ↑↓/PgUp/PgDn 滚动 · End 跟随 · Esc 返回",...output.slice(scroll,scroll+count)],width,height,` ${entry?.name??id} 对话 `);
+				return boxed([paintHistory("custom","只读 · ↑↓/PgUp/PgDn 滚动 · End 跟随 · Esc 返回",inner,true),...output.slice(scroll,scroll+count)],width,height,` ${entry?.name??id} 对话 `,{title:text=>theme.style(text,{fg:"accent",bg:"selectedBg",bold:true})});
 			},invalidate(){},handleInput(data:string){
 				if(matchesKey(data,"escape")){done();return;}
 				if(matchesKey(data,"up")){follow=false;scroll=Math.max(0,scroll-1);}

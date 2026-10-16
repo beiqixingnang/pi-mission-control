@@ -31,9 +31,14 @@
 /goal start {"objective":"修复项目的类型错误","criteria":["类型检查通过"],"verificationCommands":["npm run typecheck"],"maxContinuations":15,"maxMinutes":45,"maxOutputTokens":80000}
 ```
 
-主模型通过 `goal_finish` 提交每个验收条件的证据。配置过的 `verificationCommands` 会在完成前通过当前会话的 `bash` 工具执行，每条最多 30 秒；任一检查失败都不会标记完成。会话必须启用 `bash`。没有配置命令的条件，由主模型提交的证据记录完成情况，不构成独立的程序验证。
+主模型通过 `goal_finish` 提交每个验收条件的证据。它也可以在目标仍未完成时调用 `goal_update` 修改目标、验收条件、验证命令或预算；修改后旧的证据和成员结果会清除。调用 `goal_stop` 会保留历史并取消该目标的后台任务，适合清理遗留目标。`goal_update` 和 `goal_stop` 都需要当前 `goalId`，可先调用 `goal_status` 获取。
 
-## 团队自动唤醒
+配置过的 `verificationCommands` 会在完成前通过当前会话的 `bash` 工具执行，每条最多 30 秒；任一检查失败都不会标记完成。会话必须启用 `bash`。没有配置命令的条件，由主模型提交的证据记录完成情况，不构成独立的程序验证。
+
+## Supervisor 控制
+
+监督器默认关闭且只在当前会话有效。用户可以使用 `/supervisor on|off|status|interval <seconds>`，主模型也可以调用 `supervisor_control`，动作是 `on`、`off`、`status` 或 `interval`；周期限制为 1 到 3600 秒。它只在活动 Goal 或后台任务存在时唤醒主模型，不会创建系统级后台任务。
+
 
 普通团队任务也可以使用，无需开启 Goal：
 

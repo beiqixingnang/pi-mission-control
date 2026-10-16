@@ -13,7 +13,7 @@ test('member viewer is read-only, hides thinking, and Esc returns without alteri
  runtime.sendMessage=()=>{requests++;};runtime.sendUserMessage=()=>{requests++;};
  const loaded=await loadExtensions([path.resolve(here,'../index.ts')],process.cwd(),bus,runtime);const extension=loaded.extensions[0];assert.deepEqual(loaded.errors,[]);
  const host={terminal:{columns:100,rows:32},requestRender(){}};
- const ui={theme:{fg:(_c,text)=>text},notify:text=>notices.push(text),onTerminalInput:()=>()=>{},setWidget(_key,factory){widget=factory?factory(host,this.theme):undefined;},getEditorText:()=>mainDraft,
+ const ui={theme:{fg:(_c,text)=>text,style:(text,options)=>`<${options.fg||""}|${options.bg||""}>${text}</>`},notify:text=>notices.push(text),onTerminalInput:()=>()=>{},setWidget(_key,factory){widget=factory?factory(host,this.theme):undefined;},getEditorText:()=>mainDraft,
   custom(factory){return new Promise(resolve=>{finish=resolve;viewer=factory(host,this.theme,{},resolve);});}};
  const ctx={cwd:process.cwd(),mode:'tui',ui,sessionManager:{getBranch:()=>[]}};
  const emit=async type=>{for(const handler of extension.handlers.get(type)||[])await handler({type},ctx);};
@@ -31,7 +31,7 @@ test('member viewer is read-only, hides thinking, and Esc returns without alteri
 test('message timestamp is independent of activity/spinner redraws',async()=>{
  const bus=createEventBus(),runtime=createExtensionRuntime();let widget;
  const loaded=await loadExtensions([path.resolve(here,'../index.ts')],process.cwd(),bus,runtime);const extension=loaded.extensions[0];
- const ctx={mode:'tui',sessionManager:{getBranch:()=>[]},ui:{theme:{fg:(_c,text)=>text},onTerminalInput:()=>()=>{},notify(){},setWidget(_key,factory){widget=factory?factory({requestRender(){}},this.theme):undefined;}}};
+ const ctx={mode:'tui',sessionManager:{getBranch:()=>[]},ui:{theme:{fg:(_c,text)=>text,style:(text,options)=>`<${options.fg||""}|${options.bg||""}>${text}</>`},onTerminalInput:()=>()=>{},notify(){},setWidget(_key,factory){widget=factory?factory({requestRender(){}},this.theme):undefined;}}};
  const emit=async type=>{for(const handler of extension.handlers.get(type)||[])await handler({type},ctx);};
  try{
   await emit('session_start');const at=new Date().setHours(12,34,56,0);

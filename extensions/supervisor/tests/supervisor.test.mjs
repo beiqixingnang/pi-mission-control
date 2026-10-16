@@ -41,9 +41,10 @@ async function harness() {
     return result;
   };
   const command = args => extension.commands.get('supervisor').handler(args, ctx);
+  const tool = (name, params = {}) => extension.tools.get(name).definition.execute('test', params, undefined, undefined, ctx);
   const goal = value => entries.push({type: 'custom', customType: 'goal-state', data: value});
   await emit('session_start', {reason: 'startup'});
-  return {entries, sent, notices, bus, state, emit, command, goal, close: () => emit('session_shutdown', {reason: 'quit'})};
+  return {entries, sent, notices, bus, state, emit, command, tool, goal, close: () => emit('session_shutdown', {reason: 'quit'})};
 }
 
 async function withHarness(fn) {
@@ -134,6 +135,14 @@ test('finished team jobs clear the work gate', async () => withHarness(async h =
   assert.equal(h.sent.length, 0);
 }));
 
+test('model control tool changes supervisor state and validates interval', async () => withHarness(async h => {
+  const status = await h.tool('supervisor_control', {action: 'status'}); assert.match(status.content[0].text, /Supervisor: off/);
+  await h.tool('supervisor_control', {action: 'on', seconds: 2});
+  assert.match((await h.tool('supervisor_control', {action: 'status'})).content[0].text, /interval 2s/);
+  assert.equal((await h.tool('supervisor_control', {action: 'interval', seconds: 0.5})).isError, true);
+  await h.tool('supervisor_control', {action: 'off'});
+  assert.match((await h.tool('supervisor_control', {action: 'status'})).content[0].text, /Supervisor: off/);
+}));
 test('interval configuration is validated and reported', async () => withHarness(async h => {
   await h.command('interval 0.5');
   assert.match(String(h.notices.at(-1)[0]), /between/);

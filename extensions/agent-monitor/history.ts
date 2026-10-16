@@ -24,13 +24,23 @@ export function clock(timestamp?:number,now=Date.now()){
 	const time=date.toLocaleTimeString('zh-CN',{hour12:false});
 	return (date.toDateString()===current.toDateString()?"":`${date.getMonth()+1}/${date.getDate()} `)+time;
 }
-export function linesForHistory(items:HistoryItem[],width:number):string[]{
-	return items.flatMap(item=>[`[${item.role}] ${clock(item.timestamp)}`,...item.content.split("\n").flatMap(line=>wrapTextWithAnsi(line,width)),""]);
+export interface HistoryPainter { header?: (role:string,text:string,width:number)=>string; body?: (role:string,text:string,width:number)=>string; }
+export function linesForHistory(items:HistoryItem[],width:number,painter:HistoryPainter={}):string[]{
+	return items.flatMap(item=>{
+		const header=`[${item.role}] ${clock(item.timestamp)}`;
+		const headerLine=painter.header?.(item.role,header,width)??header;
+		const body=item.content.split("\\n").flatMap(line=>wrapTextWithAnsi(line,width)).map(line=>painter.body?.(item.role,line,width)??line);
+		return [headerLine,...body,""];
+	});
 }
-export function boxed(lines:string[],width:number,height:number,title:string):string[]{
+export interface BoxStyle { title?: (text:string)=>string; body?: (text:string,filled:boolean)=>string; }
+export function boxed(lines:string[],width:number,height:number,title:string,style:BoxStyle={}):string[]{
 	if(width<1||height<1)return [];
 	if(width<3||height<2)return [truncateToWidth(title,width)];
 	const inner=width-2;
 	const row=(line:string)=>"│"+truncateToWidth(line,inner)+" ".repeat(Math.max(0,inner-visibleWidth(truncateToWidth(line,inner))))+"│";
-	return ["┌"+truncateToWidth(title,inner)+"─".repeat(Math.max(0,inner-visibleWidth(truncateToWidth(title,inner))))+"┐",...Array.from({length:Math.max(0,height-2)},(_,i)=>row(lines[i]??"")),"└"+"─".repeat(inner)+"┘"];
+	const applyBody=style.body??((text:string,_filled:boolean)=>text),applyTitle=(text:string)=>style.title?.(text)??applyBody(text,true);
+	const titleText=applyTitle("┌"+truncateToWidth(title,inner)+"─".repeat(Math.max(0,inner-visibleWidth(truncateToWidth(title,inner))))+"┐");
+	const end="└"+"─".repeat(inner)+"┘";
+	return [titleText,...Array.from({length:Math.max(0,height-2)},(_,i)=>applyBody(row(lines[i]??""),Boolean(lines[i]?.trim()))),applyBody(end,false)];
 }

@@ -170,6 +170,16 @@ test('tree navigation invalidates scheduled wakes and restores the branch',async
 
 function peer(prompt) {const listeners=new Set();return {listeners,onEvent(fn){listeners.add(fn);return()=>listeners.delete(fn);},prompt,emit(event){for(const fn of [...listeners])fn(event);}};}
 
+test('model can update an active goal and stop it by id', async()=>withHarness(async h=>{
+  await h.start({criteria:['old criterion']}); const id=(await h.state()).id;
+  const updated=await h.tool('goal_update',{goalId:id,objective:'New objective',criteria:['new criterion'],maxContinuations:3});
+  assert.equal(updated.isError,undefined); const next=await h.state(); assert.equal(next.id,id); assert.equal(next.objective,'New objective'); assert.deepEqual(next.criteria,['new criterion']); assert.equal(next.maxContinuations,3);
+  let cancelled; h.bus.on('team:cancel-goal',data=>{cancelled=data.goalId;});
+  const stopped=await h.tool('goal_stop',{goalId:id,reason:'test cleanup'}); assert.equal(stopped.isError,undefined); assert.equal(cancelled,id); assert.equal((await h.state()).status,'stopped');
+  assert.equal((await h.tool('goal_update',{goalId:id,objective:'should fail'})).isError,true);
+}));
+
+
 test('RPC timeout before prompt acceptance is caught without leaking listeners or rejection',async()=>{
   const p=peer(()=>delay(50).then(()=> 'started'));
   await assert.rejects(promptAndWaitSafely(p,'test',undefined,5),/timed out/);
