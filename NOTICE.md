@@ -1,6 +1,6 @@
 # Attribution
 
-Pi Mission Control combines local extensions developed for this installation with code adapted from the MIT-licensed Pi project and its extension examples, including the subagent example and custom compaction patterns.
+Pi Mission Control combines local extensions developed for this project with code adapted from the MIT-licensed Pi project and its extension examples, including the subagent example and custom compaction patterns.
 
 Upstream: https://github.com/earendil-works/pi
 
