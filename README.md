@@ -156,6 +156,10 @@ Windows 使用 `C:/projects/example` 这类原生路径；WSL 使用 `/home/...`
 - [TUI 状态区](extensions/agent-monitor/README.md)
 - [工作区访问限制](extensions/workspace/README.md)
 
+## Pi 源码参考
+
+仓库内的 [vendor/pi-1.2.0](vendor/pi-1.2.0) 保存用户提供的 Pi 1.2.0 完整源码快照，方便查阅插件依赖的底层 API。来源、归档校验值和许可证见 [vendor/README.md](vendor/README.md)。该目录不参与插件自动加载，也不包含在 npm 功能包中；运行插件仍需单独安装 Pi。
+
 ## 验证
 
 需要目标机器已安装 Pi；无需安装本包的 peer dependencies，它们由 Pi 提供。

@@ -4,4 +4,6 @@ Pi Mission Control combines local extensions developed for this installation wit
 
 Upstream: https://github.com/earendil-works/pi
 
-Pi and its host-provided libraries remain separate installations. This archive does not include copies of their npm packages or dependencies. Runtime libraries are declared as peer dependencies and resolved by the Pi extension loader.
+Pi and its host-provided libraries remain separate runtime installations. Runtime libraries are declared as peer dependencies and resolved by the Pi extension loader; published npm packages and their installed dependencies are not bundled into the plugin package.
+
+The Git repository also contains an unmodified, user-provided Pi 1.2.0 source snapshot under `vendor/pi-1.2.0/`. Its original MIT license and copyright notice are retained at `vendor/pi-1.2.0/LICENSE` (Copyright (c) 2025 Mario Zechner). See `vendor/README.md` for the archive identity and checksum. This source snapshot is excluded from the plugin's npm package and does not replace the installed Pi runtime.
