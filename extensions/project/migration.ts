@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir, SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 type ReadonlySessionManager = ExtensionContext["sessionManager"];
 import { readRoster, type RosterSnapshot } from "../team/roster.ts";
-import { getProjectIdentity,associateProjectSession,relocateProject } from "./identity.ts";
+import { getProjectIdentity,newProjectIdentityId,lookupProject,registerProject,associateProjectSession,relocateProject } from "./identity.ts";
 
 export type Action = "rename" | "switch";
 export interface Plan { action: Action; source: string; target: string; }
@@ -74,9 +74,10 @@ export function prepareMigration(plan: Plan, manager: ReadonlySessionManager, ch
 	if (inside(plan.source, getAgentDir())) throw new Error("Pi's agent directory must be outside the workspace being migrated.");
 	fs.mkdirSync(storage, { recursive: true, mode: 0o700 });
 	const sourceProject=getProjectIdentity(plan.source);
-	const targetProject=plan.action==="rename"?sourceProject:getProjectIdentity(plan.target);
+	const targetExisting=plan.action==="rename"?undefined:lookupProject(plan.target);
+	const targetProjectId=plan.action==="rename"?sourceProject.id:(targetExisting?.id??newProjectIdentityId());
 	associateProjectSession(sourceProject.id,manager.getSessionFile()!);
-	const migration: PreparedMigration = { plan, projectId:targetProject.id,sourceProjectId:sourceProject.id, backup: path.join(storage, "original.jsonl"), journal: path.join(storage, "migration.json"), sessionFile: "", createdFiles: [], processCwd: process.cwd(), renamed: false };
+	const migration: PreparedMigration = { plan, projectId:targetProjectId,sourceProjectId:sourceProject.id, backup: path.join(storage, "original.jsonl"), journal: path.join(storage, "migration.json"), sessionFile: "", createdFiles: [], processCwd: process.cwd(), renamed: false };
 	snapshot(manager, migration.backup);
 	writeJournal(migration, "prepared");
 	try {
@@ -136,7 +137,7 @@ export function prepareMigration(plan: Plan, manager: ReadonlySessionManager, ch
 }
 export function commitMigration(migration:PreparedMigration){
 	if(migration.plan.action==="rename")relocateProject(migration.projectId,migration.plan.source,migration.plan.target,migration.sessionFile);
-	else associateProjectSession(migration.projectId,migration.sessionFile);
+	else registerProject(migration.projectId,migration.plan.target,migration.sessionFile);
 }
 export function rollbackMigration(migration: PreparedMigration) {
 	for (const file of migration.createdFiles) fs.rmSync(file, { force: true });

@@ -18,7 +18,11 @@ export default function (pi: ExtensionAPI) {
 	let currentCtx:ExtensionContext|undefined;
 	function identity(ctx:ExtensionContext){
 		const marker=[...ctx.sessionManager.getBranch()].reverse().find(entry=>entry.type==="custom"&&entry.customType==="project-migration") as {data?:{projectId?:string;target?:string}}|undefined;
-		return marker?.data?.projectId&&marker.data.target===ctx.cwd?lookupProject(marker.data.projectId)??getProjectIdentity(ctx.cwd):getProjectIdentity(ctx.cwd);
+		if(marker?.data?.projectId&&marker.data.target===ctx.cwd){
+			const known=lookupProject(marker.data.projectId);
+			return known??{id:marker.data.projectId,currentPath:ctx.cwd,previousPaths:[],sessions:[]};
+		}
+		return getProjectIdentity(ctx.cwd);
 	}
 	function clear() { grant = undefined; pending = undefined; if (timer) clearTimeout(timer); timer = undefined; }
 	function status(ctx: ExtensionContext) {

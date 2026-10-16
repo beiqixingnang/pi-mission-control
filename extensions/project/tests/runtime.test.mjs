@@ -35,7 +35,7 @@ async function harness(fn,{team=false}={}){
   if(!disposed)await runtime?.dispose();await Promise.allSettled(peers.map(p=>p.stop()));RpcClient.prototype.start=originalStart;process.chdir(cwd);if(priorAgent===undefined)delete process.env.PI_CODING_AGENT_DIR;else process.env.PI_CODING_AGENT_DIR=priorAgent;fs.rmSync(base,{recursive:true,force:true});
  }
 }
-function untilSwitched(promise){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Migration did not finish after settlement')),10000);promise.then(v=>{clearTimeout(timer);resolve(v);},e=>{clearTimeout(timer);reject(e);});});}
+function untilSwitched(promise,details){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Migration did not finish after settlement '+JSON.stringify(details))),10000);promise.then(v=>{clearTimeout(timer);resolve(v);},e=>{clearTimeout(timer);reject(e);});});}
 
 test('manual rename continues inside the same Pi host and a fresh session lookup finds the history',()=>harness(async h=>{
  await h.command('PROBE:{"op":"remember","token":"BEFORE_RENAME_MEMORY"}');
@@ -69,7 +69,7 @@ test('AI cannot change a workspace without a grant; one authorized change execut
  assert.equal((await h.tool('project_apply',{authorizationId:'wrong'})).isError,true);
  const old=h.runtime.session;
  await h.command('PROBE:'+JSON.stringify({tool:'project_apply',args:{authorizationId:grant.id}}));
- await untilSwitched(h.switched);
+ await untilSwitched(h.switched,h.notices);
  assert.notEqual(h.runtime.session,old,JSON.stringify(h.notices));assert.equal(h.runtime.cwd,h.target);assert.equal((await h.tool('project_status')).details.authorization,null);
  assert.equal((await h.tool('project_apply',{authorizationId:grant.id})).isError,true);
 }));

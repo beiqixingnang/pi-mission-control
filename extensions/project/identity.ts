@@ -217,6 +217,12 @@ function addSession(project: ProjectIdentity, sessionFile: string): boolean {
 	return true;
 }
 
+export function newProjectIdentityId(): string { return randomUUID(); }
+
+export function registerProject(id: string, cwd: string, sessionFile: string): ProjectIdentity {
+ requireId(id);const currentPath=directory(cwd);const session=canonicalAbsolute(sessionFile);const file=registryFile();externalStorage(file,currentPath);const registry=readRegistry(file);const existing=registry.projects.find(project=>project.id===id);if(existing){if(!samePath(existing.currentPath,currentPath))throw new Error("Project ID is already bound to another path.");addSession(existing,session);writeRegistry(file,registry);return copy(existing);}const owner=registry.projects.find(project=>aliases(project).some(alias=>samePath(alias,currentPath)));if(owner)throw new Error(`The project path is already registered to another project: ${owner.id}`);const project={id,currentPath,previousPaths:[],sessions:[session]};registry.projects.push(project);writeRegistry(file,registry);return copy(project);
+}
+
 /** Existing directories get fresh IDs; historical aliases cannot silently claim a reused directory. */
 export function getProjectIdentity(cwd: string): ProjectIdentity {
 	const currentPath = directory(cwd);
