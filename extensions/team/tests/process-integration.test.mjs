@@ -29,14 +29,14 @@ test('a completely new parent process restores its saved roster and member conve
 
 const originalStart=RpcClient.prototype.start;
 
-async function harness(manager,peers){
+async function harness(manager,peers,withGoal=false){
  const bus=createEventBus(), runtime=createExtensionRuntime();
  runtime.appendEntry=(type,data)=>manager.appendCustomEntry(type,structuredClone(data));
  runtime.sendMessage=()=>{};
- const loaded=await loadExtensions([path.join(packageRoot,'extensions/team/index.ts')],manager.getCwd(),bus,runtime);assert.deepEqual(loaded.errors,[]);
+ const loaded=await loadExtensions([path.join(packageRoot,'extensions/team/index.ts'),...(withGoal?[path.join(packageRoot,'extensions/goal/index.ts')]:[])],manager.getCwd(),bus,runtime);assert.deepEqual(loaded.errors,[]);
  const extension=loaded.extensions[0];const ctx={mode:'rpc',cwd:manager.getCwd(),sessionManager:manager,thinkingLevel:'off',model:{provider:'workbench-fixture',id:'model'},ui:{notify(){}},isIdle:()=>true};
- const emit=async(type)=>{for(const handler of extension.handlers.get(type)||[])await handler({type},ctx);};
- const tool=(name,args)=>extension.tools.get(name).definition.execute('integration',args,undefined,undefined,ctx);
+ const emit=async(type)=>{for(const ext of loaded.extensions)for(const handler of ext.handlers.get(type)||[])await handler({type},ctx);};
+ const tool=(name,args)=>loaded.extensions.find(e=>e.tools.has(name)).tools.get(name).definition.execute('integration',args,undefined,undefined,ctx);
  await emit('session_start');
  return {bus,tool,close:()=>emit('session_shutdown'),manager};
 }
@@ -88,4 +88,30 @@ test('real restricted children expose the message tool, enforce ACL both ways, a
   if(h)await h.close();await Promise.allSettled(peers.map(peer=>peer.stop()));RpcClient.prototype.start=originalStart;
   await fs.rm(base,{recursive:true,force:true});
  }
+});
+
+test('real supervisor dispatches downstream work, sleeps, reviews delivery and keeps Goal pending until review',{timeout:45000},async()=>{
+ const base=realpathSync.native(await fs.mkdtemp(path.join(os.tmpdir(),'pi-task-tree-process-'))),peers=[];let h;
+ RpcClient.prototype.start=async function(){this.options.cliPath=path.join(hostDir,'dist/bundle/cli.js');this.options.args.push('--extension',path.join(packageRoot,'scripts/fixtures/offline-provider.ts'));peers.push(this);return originalStart.call(this);};
+ try{
+  const cwd=path.join(base,'work');await fs.mkdir(cwd);let manager=SessionManager.create(cwd,path.join(base,'parents'));manager.appendMessage({role:'user',content:'Task tree integration',timestamp:Date.now()});
+  h=await harness(manager,peers,true);
+  for(const name of ['supervisor','executor']){const r=await h.tool('team_spawn',{name,role:name,workspace:{root:cwd,access:'read-only'},communication:{allow:name==='supervisor'?['executor']:[]}});assert.ok(!r.isError,JSON.stringify(r));}
+  await h.tool('goal_start',{objective:'Review a downstream receipt',criteria:['Supervisor reviews worker receipt']});
+  let childStarted,rootFinished;const childReady=new Promise(resolve=>{childStarted=resolve;}),rootReady=new Promise(resolve=>{rootFinished=resolve;});
+  h.bus.on('team:job-start',job=>{if(job.member==='executor')childStarted(job);});h.bus.on('team:job-end',job=>{if(job.member==='supervisor')rootFinished(job);});
+  const sent=await h.tool('team_send',{to:'supervisor',message:'PROBE:'+JSON.stringify({op:'delegate',to:'executor',child:{op:'remember',token:'VERIFIED_CHILD_RECEIPT'}}),wait:false});
+  const child=await childReady;assert.equal(child.parentId,sent.details.jobId);const state=await h.tool('goal_status',{});assert.ok(state.details.pending.some(job=>job.id===sent.details.jobId));
+  const completed=await rootReady;assert.equal(completed.ok,true,JSON.stringify(completed));assert.match(completed.reply,/reviewed/);assert.match(completed.reply,/VERIFIED_CHILD_RECEIPT/);
+  const tree=await h.tool('team_tree',{});assert.equal(tree.details.tasks.length,2);assert.ok(tree.details.tasks.every(task=>task.state==='completed'));assert.equal(new Set(tree.details.deliveries.map(d=>d.id)).size,2);
+  assert.equal((await h.tool('goal_status',{})).details.pending.length,0);
+  const file=manager.getSessionFile();await h.close();h=undefined;manager=SessionManager.open(file);h=await harness(manager,peers,true);
+  const restored=await h.tool('team_tree',{});assert.equal(restored.details.tasks.length,2);assert.ok(restored.details.tasks.every(task=>task.state==='completed'));
+  let blocked;const blockedReady=new Promise(resolve=>{blocked=resolve;});h.bus.on('team:blocked',event=>blocked(event));
+  const blockedRoot=await h.tool('team_send',{to:'supervisor',message:'PROBE:'+JSON.stringify({op:'delegate',to:'executor',child:{op:'block',reason:'FIXTURE_TOOLCHAIN_BLOCKER'}}),wait:false});
+  await blockedReady;assert.equal((await h.tool('goal_status',{})).details.status,'blocked');
+  assert.match((await h.tool('goal_status',{})).details.reason,/FIXTURE_TOOLCHAIN_BLOCKER/);
+  const cancelled=await h.tool('team_cancel',{jobId:blockedRoot.details.jobId});assert.ok(!cancelled.isError,JSON.stringify(cancelled));
+  const final=await h.tool('team_tree',{taskId:blockedRoot.details.jobId});assert.ok(final.details.tasks.every(task=>task.state==='cancelled'));
+ }finally{if(h)await h.close();await Promise.allSettled(peers.map(peer=>peer.stop()));RpcClient.prototype.start=originalStart;await fs.rm(base,{recursive:true,force:true});}
 });

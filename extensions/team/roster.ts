@@ -1,3 +1,4 @@
+import { restoreTasks,restoreDeliveries,type TaskRecord,type Delivery } from "./tasks.ts";
 import path from "node:path";
 import type { ResolvedWorkspace } from "../workspace/launch.ts";
 import { communication, validMemberName, validRequestId, type Communication } from "./messaging.ts";
@@ -22,6 +23,7 @@ export interface MemberDefinition {
 	lastMessageAt?: number;
 }
 export interface SavedCompletion {
+	parentId?:string;rootId?:string;batchId?:string;owner?:string;inputHash?:string;inputSummary?:string;resultPaths?:string[];deliveryId?:string;sequence?:number;timeoutLayer?:string;processState?:string;
 	id: string;
 	member: string;
 	goalId?: string;
@@ -34,6 +36,9 @@ export interface RosterSnapshot {
 	members: MemberDefinition[];
 	pendingJobs: Array<{ id: string; member: string; goalId?: string }>;
 	completedJobs: SavedCompletion[];
+	taskTree?:TaskRecord[];
+	deliveries?:Delivery[];
+	board?:Array<{id:string;title:string;assignee?:string;status:"todo"|"doing"|"done"|"blocked";note?:string;createdAt:number;updatedAt:number}>;
 }
 function optionalString(value: unknown) { return value === undefined || typeof value === "string"; }
 /** Keep the exact ID of v1.0 members: renaming it would orphan their child history. */
@@ -46,7 +51,8 @@ function parseDefinition(value: unknown): MemberDefinition {
 	// A malformed policy must never be restored as an unrestricted member.
 	if (member.workspace !== undefined) {
 		const workspace = member.workspace;
-		if (!workspace || typeof workspace.root !== "string" || !path.isAbsolute(workspace.root) || !["read-only", "read-write"].includes(workspace.access) || workspace.execution !== "disabled" || !Array.isArray(workspace.extraReadRoots) || workspace.extraReadRoots.some(root => typeof root !== "string" || !path.isAbsolute(root))) throw new Error("Invalid persisted team workspace policy.");
+		if (!workspace || typeof workspace.root !== "string" || !path.isAbsolute(workspace.root) || !["read-only", "read-write"].includes(workspace.access) || !["disabled","sandbox"].includes(workspace.execution) || !Array.isArray(workspace.extraReadRoots) || workspace.extraReadRoots.some(root => typeof root !== "string" || !path.isAbsolute(root))) throw new Error("Invalid persisted team workspace policy.");
+		if(workspace.execution==="sandbox"&&(!workspace.sandbox||workspace.sandbox.engine!=="podman"||typeof workspace.sandbox.image!=="string"))throw new Error("Invalid persisted sandbox configuration.");
 	}
 	return { ...JSON.parse(JSON.stringify(member)), communication: communication(member.communication) };
 }
@@ -68,5 +74,7 @@ export function readRoster(branch: readonly { type: string; customType?: string;
 		if (!result || typeof result.id !== "string" || !validMemberName(result.member) || typeof result.ok !== "boolean" || !optionalString(result.goalId) || !optionalString(result.reply) || !optionalString(result.error)) throw new Error("Invalid persisted team completion.");
 		return { ...result };
 	});
-	return { version: 1, members, pendingJobs, completedJobs };
+	const taskTree=restoreTasks(snapshot.taskTree),deliveries=restoreDeliveries(snapshot.deliveries);
+	if(snapshot.board!==undefined&&(!Array.isArray(snapshot.board)||snapshot.board.length>2000||snapshot.board.some(task=>!task||typeof task.id!=="string"||typeof task.title!=="string"||!["todo","doing","done","blocked"].includes(task.status))))throw new Error("Invalid task board snapshot.");
+	return { version: 1, members, pendingJobs, completedJobs,taskTree,deliveries,board:snapshot.board??[] };
 }

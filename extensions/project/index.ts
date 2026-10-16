@@ -2,8 +2,9 @@
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { planMigration, prepareMigration, rollbackMigration, writeJournal, type Action, type Plan, type PreparedMigration } from "./migration.ts";
+import { planMigration, prepareMigration, commitMigration, rollbackMigration, writeJournal, type Action, type Plan, type PreparedMigration } from "./migration.ts";
 
+import { getProjectIdentity,lookupProject,resolveProjectPath } from "./identity.ts";
 const result = (text: string, details: unknown = undefined, isError = false) => ({ content: [{ type: "text" as const, text }], details, ...(isError ? { isError: true } : {}) });
 interface Grant { id: string; plan: Plan; sessionId: string; expiresAt: number; ctx: ExtensionCommandContext; }
 export default function (pi: ExtensionAPI) {
@@ -14,10 +15,15 @@ export default function (pi: ExtensionAPI) {
 	let dead = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let internalStop = false;
+	let currentCtx:ExtensionContext|undefined;
+	function identity(ctx:ExtensionContext){
+		const marker=[...ctx.sessionManager.getBranch()].reverse().find(entry=>entry.type==="custom"&&entry.customType==="project-migration") as {data?:{projectId?:string;target?:string}}|undefined;
+		return marker?.data?.projectId&&marker.data.target===ctx.cwd?lookupProject(marker.data.projectId)??getProjectIdentity(ctx.cwd):getProjectIdentity(ctx.cwd);
+	}
 	function clear() { grant = undefined; pending = undefined; if (timer) clearTimeout(timer); timer = undefined; }
 	function status(ctx: ExtensionContext) {
 		if (grant && Date.now() >= grant.expiresAt) grant = undefined;
-		return { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), sessionFile: ctx.sessionManager.getSessionFile(), busy: running || !!pending,
+		return { project:identity(ctx), cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), sessionFile: ctx.sessionManager.getSessionFile(), busy: running || !!pending,
 			authorization: grant ? { id: grant.id, ...grant.plan, expiresAt: grant.expiresAt } : null };
 	}
 	function suspendAutomation() {
@@ -52,6 +58,7 @@ export default function (pi: ExtensionAPI) {
 			process.chdir(fresh.target);
 			switchAttempted = true;
 			const changed = await ctx.switchSession(migration.sessionFile, { withSession: async next => {
+				commitMigration(migration!);
 				// Only the replacement context is legal after session invalidation.
 				next.ui.notify(`Workspace: ${fresh.target}\nConversation retained. Use pi -r from this directory after restarting. Goal and supervisor remain paused.`, "info");
 			} });
@@ -93,9 +100,11 @@ export default function (pi: ExtensionAPI) {
 		}, 0);
 		timer.unref?.();
 	}
-	pi.on("session_start", () => { dead = false; clear(); });
+	pi.on("session_start", (_event,ctx) => { currentCtx=ctx;dead = false; clear(); });
 	pi.on("session_tree", () => { clear(); });
-	pi.on("session_shutdown", () => { dead = true; clear(); });
+	pi.on("session_shutdown", () => { currentCtx=undefined;dead = true; clear(); });
+	pi.events.on("project:scope",data=>{if(currentCtx){const project=identity(currentCtx);Object.assign(data as object,{projectId:project.id,pathMappings:project.previousPaths.map(source=>({source,target:project.currentPath}))});}});
+	pi.registerTool({name:"project_resolve",label:"Project: resolve evidence path",description:"Resolve an old evidence path through the stable workspace identity. Does not change historical evidence or read files.",parameters:Type.Object({path:Type.String()}),async execute(_id,args,_signal,_update,ctx){const project=identity(ctx);const resolved=resolveProjectPath(project.id,args.path);return result(resolved,{projectId:project.id,original:args.path,resolved});}});
 	pi.events.on("workbench:stop", () => { if (!internalStop) clear(); });
 	pi.on("agent_settled", event => { if (event.aborted) clear(); else schedule(); });
 	pi.registerTool({
@@ -129,6 +138,7 @@ export default function (pi: ExtensionAPI) {
 				const command = match?.[1] ?? "status";
 				let target = (match?.[2] ?? "").trim();
 				if (command === "status") { ctx.ui.notify(JSON.stringify(status(ctx), null, 2), "info"); return; }
+				if (command === "resolve") {ctx.ui.notify(resolveProjectPath(identity(ctx).id,target),"info");return;}
 				if (command === "revoke") { clear(); ctx.ui.notify("Workspace authorization revoked.", "info"); return; }
 				if (running || pending) throw new Error("A workspace change is already pending or running.");
 				let action: string = command;

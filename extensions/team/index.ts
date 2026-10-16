@@ -35,12 +35,15 @@ import { Type } from "typebox";
 import {
 	prepareWorkspaceLaunch,
 	WorkspaceSchema,
+	SandboxSchema,
 	type ResolvedWorkspace,
 } from "../workspace/launch.ts";
 import { promptAndWaitSafely } from "./rpc.ts";
-import { POLICY_ENV } from "../workspace/policy.ts";
-import { BRIDGE_ENV, MEMBER_ENV, communication, createParentBridge, mayCommunicate, validMemberName, type MessageRequest, type ParentBridge } from "./messaging.ts";
+import { POLICY_ENV, bridgeTools } from "../workspace/policy.ts";
+import { BRIDGE_ENV, MEMBER_ENV, communication, createParentBridge, mayCommunicate, validMemberName, type MessageRequest, type MessageResponse, type ParentBridge } from "./messaging.ts";
 import { ROSTER_TYPE, readRoster, type MemberDefinition, type RosterSnapshot } from "./roster.ts";
+import { newDelivery, descendants, type TaskRecord, type Delivery } from "./tasks.ts";
+import { JobGraph } from "./job-graph.ts";
 
 /** Shape of the launch plan returned by the lead-owned workspace helper. */
 type WorkspaceLaunchPlan = Awaited<ReturnType<typeof prepareWorkspaceLaunch>>;
@@ -84,6 +87,7 @@ interface TeamMember {
 	/** Resolves when the member's currently queued run settles. */
 	queue: Promise<void>;
 	activeJobId?: string;
+	contextJobId?: string;
 	waitAbort?: AbortController;
 	activeDone?: Promise<void>;
 	stopped?: boolean;
@@ -95,6 +99,17 @@ interface TeamMember {
 type NotifyPolicy = "batch" | "immediate" | "off";
 interface Completion {
 	id: string;
+	parentId?: string;
+	rootId?: string;
+	batchId?: string;
+	owner?: string;
+	inputHash?: string;
+	inputSummary?: string;
+	resultPaths?: string[];
+	deliveryId?: string;
+	sequence?: number;
+	timeoutLayer?: string;
+	processState?: string;
 	member: string;
 	goalId?: string;
 	ok: boolean;
@@ -109,6 +124,13 @@ interface BackgroundJob {
 	epoch: number;
 	cancelled: boolean;
 	finished: boolean;
+	record: TaskRecord;
+	ownDone: boolean;
+	ownResult?: { ok: boolean; reply?: string; error?: string };
+	childResults: Completion[];
+	resolve(result: { ok: boolean; reply?: string; error?: string }): void;
+	queueTimer?: ReturnType<typeof setTimeout>;
+	reportTimer?: ReturnType<typeof setTimeout>;
 }
 
 type TaskStatus = "todo" | "doing" | "done" | "blocked";
@@ -231,6 +253,10 @@ export default function (pi: ExtensionAPI) {
 	const messageAborts = new Set<AbortController>();
 	let deliveryError: string | undefined;
 	let currentCtx: ExtensionContext | undefined;
+	const taskTree = new Map<string, TaskRecord>();
+	let deliveries: Delivery[] = [];
+	let deliverySequence = 0;
+	const queuedDeliveries = new Set<string>();
 	const waitingFor = new Map<string, { from: string; to: string }>();
 	const restoreErrors = new Map<string, string>();
 
@@ -242,6 +268,9 @@ export default function (pi: ExtensionAPI) {
 			members: [...definitions.values()].filter(member => member.persistent),
 			pendingJobs: [...jobs.values()].map(job => ({ id: job.id, member: job.member.name, goalId: job.goalId })),
 			completedJobs: history.slice(-100),
+			taskTree: [...taskTree.values()],
+			deliveries: deliveries.slice(-4000),
+			board: tasks.map(task => ({...task})),
 		};
 		pi.appendEntry(ROSTER_TYPE, JSON.parse(JSON.stringify(snapshot)));
 	}
@@ -261,63 +290,62 @@ export default function (pi: ExtensionAPI) {
 
 	function deliver(results: Completion[]): boolean {
 		if (closing || wakeSuppressed || !wakeEnabled || !results.length) return false;
-		const request = { results };
+		const request = { results: results.filter(item=>!item.deliveryId||!queuedDeliveries.has(item.deliveryId)).sort((a,b)=>(a.sequence??0)-(b.sequence??0)) };
+		if(!request.results.length)return true;
 		pi.events.emit("team:before-wake", request);
 		if (!request.results.length) return true;
 		try {
-			pi.sendMessage({ customType: "team-results", display: true, details: { results: request.results },
-				content: "Background team work finished. Review the results and continue the user's task.\n\n" + request.results.map(result => `Member ${result.member}, job ${result.id}: ${result.ok ? "completed" : "FAILED"}\n${truncate(result.ok ? result.reply || "(empty reply)" : result.error || "Unknown failure", 12000)}`).join("\n\n"),
+			pi.sendMessage({ customType: "team-results", display: true, details: { results: request.results, deliveryIds: request.results.map(item=>item.deliveryId).filter(Boolean) },
+				content: "Background team work finished. Review the results and continue the user's task.\n\n" + request.results.map(result => `Member ${result.member}, job ${result.id}, batch ${result.batchId}, delivery ${result.deliveryId}, input ${result.inputHash}, artifacts ${(result.resultPaths??[]).join(", ")||"none"}: ${result.ok ? "completed" : "FAILED"}\n${truncate(result.ok ? result.reply || "(empty reply)" : result.error || "Unknown failure", 12000)}`).join("\n\n"),
 			}, { triggerTurn: true, deliverAs: "followUp" });
+			for(const item of request.results)if(item.deliveryId)queuedDeliveries.add(item.deliveryId);
 			deliveryError = undefined;
 			return true;
 		} catch (error) { deliveryError = String((error as Error)?.message ?? error); return false; }
 	}
 	function flush() {
-		if ([...jobs.values()].some(job => job.notify !== "off" && !job.goalId) || !notifications.length) return;
+		if ([...jobs.values()].some(job => job.notify !== "off" && !job.goalId && !job.record.parentId) || !notifications.length) return;
 		const results = notifications.slice();
 		if (deliver(results)) notifications.splice(0, results.length);
 	}
-	function finishJob(job: BackgroundJob, result: { ok: boolean; reply?: string; error?: string }, suppress = false) {
-		if (job.finished) return;
-		job.finished = true;
-		jobs.delete(job.id);
-		if (closing || job.epoch !== epoch) return;
-		const completion: Completion = { id: job.id, member: job.member.name, goalId: job.goalId, ...result };
-		history.push({ ...completion, reply: completion.reply ? truncate(completion.reply, 12000) : undefined });
-		if (history.length > 100) history.splice(0, history.length - 100);
-		persist();
-		pi.events.emit("team:job-end", completion);
-		if (!suppress && !wakeSuppressed && job.notify !== "off") {
-			if (job.notify !== "immediate" || !deliver([completion])) notifications.push(completion);
-		}
-		flush();
+	function finishJob(job: BackgroundJob, value: {ok:boolean;reply?:string;error?:string}, suppress=false): Completion {
+		const delivery=newDelivery(job.record,++deliverySequence);if(!job.record.parentId&&job.notify==="off")delivery.delivered=true;deliveries.push(delivery);
+		const completion:Completion={id:job.id,member:job.member.name,goalId:job.goalId,parentId:job.record.parentId,rootId:job.record.rootId,batchId:job.record.batchId,owner:job.record.owner,inputHash:job.record.inputHash,inputSummary:job.record.inputSummary,resultPaths:job.record.resultPaths,deliveryId:delivery.id,sequence:delivery.sequence,timeoutLayer:job.record.timeoutLayer,processState:job.record.processState,...value};
+		history.push({...completion,reply:completion.reply?truncate(completion.reply,12000):undefined});if(history.length>100)history.splice(0,history.length-100);
+		persist();pi.events.emit("team:job-end",completion);
+		if(!job.record.parentId&&!suppress&&!wakeSuppressed&&job.notify!=="off")if(job.notify!=="immediate"||!deliver([completion]))notifications.push(completion);
+		flush();return completion;
 	}
-	function cancelJob(job: BackgroundJob, reason: string) {
-		job.cancelled = true;
-		job.notify = "off";
-		finishJob(job, { ok: false, error: reason }, true);
-		if (job.member.activeJobId === job.id) job.member.waitAbort?.abort();
+	function acknowledge(ids:string[]){for(const delivery of deliveries)if(ids.includes(delivery.id))delivery.delivered=true;persist();}
+	const graph=new JobGraph<TeamMember>({jobs:jobs as any,records:taskTree,epoch:()=>epoch,closed:()=>closing,persist,
+		dispatch:(member,message,timeout,signal,job)=>dispatch(member,message,timeout,undefined,signal,job as BackgroundJob),
+		abort:job=>{if(job.member.activeJobId===job.id)job.member.waitAbort?.abort();},
+		start:job=>pi.events.emit("team:job-start",{id:job.id,member:job.member.name,goalId:job.goalId,parentId:job.record.parentId,rootId:job.record.rootId}),
+		waiting:job=>{job.member.status="idle";reportMember(job.member,"等待下游任务交付");},
+		finish:(job,value,suppress)=>finishJob(job as BackgroundJob,value,suppress),ack:acknowledge,
+	});
+	function cancelJob(job:BackgroundJob,reason:string){graph.cancel(job,reason);}
+	function startJob(member:TeamMember,message:string,timeout:number,notify:NotifyPolicy,signal?:AbortSignal,goalId?:string,parent?:BackgroundJob,queueTimeout=timeout,batchId?:string,attemptOf?:string){
+		const scope:{goalId?:string}={goalId:parent?.goalId??goalId};if(!scope.goalId)pi.events.emit("team:scope",scope);
+		const projectScope:{projectId?:string}={};pi.events.emit("project:scope",projectScope);
+		const started=graph.start(member,message,timeout,notify,{signal,goalId:scope.goalId,parent,queueTimeout,batchId,attemptOf});
+		const record=taskTree.get(started.id);if(record){record.projectId=parent?.record.projectId??projectScope.projectId;persist();}
+		return started;
 	}
-	function startJob(member: TeamMember, message: string, timeout: number, notify: NotifyPolicy, signal?: AbortSignal, goalId?: string) {
-		const scope: { goalId?: string } = { goalId };
-		if (!goalId) pi.events.emit("team:scope", scope);
-		const job: BackgroundJob = { id: `${Date.now().toString(36)}-${uid()}`, member, goalId: scope.goalId, notify, epoch, cancelled: false, finished: false };
-		jobs.set(job.id, job);
-		persist();
-		pi.events.emit("team:job-start", { id: job.id, member: member.name, goalId: job.goalId });
-		const result = dispatch(member, message, timeout, undefined, signal, job).then(
-			result => { finishJob(job, result); return result; },
-			error => { const result = { ok: false, error: String(error) }; finishJob(job, result); return result; },
-		);
-		return { id: job.id, result };
-	}
-	function background(member: TeamMember, message: string, timeout: number, notify: NotifyPolicy) {
-		return startJob(member, message, timeout, notify).id;
-	}
+	function background(member:TeamMember,message:string,timeout:number,notify:NotifyPolicy,queueTimeout=timeout,batchId?:string){return startJob(member,message,timeout,notify,undefined,undefined,undefined,queueTimeout,batchId).id;}
+	pi.events.on("team:delivery-ack", data => {acknowledge((data as {ids:string[]}).ids);});
+	pi.on("message_end", event => {
+		const message=event.message as any;
+		if((message.customType==="team-results"||message.customType==="team-member-message")&&Array.isArray(message.details?.deliveryIds))acknowledge(message.details.deliveryIds);
+	});
 	pi.events.on("team:cancel-goal", data => {
 		const goalId = (data as { goalId?: string } | undefined)?.goalId;
 		if (!goalId) return;
-		for (const job of [...jobs.values()]) if (job.goalId === goalId) cancelJob(job, "Goal stopped by the user.");
+		const request=data as {goalId?:string;pending?:Promise<unknown>[]};
+		const affected=[...jobs.values()].filter(job=>job.goalId===goalId);
+		const pending=[...new Set(affected.map(job=>job.member.queue))];
+		for (const job of affected) cancelJob(job, "Goal stopped by the user.");
+		request.pending?.push(Promise.allSettled(pending));
 	});
 
 	pi.events.on("agent-monitor:history",data=>{
@@ -425,8 +453,9 @@ export default function (pi: ExtensionAPI) {
 		const queuedGeneration = taskGeneration;
 		const queuedMemberGeneration = member.cancellationGeneration ?? 0;
 		const run = member.queue.then(async () => {
-			if (queuedMemberGeneration !== (member.cancellationGeneration ?? 0) || queuedGeneration !== taskGeneration || closing || member.stopped || members.get(member.name) !== member || signal?.aborted || (job && (job.cancelled || job.epoch !== epoch))) return { ok: false, error: "Team task was cancelled." };
+			if (queuedMemberGeneration !== (member.cancellationGeneration ?? 0) || queuedGeneration !== taskGeneration || closing || member.stopped || members.get(member.name) !== member || signal?.aborted || (job && (job.cancelled || job.finished || job.epoch !== epoch))) return { ok: false, error: "Team task was cancelled." };
 			member.activeJobId = job?.id;
+			if(job){graph.markRunning(job);member.contextJobId=job.id;}
 			let markActiveDone:()=>void=()=>{};
 			const activeDone=new Promise<void>(resolve=>{markActiveDone=resolve;});
 			member.activeDone=activeDone;
@@ -446,7 +475,9 @@ export default function (pi: ExtensionAPI) {
 			const abort = () => waitAbort.abort();
 			signal?.addEventListener("abort", abort, { once: true });
 			try {
-				const events = await promptAndWaitSafely(member.client, message, undefined, timeoutMs, waitAbort.signal);
+				const assigned=job?`[Task ${job.id}; parent ${job.record.parentId??"lead"}; batch ${job.record.batchId}; project ${job.record.projectId??"unbound"}; goal ${job.goalId??"none"}]\n${message}`:message;
+				const events = await promptAndWaitSafely(member.client, assigned, undefined, timeoutMs, waitAbort.signal);
+				if(job)for(const event of events as any[]){const data=event.result?.details??event.message?.details;if(data&&typeof data==="object"){const paths=[data.receiptPath,data.logPath,...(Array.isArray(data.artifactPaths)?data.artifactPaths:[])];for(const location of paths)if(typeof location==="string"&&job.record.resultPaths.length<200&&!job.record.resultPaths.includes(location))job.record.resultPaths.push(location);}}
 				const assistant = events.filter(event => event?.type === "message_end" && event.message?.role === "assistant").at(-1)?.message;
 				if (assistant?.stopReason === "error" || assistant?.stopReason === "aborted") throw new Error(assistant.errorMessage || `Member response ${assistant.stopReason}.`);
 				if (!assistant) throw new Error("Member completed without an assistant response.");
@@ -504,6 +535,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function disposeAll(suppressEvents = false): Promise<void> {
+		graph.dispose();
 		if (!suppressEvents) for (const job of [...jobs.values()]) cancelJob(job, "Team disbanded.");
 		epoch++;
 		for (const job of jobs.values()) job.cancelled = true;
@@ -533,12 +565,22 @@ export default function (pi: ExtensionAPI) {
 
 	async function restoreRoster(ctx: ExtensionContext) {
 		currentCtx = ctx;
+		taskTree.clear();deliveries=[];deliverySequence=0;queuedDeliveries.clear();tasks.length=0;
 		restoreFailed = false;
 		restoreErrors.clear();
 		let snapshot: RosterSnapshot | undefined;
 		try { snapshot = readRoster(ctx.sessionManager.getBranch()); }
 		catch (error) { restoreFailed = true; restoreErrors.set("roster", String((error as Error)?.message ?? error)); return; }
 		if (!snapshot) return;
+		for(const record of snapshot.taskTree??[]){
+			if(["queued","running","waiting"].includes(record.state)){record.state="interrupted";record.error="Session restarted. Work was not replayed; use team_resume explicitly.";record.processState="unknown";}
+			taskTree.set(record.id,record);
+		}
+		deliveries=snapshot.deliveries??[];deliverySequence=Math.max(0,...deliveries.map(d=>d.sequence));
+		const acknowledged=new Set<string>();for(const entry of ctx.sessionManager.getBranch() as any[]){const message=entry.message??entry;if(Array.isArray(message.details?.deliveryIds))for(const id of message.details.deliveryIds)acknowledged.add(id);}
+		for(const delivery of deliveries)if(acknowledged.has(delivery.id))delivery.delivered=true;
+		tasks.push(...(snapshot.board??[]));
+		notifications=snapshot.completedJobs.filter(item=>item.deliveryId&&deliveries.some(d=>d.id===item.deliveryId&&!d.delivered&&d.to==="lead")&&!item.goalId);
 		const pendingMembers = new Set(snapshot.pendingJobs.map(job => job.member));
 		history.push(...snapshot.completedJobs.slice(-100));
 		// Install the complete snapshot before any child can cause another write.
@@ -653,29 +695,57 @@ export default function (pi: ExtensionAPI) {
 	// team_send
 	// -------------------------------------------------------------------
 
-	async function routeMemberMessage(from: string, request: MessageRequest, signal: AbortSignal): Promise<{ ok: boolean; reply?: string; error?: string; jobId?: string }> {
-		if(wakeSuppressed || closing || signal.aborted)return {ok:false,error:"Team is globally stopped; the lead must issue new work."};
-		if (request.to === "lead") {
-			if (request.wait) return { ok: false, error: "Messages to the lead require wait:false." };
-			try {
-				pi.sendMessage({ customType: "team-member-message", content: `Message from ${from}:\n\n${request.message}`, display: true, details: { from, to: "lead" } }, { triggerTurn: true, deliverAs: "followUp" });
-				return { ok: true, jobId: request.id };
-			} catch (error) { return { ok: false, error: String((error as Error)?.message ?? error) }; }
+	async function routeMemberMessage(from:string,request:MessageRequest,signal:AbortSignal):Promise<Omit<MessageResponse,"version"|"id">>{
+		if(wakeSuppressed||closing||signal.aborted)return {ok:false,error:"Team is stopped; requests were not accepted."};
+		const sender=members.get(from);if(!sender)return {ok:false,error:"Unknown sender."};
+		const parent=jobs.get(sender.activeJobId??sender.contextJobId??"");
+		const operation=request.operation??"task";
+		if(["wait","status","cancel"].includes(operation)){
+			if(!parent)return {ok:false,error:"No active assigned task. Ask the lead to dispatch a task before waiting."};
+			const allowed=descendants(taskTree.values(),parent.id);
+			if(operation==="cancel"){
+				if(!request.taskId||request.taskId===parent.id||!allowed.has(request.taskId))return {ok:false,error:"Only this task's descendants may be cancelled."};
+				const child=jobs.get(request.taskId);if(child)cancelJob(child,`Cancelled by owner ${from}`);
+			}
+			if(operation==="wait"&&request.blockedReason){
+				graph.block(parent,request.blockedReason);
+				const delivery=newDelivery(parent.record,++deliverySequence);deliveries.push(delivery);
+				const owner=parent.record.parentId?jobs.get(parent.record.parentId):undefined;
+				const blocked={id:parent.id,deliveryId:delivery.id,sequence:delivery.sequence,ok:false,error:`Blocked: ${request.blockedReason}`};
+				if(owner)graph.note(owner,blocked,true);
+				else if(wakeEnabled){pi.sendMessage({customType:"team-member-message",display:true,content:`Task ${parent.id} blocked: ${request.blockedReason}`,details:{deliveryIds:[delivery.id],taskId:parent.id}},{triggerTurn:true,deliverAs:"followUp"});}
+				pi.events.emit("team:blocked",{goalId:parent.goalId,taskId:parent.id,reason:request.blockedReason});persist();
+			}
+			const pending=[...jobs.values()].filter(job=>job.id!==parent.id&&allowed.has(job.id)).map(job=>({id:job.id,member:job.member.name,state:job.record.state}));
+			if(operation==="wait"&&request.reportAfterMs&&pending.length)graph.reportAfter(parent,request.reportAfterMs);
+			return {ok:true,jobId:parent.id,reply:JSON.stringify({taskId:parent.id,goalId:parent.goalId,blocked:!!parent.record.blockedReason,pending,tree:[...taskTree.values()].filter(task=>allowed.has(task.id)).map(({message,...task})=>task)})};
 		}
-		const sender = members.get(from);
-		const recipient = members.get(request.to);
-		const roster = new Map([...members].map(([name, member]) => [name, { communication: member.definition.communication }]));
-		if (!sender || !recipient || !mayCommunicate(from, request.to, roster)) return { ok: false, error: "TEAM_MESSAGE_DENIED: communication ACL denied." };
-		const forwarded = `[Message from teammate ${from}]\n\n${request.message}`;
-		const controller=new AbortController();messageAborts.add(controller);
-		const abort=()=>controller.abort();signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort();
-		const resultPromise=dispatch(recipient, forwarded, Math.max(1, request.expiresAt - Date.now()), undefined, controller.signal).finally(()=>{messageAborts.delete(controller);signal.removeEventListener("abort",abort);});
-		if (!request.wait) {
-			void resultPromise.catch(() => {});
-			return { ok: true, jobId: request.id };
+		if(request.to==="lead"){
+			if(request.wait)return {ok:false,error:"Messages to the lead require wait:false."};
+			if(queuedDeliveries.has(request.id)||deliveries.some(d=>d.id===request.id))return {ok:true,jobId:request.id};
+			const identity=parent?.record;
+			const delivery:Delivery={id:request.id,taskId:identity?.id??request.id,parentId:identity?.parentId,batchId:identity?.batchId??request.id,inputHash:identity?.inputHash??"note",resultPaths:identity?.resultPaths??[],from,to:"lead",sequence:++deliverySequence,createdAt:Date.now(),delivered:false};
+			deliveries.push(delivery);persist();
+			try{pi.sendMessage({customType:"team-member-message",content:`Message from ${from}; task ${delivery.taskId}; delivery ${delivery.id}; sequence ${delivery.sequence}:\n\n${request.message}`,display:true,details:{...delivery,deliveryIds:[delivery.id]}},{triggerTurn:true,deliverAs:"followUp"});queuedDeliveries.add(delivery.id);return {ok:true,jobId:request.id};}catch(error){return {ok:false,error:String(error)};}
 		}
-		const result = await resultPromise;
-		return result.ok ? { ok: true, reply: result.reply } : { ok: false, error: result.error };
+		const recipient=await reusableMember(request.to);
+		const roster=new Map([...members].map(([name,member])=>[name,{communication:member.definition.communication}]));
+		if(!recipient||!mayCommunicate(from,request.to,roster))return {ok:false,error:"TEAM_MESSAGE_DENIED: communication ACL denied."};
+		let ancestor=parent;while(ancestor){if(ancestor.member===recipient){
+			if(operation==="note"){
+				const delivery:Delivery={id:request.id,taskId:parent!.id,parentId:parent!.record.parentId,batchId:parent!.record.batchId,inputHash:parent!.record.inputHash,resultPaths:parent!.record.resultPaths,from,to:recipient.name,sequence:++deliverySequence,createdAt:Date.now(),delivered:false};
+				if(!deliveries.some(d=>d.id===request.id)){deliveries.push(delivery);graph.note(ancestor,{id:parent!.id,deliveryId:delivery.id,sequence:delivery.sequence,resultPaths:delivery.resultPaths,ok:true,reply:request.message});persist();}
+				return {ok:true,jobId:request.id};
+			}
+			return {ok:false,error:"Task cycle denied: use operation:'note' for a report, or wait for descendant deliveries instead of assigning back to an ancestor."};
+		}ancestor=ancestor.record.parentId?jobs.get(ancestor.record.parentId):undefined;}
+		const forwarded=`[Message from teammate ${from}; parent task ${parent?.id??"unscoped"}]\n\n${request.message}`;
+		const controller=new AbortController();const abort=()=>controller.abort();
+		if(request.wait){messageAborts.add(controller);signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort();}
+		const job=startJob(recipient,forwarded,Math.max(1,request.expiresAt-Date.now()),"off",request.wait?controller.signal:undefined,parent?.goalId,parent);
+		if(request.wait){const record=taskTree.get(job.id);if(record)record.deliveryMode="reply";}
+		if(!request.wait)return {ok:true,jobId:job.id};
+		try{const value=await job.result;return value.ok?{ok:true,jobId:job.id,reply:value.reply}:{ok:false,jobId:job.id,error:value.error,timeoutLayer:taskTree.get(job.id)?.timeoutLayer,processState:taskTree.get(job.id)?.processState};}finally{messageAborts.delete(controller);signal.removeEventListener("abort",abort);}
 	}
 
 	async function spawnMember(params: any, ctx: any, onUpdate?: any) {
@@ -704,7 +774,7 @@ export default function (pi: ExtensionAPI) {
 		const comm = communication(params.communication);
 		const persistent = params.__definition?.persistent ?? params.persistent !== false;
 		const sessionId = params.__definition?.sessionId ?? (persistent ? randomUUID() : undefined);
-			const effectiveTools = params.tools ? [...new Set([...params.tools, "team_message"])] : params.tools;
+			const effectiveTools = params.tools ? [...new Set([...params.tools, ...bridgeTools])] : params.tools;
 
 			const systemPrompt = [
 				`You are "${name}", a member of an agent team led by another agent.`,
@@ -713,6 +783,7 @@ export default function (pi: ExtensionAPI) {
 				"When you finish a task, reply with a concise, self-contained report: what you did, the files or commands involved, key findings, and any blocker.",
 				"That reply is the only thing the lead sees, so do not assume the lead has read your files or tool output.",
 				"Use the provided team_message tool (workspace_team_message in restricted workspaces) to message allowed teammates or notify the lead with wait:false. The parent validates each pair's ACL.",
+"Downstream tasks belong to your assigned task. After dispatching with wait:false, call team_wait ALONE to sleep until child deliveries arrive; use reportAfterMs only for an agreed progress check. Read receipt/log paths directly, do not ask the lead to rerun tests. A delivery ID is historical evidence: do not execute it twice.",
 				params.systemPrompt ?? "",
 			]
 				.filter((part) => part && part.trim())
@@ -844,10 +915,11 @@ export default function (pi: ExtensionAPI) {
 		const member = members.get(name);
 		if (!member) return memberNotFound(name);
 		member.cancellationGeneration = (member.cancellationGeneration ?? 0) + 1;
-		const pending = member.queue;
+		const affected=new Set<string>();for(const job of jobs.values())if(job.member===member)for(const id of descendants(taskTree.values(),job.id))affected.add(id);
+		const pending=[...new Set([...jobs.values()].filter(job=>affected.has(job.id)).map(job=>job.member.queue))];
 		for (const job of [...jobs.values()]) if (job.member === member) cancelJob(job, reason);
 		member.waitAbort?.abort(reason);
-		await pending;
+		await Promise.allSettled(pending);
 		persist();
 		return { content:[{type:"text" as const,text:`Cancelled current and queued work for ${name}. Member identity and conversation are retained.`}],details:{name,cancelled:true,retained:true,processAlive:!member.stopped,sessionId:member.definition.sessionId} };
 	}
@@ -862,10 +934,10 @@ export default function (pi: ExtensionAPI) {
 			if(params.name)return cancelMember(params.name,reason);
 			const job=jobs.get(params.jobId!);
 			if(!job)return {content:[{type:"text" as const,text:"Unknown or already finished job."}],details:{jobId:params.jobId},isError:true};
-			const active=job.member.activeJobId===job.id;
-			const pending=job.member.activeDone;
+			const affected=descendants(taskTree.values(),job.id);
+			const pending=[...new Set([...jobs.values()].filter(child=>affected.has(child.id)).map(child=>child.member.queue))];
 			cancelJob(job,reason);
-			if(active)await pending;
+			await Promise.allSettled(pending);
 			return {content:[{type:"text" as const,text:`Cancelled job ${job.id}; member ${job.member.name} retained.`}],details:{jobId:job.id,name:job.member.name,cancelled:true,retained:true}};
 		},
 	});
@@ -881,6 +953,40 @@ export default function (pi: ExtensionAPI) {
 		return members.get(name);
 	}
 
+	pi.registerTool({name:"team_configure",label:"Team: configure execution",executionMode:"sequential",description:"Enable an isolated command backend or disable execution for an idle restricted member. Preserves its workspace roots, file access, identity and conversation; never grants unrestricted host tools.",parameters:Type.Object({name:Type.String(),execution:Type.Union([Type.Literal("disabled"),Type.Literal("sandbox")]),sandbox:Type.Optional(SandboxSchema)}),
+		async execute(_id,args,_signal,_update,ctx){
+			const member=members.get(args.name);if(!member)return memberNotFound(args.name);
+			if(!member.workspace)return {content:[{type:"text" as const,text:"This tool configures restricted members only."}],details:undefined,isError:true};
+			if([...jobs.values()].some(job=>job.member===member)||member.status==="working")return {content:[{type:"text" as const,text:"Finish or cancel this member's tasks before changing its execution backend."}],details:undefined,isError:true};
+			try{
+				const workspace={...member.workspace,execution:args.execution,sandbox:args.execution==="sandbox"?args.sandbox:undefined};
+				const tools=member.definition.tools?member.definition.tools.filter(tool=>tool!=="exec"):undefined;
+				if(tools&&args.execution==="sandbox")tools.push("exec");
+				const plan=await prepareWorkspaceLaunch({baseCwd:ctx.cwd,cwd:member.cwd,workspace,tools});
+				const saved=JSON.parse(JSON.stringify(member.definition));const updated={...saved,workspace:plan.workspace,tools};
+				member.stopped=true;await member.bridge?.stop();await member.client.stop();removePromptFile(member);members.delete(member.name);
+				const changed=await spawnMember({__definition:updated},ctx);
+				if(changed.isError){await spawnMember({__definition:saved},ctx);return changed;}
+				return changed;
+			}catch(error){return {content:[{type:"text" as const,text:String((error as Error).message)}],details:undefined,isError:true};}
+		},
+	});
+	pi.registerTool({name:"team_tree",label:"Team: task tree",description:"Inspect durable task ancestry, queue/run state, delivery identities, artifacts and timeout layers. Restored tasks stay interrupted until explicitly resumed.",parameters:Type.Object({taskId:Type.Optional(Type.String())}),
+		async execute(_id,params){const selected=params.taskId?descendants(taskTree.values(),params.taskId):undefined;const records=[...taskTree.values()].filter(t=>!selected||selected.has(t.id)).map(({message,...record})=>record);return {content:[{type:"text" as const,text:truncate(JSON.stringify(records,null,2))}],details:{tasks:records,deliveries:deliveries.filter(d=>!selected||selected.has(d.taskId))}};},
+	});
+	pi.registerTool({name:"team_resume",label:"Team: resume saved task",executionMode:"sequential",description:"Explicitly redispatch a saved interrupted/failed/cancelled task as a new attempt. Never automatically rerun historical results.",parameters:Type.Object({taskId:Type.String()}),
+		async execute(_id,params){
+			const saved=taskTree.get(params.taskId);
+			if(!saved||!["interrupted","cancelled","failed","blocked"].includes(saved.state))return {content:[{type:"text" as const,text:"Only interrupted, cancelled, blocked or failed tasks can be resumed."}],details:undefined,isError:true};
+			const member=await reusableMember(saved.member);if(!member)return memberNotFound(saved.member);wakeSuppressed=false;
+			const scope:{projectId?:string;pathMappings?:unknown}={};pi.events.emit("project:scope",scope);
+			const message=`[Explicitly resumed attempt of ${saved.id}. Historical path mappings: ${JSON.stringify(scope.pathMappings??[])}. Resolve evidence paths against the current workspace; do not alter old evidence.]\n${saved.message}`;
+			const parent=saved.parentId?jobs.get(saved.parentId):undefined;
+			const next=startJob(member,message,saved.runTimeoutMs,parent?"off":"batch",undefined,parent?.goalId,parent,saved.queueTimeoutMs,undefined,saved.id);
+			const old=jobs.get(saved.id);if(old)cancelJob(old,"Replaced by an explicitly resumed attempt.");
+			return {content:[{type:"text" as const,text:`Resumed ${saved.id} as ${next.id}.`}],details:{jobId:next.id,attemptOf:saved.id}};
+		},
+	});
 	pi.registerTool({
 		name: "team_send",
 		label: "Team: send to member",
@@ -901,6 +1007,7 @@ export default function (pi: ExtensionAPI) {
 				}),
 			),
 			notify: Type.Optional(StringEnum(["batch", "immediate", "off"] as const, { description: "Async notification policy; default batch wakes after all background jobs drain. Goal mode controls its own wakeups." })),
+			queueTimeoutMs: Type.Optional(Type.Integer({minimum:1,maximum:2147483647,description:"Maximum queue wait, separate from member response timeoutMs."})),
 			timeoutMs: Type.Optional(
 				Type.Number({ minimum: 1, maximum: 2147483647, description: `Max wait in ms. Default ${DEFAULT_TIMEOUT_MS}.` }),
 			),
@@ -912,7 +1019,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (params.wait === false) {
 				wakeSuppressed=false;
-				const jobId = background(member, params.message, timeout, params.notify ?? "batch");
+				const jobId = background(member, params.message, timeout, params.notify ?? "batch",params.queueTimeoutMs??timeout);
 				return {
 					content: [
 						{
@@ -924,12 +1031,8 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const result = await dispatch(member, params.message, timeout, (partial) => {
-				onUpdate?.({
-					content: [{ type: "text", text: `[${member.name}] ${partial.slice(-1500)}` }],
-					details: { to: member.name, partial: true },
-				});
-			}, signal);
+			const tracked=startJob(member,params.message,timeout,"off",signal,undefined,undefined,params.queueTimeoutMs??timeout);
+			const result = await tracked.result;
 
 			if (!result.ok) {
 				return {
@@ -939,7 +1042,7 @@ export default function (pi: ExtensionAPI) {
 							text: `Member "${member.name}" failed: ${result.error}\n\nRoster: ${rosterSummary()}`,
 						},
 					],
-					details: { to: member.name, error: result.error },
+					details: { to: member.name, error: result.error, jobId:tracked.id,timeoutLayer:taskTree.get(tracked.id)?.timeoutLayer,processState:taskTree.get(tracked.id)?.processState,resultPaths:taskTree.get(tracked.id)?.resultPaths },
 					isError: true,
 				};
 			}
@@ -951,7 +1054,7 @@ export default function (pi: ExtensionAPI) {
 						text: `Reply from ${member.name} (${member.role}):\n\n${truncate(result.reply ?? "(empty reply)")}`,
 					},
 				],
-				details: { to: member.name, turns: member.turns, status: member.status },
+				details: { to: member.name, jobId:tracked.id,turns: member.turns, status: member.status,resultPaths:taskTree.get(tracked.id)?.resultPaths },
 			};
 		},
 	});
@@ -980,9 +1083,10 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			const timeout = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+			const batchId=randomUUID();
 
 			if (params.wait === false) {
-				const jobIds = all.map(member => background(member, params.message, timeout, params.notify ?? "batch"));
+				const jobIds = all.map(member => background(member, params.message, timeout, params.notify ?? "batch",timeout,batchId));
 				return {
 					content: [
 						{ type: "text" as const, text: `Broadcast ${jobIds.length} async jobs. Completion wakes the lead automatically unless notifications are off.` },
@@ -992,7 +1096,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const results = await Promise.all(
-				all.map(async (member) => ({ member, result: await dispatch(member, params.message, timeout, undefined, signal) })),
+				all.map(async (member) => ({ member, result: await startJob(member, params.message, timeout, "off", signal,undefined,undefined,timeout,batchId).result })),
 			);
 
 			const lines = results.map(({ member, result }) =>
@@ -1179,7 +1283,7 @@ export default function (pi: ExtensionAPI) {
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
 				};
-				tasks.push(task);
+				tasks.push(task);persist();
 				return {
 					content: [{ type: "text" as const, text: `Added task ${task.id}: ${task.title}` }],
 					details: task,
@@ -1197,7 +1301,7 @@ export default function (pi: ExtensionAPI) {
 				if (params.status) task.status = params.status;
 				if (params.assignee) task.assignee = params.assignee;
 				if (params.note !== undefined) task.note = params.note;
-				task.updatedAt = Date.now();
+				task.updatedAt = Date.now();persist();
 				return {
 					content: [{ type: "text" as const, text: `Updated task ${task.id} → ${task.status}.` }],
 					details: task,

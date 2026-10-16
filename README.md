@@ -2,12 +2,15 @@
 
 这是一个非官方的 Pi 扩展包，与 Pi 上游项目没有隶属或背书关系。
 
-当前版本 **1.3.0** 增加工作区重命名、切换和对话延续，支持手动操作及一次性授权 AI 执行；详见 [工作区迁移说明](extensions/project/README.md)。全局停止、成员取消、宽屏侧栏等见 [界面与中断说明](docs/ui-and-interruption-1.1.0.md)。历史验证记录保留在 [验证记录](docs/verification-1.0.1.md)。
+当前版本 **1.4.0** 增加稳定工作区身份、Podman 受限执行、父子任务树、交付去重和分层超时；详见 [任务编排说明](docs/task-orchestration.md)。工作区重命名、切换和对话延续见 [工作区迁移说明](extensions/project/README.md)。全局停止、成员取消、宽屏侧栏等见 [界面与中断说明](docs/ui-and-interruption-1.1.0.md)。历史验证记录保留在 [验证记录](docs/verification-1.0.1.md)。
 
-适用于 Pi 1.3.0 的本地功能包，并保留 Pi 1.2.0 的历史兼容记录；1.3.0 已在 Windows 与 Debian WSL 实际安装并通过兼容测试，见 [升级评估](docs/pi-1.3.0-compatibility.md)。支持 Windows 与 WSL/Linux，包含：
+适用于 Pi 1.3.0 的本地功能包，并保留 Pi 1.2.0 的历史兼容记录；当前版本 1.4.0 已在 Windows 与 Debian WSL 的 Pi 1.3.0 环境通过兼容测试，见 [升级评估](docs/pi-1.3.0-compatibility.md)。支持 Windows 与 WSL/Linux，包含：
 
 | 功能 | 用法 |
 | --- | --- |
+| 受限容器执行 | `workspace_exec`，需要显式配置本地 Podman 镜像；支持 Python、Yosys、Verilator 等镜像内工具 |
+| 统一任务树 | `team_tree`、`team_wait`、`team_resume`；下游任务、交付收据和 Goal 等待统一关联 |
+| 稳定工作区身份 | `project_status`、`project_resolve`；改名后路径映射不修改旧证据 |
 | 工作区重命名与对话延续 | `/project rename`、`switch`；AI 需先经 `/project allow` 一次性授权 |
 | 持久智能体团队 | `team_spawn`、`team_send`、`team_broadcast`、`team_disband` |
 | 后台完成后唤醒 | 异步派活 `wait:false`；完成/失败自动送回主对话 |
@@ -56,7 +59,7 @@ pi list
 pi remove /path/to/pi-mission-control
 ```
 
-`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.3.0.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
+`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.4.0.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
 
 ## 已经安装散装扩展时
 
@@ -98,7 +101,7 @@ pi remove /path/to/pi-mission-control
 
 ## 安全边界
 
-这是运行在本地 Pi 进程中的自动化扩展，不是操作系统沙箱。工作区限制只约束成员可调用的文件工具；`execution: "sandbox"` 在没有沙箱后端时会拒绝启动。`goal_finish` 可以通过当前会话的 `bash` 工具执行配置的验证命令，不受限成员也可以使用 Pi 授予的工具。详见 [安全政策](SECURITY.md)。
+这是运行在本地 Pi 进程中的自动化扩展，不是操作系统沙箱。默认受限成员只能使用文件工具；显式配置 `execution: "sandbox"` 和本地 Podman 镜像后，成员可以通过 `workspace_exec` 在隔离容器中运行镜像内命令。`goal_finish` 仍可以通过当前会话的 `bash` 工具执行配置的验证命令，不受限成员也可以使用 Pi 授予的工具。详见 [安全政策](SECURITY.md) 和 [任务编排说明](docs/task-orchestration.md)。
 
 ## 成员间通信
 
@@ -174,14 +177,15 @@ Pi 内置重试负责已识别的网络、限流和服务端错误。`retry-any`
 
 Windows 使用 `C:/projects/example` 这类原生路径；WSL 使用 `/home/...` 或 `/mnt/c/...`。配置是共享的也不代表文件路径能在两种系统中原样互用。
 
-工作区限制是文件工具层限制，受限成员不能执行主机命令、MCP 或再派生智能体；它不是操作系统沙箱。当前没有实现可执行命令的沙箱后端，`execution:sandbox` 会报错而不降级为主机执行。
+工作区限制是文件工具和可选容器后端的访问控制，受限成员不能执行宿主机命令、MCP 或再派生智能体；容器后端仍需本地 Podman 和用户显式配置的镜像。没有后端或镜像时会拒绝启动，不会降级成宿主机执行。
 
 详见各功能说明：
 
 - [Goal 与唤醒](extensions/goal/README.md)
 - [TUI 状态区](extensions/agent-monitor/README.md)
+- [任务树与受限执行](docs/task-orchestration.md)
 - [工作区重命名与对话延续](extensions/project/README.md)
-- [工作区访问限制](extensions/workspace/README.md)
+- [工作区访问限制与容器执行](extensions/workspace/README.md)
 
 ## Pi 源码参考
 

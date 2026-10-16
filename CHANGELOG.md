@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- Added stable workspace identities and historical path resolution without rewriting session messages or evidence.
+- Added an opt-in Podman sandbox backend for restricted members with immutable local images, no network, bounded resources, receipts, logs, cancellation, timeouts, and guarded artifact export.
+- Added `team_configure` to enable the sandbox backend for an idle restricted member without replacing its identity or conversation.
+- Added a persistent parent/child task graph with Goal propagation, task batches, delivery IDs, input hashes, artifact paths, ordered deduplication, downstream waiting, scheduled reports, blockers, explicit resume, and cascading cancellation.
+- Added separate queue, message, member, and process timeout reporting, plus retained recovery state after reload.
+- Added offline and local Podman regression coverage for hardware-toolchain execution with Yosys and Verilator.
+
 ## 1.3.0
 
 - Added `/project rename` and `/project switch` to keep conversation history while rebuilding Pi's runtime for the new directory. Continued sessions are discoverable from the target directory on restart.

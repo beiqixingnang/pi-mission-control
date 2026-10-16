@@ -33,7 +33,23 @@ export default function (pi: ExtensionAPI) {
 						}
 					}
 					let result: unknown;
-					if (last?.role === "toolResult") result = { isError: last.isError, content: last.content, details: (last as any).details };
+					const latestUser=textOf(users.at(-1)??{content:""});
+					if(latestUser.startsWith("[Task ")&&(latestUser.includes("descendant delivery")||latestUser.includes("scheduled report"))){
+						if(command.reviewReceipt&&!(last?.role==="toolResult"&&String(last.toolName)==="workspace_read")){
+							const receipt=latestUser.match(/artifacts ([^\n]+)/)?.[1]?.split(", ")[0];
+							if(!receipt)throw new Error("No receipt path in descendant delivery");
+							message.content=[{type:"toolCall",id:`fixture-${Date.now()}`,name:"workspace_read",arguments:{path:receipt}}];message.stopReason="toolUse";
+						}else result={reviewed:true,receipt:command.reviewReceipt?textOf(last):undefined,delivery:latestUser};
+					}
+					else if(command.op==="block"){
+						if(last?.role==="toolResult")result={blocked:true};else{message.content=[{type:"toolCall",id:`fixture-${Date.now()}`,name:"workspace_team_wait",arguments:{blockedReason:command.reason??"Missing toolchain fixture"}}];message.stopReason="toolUse";}
+					}
+					else if(command.op==="delegate"){
+						const action=last?.role==="toolResult"&&String(last.toolName).endsWith("team_message")?"workspace_team_wait":"workspace_team_message";
+						if(last?.role==="toolResult"&&String(last.toolName).endsWith("team_wait"))result={waiting:true};
+						else{message.content=[{type:"toolCall",id:`fixture-${Date.now()}`,name:action,arguments:action.endsWith("team_wait")?{}:{to:command.to,message:'PROBE:'+JSON.stringify(command.child??{op:'remember',token:'CHILD_RECEIPT'}),wait:false}}];message.stopReason="toolUse";}
+					}
+					else if (last?.role === "toolResult") result = { isError: last.isError, content: last.content, details: (last as any).details };
 					else if (command.tool) {
 						message.content = [{ type: "toolCall", id: `fixture-${Date.now()}`, name: command.tool, arguments: command.args }];
 						message.stopReason = "toolUse";

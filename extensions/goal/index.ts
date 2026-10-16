@@ -6,6 +6,7 @@ import { StartParams, UpdateParams, goalSettings, type GoalPatch, type GoalSetti
 
 type Status = "running" | "waiting" | "paused" | "blocked" | "completed" | "stopped";
 interface Completion {
+	deliveryId?: string;
 	id: string;
 	member: string;
 	goalId?: string;
@@ -127,6 +128,7 @@ export default function (pi: ExtensionAPI) {
 		if (!goal) return "";
 		const fresh = goal.results.filter(result => !result.notified);
 		for (const result of fresh) result.notified = true;
+		pi.events.emit("team:delivery-ack",{ids:fresh.map(result=>result.deliveryId).filter(Boolean)});
 		return fresh.map(result => `Member ${result.member}, job ${result.id}: ${result.ok ? "completed" : "FAILED"}\n${result.ok ? result.reply || "(empty reply)" : result.error || "Unknown failure"}`).join("\n\n");
 	}
 	function continueContent(reason: string) {
@@ -284,6 +286,10 @@ export default function (pi: ExtensionAPI) {
 
 	// Event-bus query handlers MUST stay synchronous: the team extension reads
 	// these mutations immediately after emit().
+	pi.events.on("team:blocked", data => {
+		const blocked=data as {goalId?:string;taskId?:string;reason?:string};
+		if(goal&&blocked.goalId===goal.id&&blocked.reason)pause(`Task ${blocked.taskId} blocked: ${blocked.reason}`,"blocked");
+	});
 	pi.events.on("team:scope", data => {
 		if (data && typeof data === "object" && goal && !["completed", "stopped"].includes(goal.status)) (data as { goalId?: string }).goalId = goal.id;
 	});
@@ -322,7 +328,7 @@ export default function (pi: ExtensionAPI) {
 		name:"goal_stop",label:"Goal: stop",description:"Stop the active Goal, cancel its team jobs, suppress future automatic continuation and retain its history for inspection.",executionMode:"sequential",parameters:Type.Object({goalId:Type.String(),reason:Type.Optional(Type.String({maxLength:2000}))}),
 		async execute(_id,params){
 			if(!goal||["completed","stopped"].includes(goal.status)||params.goalId!==goal.id)return textResult("Goal ID does not match an unfinished active goal.",goal??null,true);
-			goal.status="stopped";goal.pauseCause=undefined;goal.reason=params.reason||"Stopped by the lead.";clearTimers();persist();pi.events.emit("team:cancel-goal",{goalId:goal.id});return textResult(`Goal stopped. Team identity and history are retained.\n${statusText()}`,goal);
+			goal.status="stopped";goal.pauseCause=undefined;goal.reason=params.reason||"Stopped by the lead.";clearTimers();persist();const cancellation={goalId:goal.id,pending:[] as Promise<unknown>[]};pi.events.emit("team:cancel-goal",cancellation);await Promise.allSettled(cancellation.pending);return textResult(`Goal stopped. Team identity and history are retained.\n${statusText()}`,goal);
 		},
 	});
 	pi.registerTool({
@@ -424,7 +430,9 @@ export default function (pi: ExtensionAPI) {
 					if (goal && !["completed", "stopped"].includes(goal.status)) {
 						goal.status = "stopped"; goal.pauseCause = undefined; goal.reason = rest || "Stopped by the user.";
 						clearTimers(); persist();
-						pi.events.emit("team:cancel-goal", { goalId: goal.id });
+						const cancellation={goalId:goal.id,pending:[] as Promise<unknown>[]};
+						pi.events.emit("team:cancel-goal", cancellation);
+						await Promise.allSettled(cancellation.pending);
 						if (!ctx.isIdle()) ctx.abort();
 					}
 				} else if (command === "resume") {

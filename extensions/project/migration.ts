@@ -6,11 +6,14 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir, SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 type ReadonlySessionManager = ExtensionContext["sessionManager"];
 import { readRoster, type RosterSnapshot } from "../team/roster.ts";
+import { getProjectIdentity,associateProjectSession,relocateProject } from "./identity.ts";
 
 export type Action = "rename" | "switch";
 export interface Plan { action: Action; source: string; target: string; }
 export interface PreparedMigration {
 	plan: Plan;
+	projectId: string;
+	sourceProjectId:string;
 	backup: string;
 	journal: string;
 	sessionFile: string;
@@ -70,7 +73,10 @@ export function prepareMigration(plan: Plan, manager: ReadonlySessionManager, ch
 	const storage = path.join(getAgentDir(), "project-migrations", randomUUID());
 	if (inside(plan.source, getAgentDir())) throw new Error("Pi's agent directory must be outside the workspace being migrated.");
 	fs.mkdirSync(storage, { recursive: true, mode: 0o700 });
-	const migration: PreparedMigration = { plan, backup: path.join(storage, "original.jsonl"), journal: path.join(storage, "migration.json"), sessionFile: "", createdFiles: [], processCwd: process.cwd(), renamed: false };
+	const sourceProject=getProjectIdentity(plan.source);
+	const targetProject=plan.action==="rename"?sourceProject:getProjectIdentity(plan.target);
+	associateProjectSession(sourceProject.id,manager.getSessionFile()!);
+	const migration: PreparedMigration = { plan, projectId:targetProject.id,sourceProjectId:sourceProject.id, backup: path.join(storage, "original.jsonl"), journal: path.join(storage, "migration.json"), sessionFile: "", createdFiles: [], processCwd: process.cwd(), renamed: false };
 	snapshot(manager, migration.backup);
 	writeJournal(migration, "prepared");
 	try {
@@ -119,7 +125,7 @@ export function prepareMigration(plan: Plan, manager: ReadonlySessionManager, ch
 		if (goal?.data && !["completed", "stopped"].includes(goal.data.status)) {
 			continuation.appendCustomEntry("goal-state", { ...goal.data, pending: [], status: "paused", pauseCause: undefined, reason: "Workspace changed. Review paths and verification commands, then explicitly /goal resume." });
 		}
-		continuation.appendCustomEntry("project-migration", { version: 1, ...plan, backup: migration.backup, previousSessionId: manager.getSessionId() });
+		continuation.appendCustomEntry("project-migration", { version: 1, ...plan, projectId:migration.projectId, sourceProjectId:migration.sourceProjectId, backup: migration.backup, previousSessionId: manager.getSessionId() });
 		continuation.appendCustomMessageEntry("project-location", `Workspace ${plan.action === "rename" ? "renamed" : "switched"}: ${plan.source} -> ${plan.target}. Resolve future relative paths from ${plan.target}. Historical messages are unchanged. Goal and supervisor are paused; review absolute paths in commands before resuming.`, true);
 		writeJournal(migration, "ready");
 		return migration;
@@ -127,6 +133,10 @@ export function prepareMigration(plan: Plan, manager: ReadonlySessionManager, ch
 		rollbackMigration(migration);
 		throw error;
 	}
+}
+export function commitMigration(migration:PreparedMigration){
+	if(migration.plan.action==="rename")relocateProject(migration.projectId,migration.plan.source,migration.plan.target,migration.sessionFile);
+	else associateProjectSession(migration.projectId,migration.sessionFile);
 }
 export function rollbackMigration(migration: PreparedMigration) {
 	for (const file of migration.createdFiles) fs.rmSync(file, { force: true });

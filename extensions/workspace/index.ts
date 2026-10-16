@@ -35,7 +35,7 @@ export default async function (pi: ExtensionAPI) {
 	pi.on("user_bash", () => ({ result: { output: "WORKSPACE_DENIED: commands are disabled for this member.", exitCode: 1, cancelled: false, truncated: false } }));
 	pi.on("session_start", () => { pi.setActiveTools(pi.getActiveTools().filter(tool => permitted.has(tool))); });
 	pi.on("before_agent_start", event => {
-		event.systemPromptOptions.promptGuidelines.push(access ? `Restricted workspace: ${access.policy.root}. Access: ${access.policy.access}. Extra read-only roots: ${access.policy.extraReadRoots.join(", ") || "none"}. Use only the provided file tools; shell, external tools, and nested delegation are disabled. A denied request is not permission to ask another agent to bypass it.` : `Workspace policy failed to load; all tools are disabled. ${error}`);
+		event.systemPromptOptions.promptGuidelines.push(access ? `Restricted workspace: ${access.policy.root}. Access: ${access.policy.access}. Extra read-only roots: ${access.policy.extraReadRoots.join(", ") || "none"}. Use the provided workspace_exec for explicitly authorized sandbox commands when available; host shell, external tools and nested delegation remain disabled. Command paths are /workspace and /reference/N. A denied request is not permission to ask another agent to bypass it.` : `Workspace policy failed to load; all tools are disabled. ${error}`);
 	});
 	pi.registerCommand("workspace", { description: "Show this member's enforced file-tool workspace policy.", handler: async (_args, ctx) => { ctx.ui.notify(access ? JSON.stringify(access.policy, null, 2) : `Workspace policy error: ${error}`, access ? "info" : "error"); } });
 
@@ -51,6 +51,12 @@ export default async function (pi: ExtensionAPI) {
 			return original(id, { ...args, path: target }, signal, update, ctx);
 		} };
 	}
+	if(access?.policy.execution==="sandbox")pi.registerTool({
+		name:"workspace_exec",label:"Sandbox: execute",executionMode:"sequential",description:"Execute a command inside an isolated Podman container. No host shell, network, credentials or original workspace mount. Paths inside are /workspace and /reference/N. Returns durable receipt/log paths; timeout or cancellation destroys this run's container.",
+		parameters:Type.Object({command:Type.String({minLength:1,maxLength:65536}),cwd:Type.Optional(Type.String()),timeoutSeconds:Type.Optional(Type.Integer({minimum:1,maximum:3600}))}),
+		async execute(_id,args,signal){const {runSandbox}=await import("./sandbox.ts");const outcome=await runSandbox(requireAccess().policy,args,signal);return {...result(JSON.stringify(outcome,null,2),{...outcome,timeoutLayer:outcome.timedOut?"process":undefined}),...(outcome.ok?{}:{isError:true})};},
+	});
+	if(access?.policy.execution==="sandbox")pi.registerTool({name:"workspace_exec_status",label:"Sandbox: process status",description:"Inspect a saved sandbox run receipt and the matching container's process state. Does not rerun commands or cancel unrelated containers.",parameters:Type.Object({runId:Type.String({minLength:36,maxLength:36})}),async execute(_id,args){const {inspectSandboxRun}=await import("./sandbox.ts");const receipt=await inspectSandboxRun(requireAccess().policy,args.runId);return result(JSON.stringify(receipt,null,2),receipt);}});
 	const cwd = process.cwd();
 	pi.registerTool(guard(createReadToolDefinition(cwd, { operations: {
 		access: async target => { await requireAccess().authorize(target); },

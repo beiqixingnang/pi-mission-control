@@ -5,10 +5,12 @@ import { Type } from "typebox";
 import { POLICY_ENV, allowedTools, toolAlias, inside, resolveInput, resolveWorkspace, type WorkspaceOptions, type ResolvedWorkspace } from "./policy.ts";
 export type { WorkspaceOptions, ResolvedWorkspace } from "./policy.ts";
 
+export const SandboxSchema=Type.Object({engine:Type.Literal("podman"),image:Type.String({minLength:1,maxLength:512}),cpus:Type.Optional(Type.Number({minimum:0.01,maximum:64})),memoryMb:Type.Optional(Type.Integer({minimum:64,maximum:65536})),pidsLimit:Type.Optional(Type.Integer({minimum:16,maximum:32768})),maxSeconds:Type.Optional(Type.Integer({minimum:1,maximum:3600}))},{additionalProperties:false});
 export const WorkspaceSchema = Type.Object({
 	root: Type.String({ minLength: 1, description: "Authorized workspace directory, resolved relative to the lead's cwd." }),
 	access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("read-write")], { description: "File access in the primary workspace; default read-write." })),
 	extraReadRoots: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 20, description: "Additional separate directories that are always read-only." })),
+	sandbox:Type.Optional(SandboxSchema),
 	execution: Type.Optional(Type.Union([Type.Literal("disabled"), Type.Literal("sandbox")], { description: "Default disabled: no host commands or delegation. Sandbox requires a configured backend; unavailable backends fail instead of running on the host." })),
 }, { additionalProperties: false });
 

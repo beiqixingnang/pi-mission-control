@@ -37,7 +37,7 @@ export function createBridgeClient(config: BridgeConfig) {
 		} catch (error) { stop(String((error as Error)?.message ?? error)); }
 		finally { polling = false; }
 	};
-	async function send(params: { to: string; message: string; wait?: boolean; timeoutMs?: number }, signal?: AbortSignal): Promise<MessageResponse> {
+	async function send(params: { to: string; message: string; wait?: boolean; timeoutMs?: number; operation?: MessageRequest["operation"]; taskId?:string;reportAfterMs?:number;blockedReason?:string }, signal?: AbortSignal): Promise<MessageResponse> {
 		const id = randomUUID();
 		const fail = (error: string): MessageResponse => ({ version: 1, id, ok: false, error });
 		const timeout = params.timeoutMs ?? 600_000;
@@ -58,17 +58,17 @@ export function createBridgeClient(config: BridgeConfig) {
 				resolve(response);
 			};
 			const cancel = (reason: string) => {
-				finish(fail(reason));
+				finish({...fail(reason),timeoutLayer:"message",processState:"unknown"});
 				void append({ version: 1, kind: "cancel", id, token: config.token }).catch(() => {});
 			};
 			const abort = () => cancel("Team message was cancelled.");
 			pending.set(id, { finish });
 			signal?.addEventListener("abort", abort, { once: true });
 			if (signal?.aborted) { abort(); return; }
-			deadline = setTimeout(() => cancel(`Team message timed out after ${timeout} ms.`), timeout + 2000);
+			deadline = setTimeout(() => cancel(`Message transport timed out after ${timeout} ms. The member session is retained; accepted task/process state is unknown until its task status or execution receipt is inspected.`), timeout + 2000);
 			deadline.unref?.();
 			if (!timer) { timer = setInterval(() => { void poll(); }, 100); timer.unref?.(); }
-			const request: MessageRequest = { version: 1, kind: "message", id, token: config.token, to: params.to, message: params.message, wait: params.wait !== false, expiresAt: Date.now() + timeout };
+			const request: MessageRequest = { version: 1, kind: "message", id, token: config.token, to: params.to, message: params.message, wait: params.wait !== false, expiresAt: Date.now() + timeout, operation:params.operation,taskId:params.taskId,reportAfterMs:params.reportAfterMs,blockedReason:params.blockedReason };
 			void append(request).catch(error => finish(fail(String((error as Error)?.message ?? error))));
 		});
 	}
@@ -88,6 +88,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			to: Type.String({ minLength: 1, maxLength: 32 }),
 			message: Type.String({ minLength: 1, maxLength: MAX_MESSAGE_CHARS }),
+			operation:Type.Optional(Type.Union([Type.Literal("task"),Type.Literal("note")])),
 			wait: Type.Optional(Type.Boolean({ default: true })),
 			timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_TIMEOUT_MS })),
 		}, { additionalProperties: false }),
@@ -100,4 +101,16 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 	});
+	for(const operation of ["wait","status","cancel"] as const){
+		const name=operation==="wait"?"team_wait":operation==="status"?"team_task_status":"team_task_cancel";
+		pi.registerTool({name:process.env[POLICY_ENV]?`workspace_${name}`:name,label:`Team: ${operation}`,executionMode:"sequential",
+			description:operation==="wait"?"End this member run while downstream tasks continue. Deliveries wake this member directly; reportAfterMs optionally schedules a progress check.":operation==="status"?"Inspect this member's assigned task and downstream tree without polling.":"Cancel a task assigned by this member and all descendants; retain member conversations.",
+			parameters:Type.Object({taskId:Type.Optional(Type.String({maxLength:150})),reportAfterMs:Type.Optional(Type.Integer({minimum:1000,maximum:86400000})),blockedReason:Type.Optional(Type.String({minLength:1,maxLength:4000}))}),
+			async execute(_id,args,signal){
+				const response=await bridge.send({to:"lead",message:operation,wait:false,operation,taskId:args.taskId,reportAfterMs:args.reportAfterMs,blockedReason:args.blockedReason},signal);
+				let state:any;try{state=JSON.parse(response.reply??"{}");}catch{}
+				return {content:[{type:"text" as const,text:response.ok?response.reply??"Accepted":response.error??"Denied"}],details:{...response,state},...(!response.ok?{isError:true}:{}),...(operation==="wait"&&response.ok&&(state?.pending?.length||state?.blocked)?{terminate:true}:{})};
+			},
+		});
+	}
 }

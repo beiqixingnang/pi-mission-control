@@ -26,6 +26,10 @@ export interface MessageRequest {
 	message: string;
 	wait: boolean;
 	expiresAt: number;
+	operation?: "task" | "note" | "wait" | "status" | "cancel";
+	taskId?: string;
+	reportAfterMs?: number;
+	blockedReason?:string;
 }
 export interface CancelRequest {
 	version: 1;
@@ -40,6 +44,8 @@ export interface MessageResponse {
 	reply?: string;
 	error?: string;
 	jobId?: string;
+	timeoutLayer?: "message" | "member" | "queue" | "process";
+	processState?:string;
 }
 export const validMemberName = (name: unknown): name is string => typeof name === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(name) && name !== "lead";
 export const validRequestId = (id: unknown): id is string => typeof id === "string" && /^[0-9a-f-]{36}$/.test(id);
@@ -67,7 +73,11 @@ export function parseRequest(value: unknown, config: BridgeConfig): MessageReque
 	if (!request || request.version !== 1 || !validRequestId(request.id) || request.token !== config.token) throw new Error("TEAM_MESSAGE_DENIED: invalid bridge request.");
 	if (request.kind === "cancel") return { version: 1, kind: "cancel", id: request.id, token: request.token };
 	if (request.kind !== "message" || (request.to !== "lead" && !validMemberName(request.to)) || typeof request.message !== "string" || !request.message.trim() || request.message.length > MAX_MESSAGE_CHARS || typeof request.wait !== "boolean" || !Number.isSafeInteger(request.expiresAt) || request.expiresAt <= Date.now() || request.expiresAt - Date.now() > MAX_TIMEOUT_MS + 2000) throw new Error("TEAM_MESSAGE_DENIED: invalid or expired message.");
-	return { version: 1, kind: "message", id: request.id, token: request.token, to: request.to, message: request.message, wait: request.wait, expiresAt: request.expiresAt };
+	if(request.operation!==undefined&&!["task","note","wait","status","cancel"].includes(request.operation))throw new Error("TEAM_MESSAGE_DENIED: invalid operation.");
+	if(request.taskId!==undefined&&(typeof request.taskId!=="string"||request.taskId.length>150))throw new Error("TEAM_MESSAGE_DENIED: invalid task id.");
+	if(request.reportAfterMs!==undefined&&(!Number.isSafeInteger(request.reportAfterMs)||request.reportAfterMs<1000||request.reportAfterMs>86400000))throw new Error("TEAM_MESSAGE_DENIED: invalid report time.");
+	if(request.blockedReason!==undefined&&(typeof request.blockedReason!=="string"||!request.blockedReason.trim()||request.blockedReason.length>4000))throw new Error("TEAM_MESSAGE_DENIED: invalid blocker.");
+	return { version: 1, kind: "message", id: request.id, token: request.token, to: request.to, message: request.message, wait: request.wait, expiresAt: request.expiresAt, operation: request.operation, taskId:request.taskId, reportAfterMs:request.reportAfterMs,blockedReason:request.blockedReason };
 }
 
 /** Only fixed, parent-created regular files are opened; no caller-provided paths. */

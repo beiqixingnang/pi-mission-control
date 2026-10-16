@@ -61,7 +61,7 @@
 
 如果额外设置 `tools` 白名单，请使用 `read`、`ls`、`find`、`grep`、`write`、`edit` 这些名字，启动器会映射到受控工具。请求 `bash` 等不支持的工具会在启动前报错；只读成员请求 `write`/`edit` 也会报错。受限模式下 `tools: []` 表示不提供工具。agent 预设中显式包含 `bash` 的也需要移除该项。
 
-`execution: "sandbox"` 已预留，但本机没有配置沙箱后端，会明确拒绝启动，**不会降级成主机执行**。本次没有安装 Docker 或其他系统组件。
+`execution: "sandbox"` 会通过本地 Podman 镜像提供 `workspace_exec`，不会回退到宿主命令；镜像必须已安装所需工具链。
 
 ## agent 文件预设
 
