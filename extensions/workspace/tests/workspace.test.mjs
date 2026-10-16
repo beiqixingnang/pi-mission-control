@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {realpathSync} from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,8 @@ const {createAgentSession,DefaultResourceLoader,SettingsManager,SessionManager}=
 const {WorkspaceAccess,resolveWorkspace,resolveInput,POLICY_ENV,toolAlias}=await import(pathToFileURL(path.resolve(here,'../policy.ts')));
 
 async function fixture(fn){
- const base=await fs.mkdtemp(path.join(os.tmpdir(),'pi-workspace-test-'));
+ let base=await fs.mkdtemp(path.join(os.tmpdir(),'pi-workspace-test-'));
+ if(process.platform==='win32')base=realpathSync.native(base);
  const root=path.join(base,'project'),extra=path.join(base,'docs'),outside=path.join(base,'outside');
  for(const dir of [root,extra,outside])await fs.mkdir(dir);
  await fs.writeFile(path.join(root,'inside.txt'),'INSIDE_MARKER\nneedle here\n');await fs.writeFile(path.join(extra,'reference.txt'),'REFERENCE_MARKER');await fs.writeFile(path.join(outside,'secret.txt'),'OUTSIDE_SECRET');

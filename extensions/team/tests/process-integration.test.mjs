@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {realpathSync} from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,7 +15,8 @@ const {loadExtensions,createExtensionRuntime}=await import(pathToFileURL(path.jo
 const {createEventBus}=await import(pathToFileURL(path.join(hostDir,'dist/core/event-bus.js')));
 const {RpcClient,SessionManager}=await import(pathToFileURL(path.join(hostDir,'dist/index.js')));
 test('a completely new parent process restores its saved roster and member conversation',{timeout:45000},async()=>{
- const base=await fs.mkdtemp(path.join(os.tmpdir(),'pi-parent-restart-'));
+ let base=await fs.mkdtemp(path.join(os.tmpdir(),'pi-parent-restart-'));
+ if(process.platform==='win32')base=realpathSync.native(base);
  try{
   const run=promisify(execFile);const driver=path.join(packageRoot,'scripts/fixtures/team-restart-driver.mjs');
   for(const phase of ['create','restore'])await run(process.execPath,['--unhandled-rejections=strict',driver,phase,base],{timeout:20000,env:{...process.env,PI_TEST_PACKAGE_DIR:hostDir}});
@@ -42,7 +44,7 @@ function unpack(result){assert.ok(!result.isError,JSON.stringify(result));const 
 async function send(h,to,command){return unpack(await h.tool('team_send',{to,message:'PROBE:'+JSON.stringify(command),timeoutMs:15000}));}
 
 test('real restricted children expose the message tool, enforce ACL both ways, and restore legacy child history after restart',{timeout:60000},async()=>{
- const base=await fs.mkdtemp(path.join(os.tmpdir(),'pi-team-process-integration-'));const peers=[];let h;
+ let base=await fs.mkdtemp(path.join(os.tmpdir(),'pi-team-process-integration-'));if(process.platform==='win32')base=realpathSync.native(base);const peers=[];let h;
  RpcClient.prototype.start=async function(){
   this.options.cliPath=path.join(hostDir,'dist/bundle/cli.js');
   this.options.args.push('--extension',path.join(packageRoot,'scripts/fixtures/offline-provider.ts'));
