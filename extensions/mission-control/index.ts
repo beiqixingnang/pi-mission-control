@@ -27,6 +27,7 @@ import { resolveWorkspace } from "../workspace/policy.ts";
 import { searchWeb, fetchPage } from "../../runtime/web.ts";
 import { board } from "./ui.ts";
 import { MissionPanel } from "./viewer.ts";
+import { installTimestamps, timestampAdapterAvailable } from "./timestamps.ts";
 import installReconnect from "./reconnect.ts";
 import { installProject } from "./project.ts";
 import {
@@ -88,6 +89,7 @@ const textResult = (value: unknown) => {
 };
 
 export default function (pi: ExtensionAPI) {
+  installTimestamps(pi);
   if (process.env.MC_V2_MEMBER) return;
   pi.registerMessageRenderer(
     "mission-control-wake",
@@ -979,6 +981,15 @@ export default function (pi: ExtensionAPI) {
           k.setReportInterval(seconds * 1000);
           context.ui.notify(
             "Progress report interval updated; result wakeups and safety maintenance remain automatic",
+            "info",
+          );
+          return;
+        }
+        if (command === "time") {
+          context.ui.notify(
+            timestampAdapterAvailable()
+              ? "消息时间已启用；主对话与成员使用本地时间。"
+              : "成员时间已启用；原生主对话需安装时间适配并重启Pi：npm run pi:timestamps -- apply",
             "info",
           );
           return;

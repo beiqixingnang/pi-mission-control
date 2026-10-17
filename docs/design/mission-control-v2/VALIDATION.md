@@ -7,10 +7,10 @@
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；25个lead工具、6个用户命令（含独立压缩命令）；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.6通过Compiler API严格检查23个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.6核心修正后本机完整86用例：82通过、0失败、4个需显式镜像的容器用例跳过；耗时约43.3秒 |
+| `npm run typecheck` | 2.0.7通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
+| `npm test` | 2.0.7本机完整95用例：91通过、0失败、4个需显式镜像的容器用例跳过；耗时约48.5秒 |
 | GitHub Actions | 2.0.6代码提交8257d07，运行39026681452成功；Ubuntu与Windows / Node24.21.0各82通过、4跳过、0失败，入口和23文件严格类型检查全部通过 |
-| 网络MCP framing回归 | 已纳入上述完整86用例 |
+| 网络MCP framing回归 | 已纳入上述完整95用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
 | npm tarball | 实际生成、检查内容、解包后加载v2入口成功；不含.reference、vendor、用户会话/认证配置或默认加载测试provider |
 | Git whitespace | `git diff --check`核对；历史文档已标v1，v2仅加载新清单 |
@@ -79,6 +79,14 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 - 自定义重连错误不依赖HTTP状态码；固定5秒在单元测试中可取消，实际Pi使用0秒夹具验证次数与取消，默认配置断言为10/5000。
 - 原生Pi1.3.0默认重试3次/2秒指数退避/60秒上限；插件没有修改全局设置。
 - `/project`迁移使用临时真实Pi运行时，覆盖rename、switch、重启、回滚、精确授权和运行成员停止；用户真实1GB日志未热迁移。
+
+## 2.0.7消息时间验证
+
+- 新增9项时间与原生组件回归；当前完整95项中91通过、4容器跳过、0失败，类型检查25个直接文件及依赖通过，入口仍为25工具/6命令。
+- dark/light/system实际主题覆盖重复正文的不同时间、保存时间/日期格式、缺失时间、稳定流式时间、真实工具耗时和UI异常回退；成员复制排除时间/耗时，原生HTML导出回归继续通过。
+- Windows全局Pi1.3.0已显式适配6个运行时文件，备份保留；实际restore→零适配状态→重新apply通过。实际独立模块与CLI bundle的用户消息构造入口均保留重复正文的不同timestamp，CLI版本入口和chunk导入成功。
+- 重新生成五个真实Pi组件隔离预览，检查了原生主对话和成员对话的时间/耗时PNG，未操作用户终端；生效需要重启Pi，/reload不足以更新核心模块。
+- 完整实现和恢复方式见[TIMESTAMPS](TIMESTAMPS.md)。没有给Linux安装写适配；Debian本次只执行静态类型检查，跨平台动态结果需核对后续对应提交的CI。
 
 ## 核心和工具验证
 

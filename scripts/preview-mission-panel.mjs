@@ -33,6 +33,30 @@ const { MissionPanel } = await jiti.import(
 const { board } = await jiti.import(
   path.join(root, "extensions/mission-control/ui.ts"),
 );
+const { ToolTimes, decorateNativeTime, TIMESTAMP_RENDERER } = await jiti.import(
+  path.join(root, "extensions/mission-control/timestamps.ts"),
+);
+const { UserMessageComponent } = await import(
+  pathToFileURL(
+    path.join(hostDir, "dist/modes/interactive/components/user-message.js"),
+  )
+);
+const { AssistantMessageComponent } = await import(
+  pathToFileURL(
+    path.join(
+      hostDir,
+      "dist/modes/interactive/components/assistant-message.js",
+    ),
+  )
+);
+const { ToolExecutionComponent } = await import(
+  pathToFileURL(
+    path.join(hostDir, "dist/modes/interactive/components/tool-execution.js"),
+  )
+);
+const { createPowerShellToolDefinition } = await import(
+  pathToFileURL(path.join(hostDir, "dist/index.js"))
+);
 const { initTheme, theme, getMarkdownTheme } = await import(
   pathToFileURL(path.join(hostDir, "dist/modes/interactive/theme/theme.js"))
 );
@@ -214,21 +238,74 @@ try {
         cwd: directory,
         version: 3,
       }),
-      ...messages.map((message) =>
-        JSON.stringify({ type: "message", message }),
+      ...messages.map((message, index) =>
+        JSON.stringify({
+          type: "message",
+          timestamp: new Date(now - 120000 + index * 10000).toISOString(),
+          message: {
+            ...message,
+            timestamp: now - 120000 + index * 10000,
+            ...(message.role === "toolResult"
+              ? { durationMs: message.toolName === "edit" ? 1200 : 4500 }
+              : {}),
+          },
+        }),
       ),
     ].join("\n") + "\n",
   );
   kernel.store.putMember(member);
+  const nativeTimes = new ToolTimes();
+  nativeTimes.start("preview-native", now - 20000);
+  nativeTimes.end("preview-native", 4500, now - 15500);
+  globalThis[TIMESTAMP_RENDERER] = (lines, metadata) =>
+    decorateNativeTime(lines, metadata, nativeTimes, now);
+  const user = Object.assign(
+    new UserMessageComponent(
+      "继续推进CPU/GPU任务，保留图形输出，交付后由监督员复核。",
+      getMarkdownTheme(),
+    ),
+    { [Symbol.for("pi-mission-control.message-time.v1")]: now - 70000 },
+  );
+  const assistant = new AssistantMessageComponent(
+    {
+      role: "assistant",
+      timestamp: now - 65000,
+      content: [
+        {
+          type: "text",
+          text: "CPU执行员正在补充边界测试，监督员等待结果。\nGPU阶段交付已经保存，后续问题由组内继续复核。",
+        },
+      ],
+      stopReason: "stop",
+    },
+    false,
+    getMarkdownTheme(),
+  );
+  const command = new ToolExecutionComponent(
+    "powershell",
+    "preview-native",
+    { command: "npm test -- --filter register" },
+    {},
+    createPowerShellToolDefinition(directory),
+    { requestRender() {} },
+    directory,
+  );
+  command.markExecutionStarted();
+  command.updateResult({
+    content: [
+      { type: "text", text: "PASS register-interface\n2 tests passed" },
+    ],
+    isError: false,
+    durationMs: 4500,
+  });
   const main = new VStack([
     {
       component: new ScrollView(
-        new Markdown(
-          "## 主对话\n\nCPU执行员正在补充边界测试，监督员等待结果。\nGPU阶段交付已经保存，后续问题由组内继续复核。\n\n这里保持主对话的完整阅读宽度，输入草稿由Pi原生编辑器管理。",
-          1,
-          1,
-          getMarkdownTheme(),
-        ),
+        new VStack([
+          { component: user },
+          { component: assistant },
+          { component: command },
+        ]),
         { primary: true, follow: "end" },
       ),
       basis: 0,
@@ -288,6 +365,7 @@ try {
     `Rendered ${frames.length} frames to .reference/artifacts/ui/frames.json and docs/ui-preview-mission-panel.txt`,
   );
 } finally {
+  delete globalThis[TIMESTAMP_RENDERER];
   panel.dispose();
   tui.stop();
   await kernel.close();

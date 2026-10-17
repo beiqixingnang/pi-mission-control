@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { once } from "node:events";
 import type { Writable } from "node:stream";
 import { lfLines } from "./jsonl.ts";
+import { readTime, readDuration } from "./time.ts";
 
 export function textOf(message: any): string {
   if (typeof message?.content === "string") return message.content;
@@ -65,6 +66,12 @@ export function publicEntry(entry: any) {
       id: entry.id,
       parentId: entry.parentId,
       timestamp: entry.timestamp,
+      ...(readTime(m.timestamp) === undefined
+        ? {}
+        : { messageTimestamp: readTime(m.timestamp) }),
+      ...(readDuration(m.durationMs) === undefined
+        ? {}
+        : { durationMs: m.durationMs }),
       role: m.role,
       toolName: m.toolName,
       toolCallId: m.toolCallId,

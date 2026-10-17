@@ -207,6 +207,8 @@ export interface PublicActivity {
   title: string;
   text: string;
   at: number;
+  timestamp?: number;
+  startedAt?: number;
 }
 export interface Assignment {
   member: Member;

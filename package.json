@@ -1,6 +1,6 @@
 {
   "name": "pi-mission-control",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "private": true,
   "description": "Pi task runtime with automatic completion wakeups, persistent teams, runtime-owned maintenance, bounded compaction and native UI integration.",
   "type": "module",
@@ -33,6 +33,8 @@
     "scripts/typecheck-v2.mjs",
     "scripts/preview-mission-panel.mjs",
     "scripts/render-terminal-preview.py",
+    "scripts/pi-timestamps.mjs",
+    "scripts/lib",
     "tests/v2",
     "agents",
     "docs",
@@ -59,7 +61,8 @@
   "scripts": {
     "test": "node scripts/test-v2.mjs",
     "check": "node scripts/check.mjs",
-    "typecheck": "node scripts/typecheck-v2.mjs"
+    "typecheck": "node scripts/typecheck-v2.mjs",
+    "pi:timestamps": "node scripts/pi-timestamps.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

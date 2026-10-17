@@ -2,6 +2,8 @@
 
 Mission Control v2 is trusted local automation inside Pi, not a separate user account or universal sandbox.
 
+The optional native message-time adapter modifies six Pi1.3.0 presentation files only when explicitly invoked. It validates code shape, retains per-installation checksummed backups and supports guarded restore. It is not an upstream API or an install hook; upgrades can overwrite it. See docs/design/mission-control-v2/TIMESTAMPS.md.
+
 - Member file tools always enforce workspace checks, including host mode. Trusted extensions and host shell commands can bypass application file-tool rules.
 - `host` intentionally grants the host user's command authority. Read-only host workers are rejected. Windows native PowerShell is separate from bash/WSL.
 - `sandbox` requires an explicitly configured local Podman image, without image pull or host fallback. Snapshot inputs, no network, resource limits and validated output export constrain container commands; the engine, image and host kernel remain trusted.

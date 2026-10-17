@@ -1,3 +1,10 @@
+# 2.0.7 — message timestamps and tool timing (2026-10-17)
+
+- Show saved local timestamps on member messages, with date changes, stable streaming times and actual recorded tool durations. Retain full logical copy text.
+- Add a display-only native Pi timestamp bridge for user, assistant, tool and custom-message components. Preserve original Markdown, tool rendering and model/session content.
+- Ship an explicit Pi1.3.0 adapter with AST shape checks, per-installation backups, checksums, atomic file replacement and guarded restore. Applying the adapter requires restarting Pi; extension reload alone is insufficient.
+- Add `/mission time` diagnostics and nine timing/native-renderer regressions. Verify both actual standalone and CLI user-message routing for repeated text and inspect native-component previews.
+
 # 2.0.6 — strict tool types and CI portability (2026-10-17)
 
 - Preserve tool parameter, result-detail and renderer-state generics through member registration and file guards; include explicit result details and type prepared delegation batches.

@@ -8,6 +8,7 @@ import {
   Markdown,
   matchesKey,
   truncateToWidth,
+  visibleWidth,
   wrapTextWithAnsi,
   type MarkdownTheme,
 } from "@earendil-works/pi-tui";
@@ -21,6 +22,12 @@ import {
 } from "../../runtime/transcript.ts";
 import { stateNames } from "./ui.ts";
 import { panelLine } from "./presentation.ts";
+import {
+  messageTime,
+  readDuration,
+  formatTime,
+  formatDuration,
+} from "../../runtime/time.ts";
 
 interface Row {
   id: string;
@@ -45,6 +52,9 @@ interface Item {
   displayBody?: string;
   language?: string;
   outcome?: "pending" | "success" | "error";
+  timestamp?: number;
+  durationMs?: number;
+  startedAt?: number;
 }
 type ViewTheme = Partial<
   Pick<Theme, "fg" | "bg" | "bold" | "italic" | "strikethrough" | "underline">
@@ -147,10 +157,17 @@ export function teamRows(
 }
 
 export function conversationItems(records: TranscriptRecord[]): Item[] {
-  const results = new Map<string, "error" | "success">();
+  const results = new Map<
+    string,
+    { outcome: "error" | "success"; timestamp?: number; durationMs?: number }
+  >();
   for (const { entry } of records)
     if (entry.role === "toolResult" && typeof entry.toolCallId === "string")
-      results.set(entry.toolCallId, entry.isError ? "error" : "success");
+      results.set(entry.toolCallId, {
+        outcome: entry.isError ? "error" : "success",
+        timestamp: messageTime(entry),
+        durationMs: readDuration(entry.durationMs),
+      });
   return records.flatMap(({ offset, entry: e }) => {
     const prefix = String(offset);
     if (e.type === "compaction")
@@ -160,6 +177,7 @@ export function conversationItems(records: TranscriptRecord[]): Item[] {
           title: "压缩摘要",
           body: e.summary ?? "",
           kind: "activity" as const,
+          timestamp: messageTime(e),
         },
       ];
     const content = e.content,
@@ -186,11 +204,19 @@ export function conversationItems(records: TranscriptRecord[]): Item[] {
               : kind === "tool-result"
                 ? `工具返回 · ${e.toolName ?? "tool"}`
                 : "公开事件";
-      items.push({ id: `${prefix}:text`, title, body, kind });
+      items.push({
+        id: `${prefix}:text`,
+        title,
+        body,
+        kind,
+        timestamp: messageTime(e),
+        durationMs: readDuration(e.durationMs),
+      });
     }
     if (Array.isArray(content))
       for (const [index, block] of content.entries())
         if (block.type === "toolCall") {
+          const result = results.get(block.id);
           const args = block.arguments as Record<string, unknown> | undefined;
           const command =
             typeof args?.command === "string" ? args.command : undefined;
@@ -226,7 +252,12 @@ export function conversationItems(records: TranscriptRecord[]): Item[] {
               : edit
                 ? "diff"
                 : "json",
-            outcome: results.get(block.id) ?? "pending",
+            outcome: result?.outcome ?? "pending",
+            timestamp:
+              result?.timestamp !== undefined && result.durationMs !== undefined
+                ? result.timestamp - result.durationMs
+                : messageTime(e),
+            durationMs: result?.durationMs,
           });
         }
     return items;
@@ -425,6 +456,8 @@ export class MissionPanel {
           title: p.title,
           body: p.text,
           kind: p.kind === "tool" ? "tool-pending" : "assistant",
+          timestamp: p.timestamp,
+          startedAt: p.startedAt,
         });
     return items;
   }
@@ -587,8 +620,17 @@ export class MissionPanel {
                 : item.kind === "user"
                   ? "accent"
                   : "muted";
+        const timing = truncateToWidth(
+          `${formatTime(item.timestamp)}${item.durationMs !== undefined ? ` · 耗时 ${formatDuration(item.durationMs)}` : item.startedAt !== undefined ? ` · 已运行 ${formatDuration(Date.now() - item.startedAt)}` : ""}`,
+          Math.max(1, width - 4),
+        );
+        const titleWidth = Math.max(0, width - visibleWidth(timing) - 4);
+        const title = truncateToWidth(
+          `${item.title}${this.expanded.has(item.id) ? "  [展开]" : ""}`,
+          titleWidth,
+        );
         card.push(
-          `${selected ? "▶" : " "} ${color(this.theme, labelColor, item.title)}${this.expanded.has(item.id) ? color(this.theme, "dim", "  [展开]") : ""}`,
+          `${selected ? "▶" : " "} ${color(this.theme, labelColor, title)}  ${color(this.theme, "dim", timing)}`,
         );
         const expanded = this.expanded.has(item.id),
           displayBody = item.displayBody ?? item.body,

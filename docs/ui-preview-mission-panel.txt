@@ -1,18 +1,18 @@
 === 输入框上方横向看板 · Pi渲染器隔离预览 (120×30) ===
+ 19:31:19
+ 继续推进CPU/GPU任务，保留图形输出，交付后由监督员复核。
 
- 主对话
-
+ 19:31:24
  CPU执行员正在补充边界测试，监督员等待结果。
  GPU阶段交付已经保存，后续问题由组内继续复核。
+ 19:32:09 · 耗时 4.5秒
 
- 这里保持主对话的完整阅读宽度，输入草稿由Pi原生编辑器管理。
+ PS> npm test -- --filter register
 
+ PASS register-interface
+ 2 tests passed
 
-
-
-
-
-
+ Took 4.5s
 
 
 
@@ -31,20 +31,20 @@
 › 尚未发送的主对话草稿
 
 === 窄屏横向看板 · Pi渲染器隔离预览 (70×24) ===
+ 19:31:19
+ 继续推进CPU/GPU任务，保留图形输出，交付后由监督员复核。
 
- 主对话
-
+ 19:31:24
  CPU执行员正在补充边界测试，监督员等待结果。
  GPU阶段交付已经保存，后续问题由组内继续复核。
+ 19:32:09 · 耗时 4.5秒
 
- 这里保持主对话的完整阅读宽度，输入草稿由Pi原生编辑器管理。
+ PS> npm test -- --filter register
 
+ PASS register-interface
+ 2 tests passed
 
-
-
-
-
-
+ Took 4.5s
 
 任务看板 · 推进中 · 成员 4 · 执行 1 · 等待 1
 目标  完成CPU/GPU辅助仓重写，保留图形输出并通过测试
@@ -93,31 +93,31 @@ AGENTS / TEAM STATUS
 === 成员对话与动作底色 · Pi渲染器隔离预览 (120×44) ===
 cpu-executor · CPU执行员
 执行中 · 跟随最新 · 会话 1/1
-  用户任务
+  用户任务  19:30:29
     │ 核对寄存器复位行为，保留已有接口并补充测试。
 
-  成员回复
+  成员回复  19:30:39
     已核对接口约束。接下来修正复位值，再执行边界测试。
 
     - 保留现有图形接口
     - 用实际测试结果提交监督员复核
 
-  编辑文件 · src/register.ts
+  编辑文件 · src/register.ts  19:30:58 · 耗时 1.2秒
     src/register.ts
     - const reset = 1;
     + const reset = 0;
 
-  工具返回 · edit
+  工具返回 · edit  19:30:59 · 耗时 1.2秒
     Updated src/register.ts
 
-  执行命令 · powershell
+  执行命令 · powershell  19:31:14 · 耗时 4.5秒
     npm test -- --filter register
 
-  工具返回 · powershell
+  工具返回 · powershell  19:31:19 · 耗时 4.5秒
     PASS register-interface
     2 tests passed
 
-▶ 执行命令 · powershell
+▶ 执行命令 · powershell  19:31:29
     npm run verify:boundaries
 
 ↑↓ 选择 · Enter 展开 · m 发消息 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新 · [ ] 历史
@@ -139,27 +139,27 @@ Esc 返回团队 · q 退出工作台 · 当前页面不使用右侧分栏
 === 编辑内容展开 · Pi渲染器隔离预览 (100×32) ===
 cpu-executor · CPU执行员
 执行中 · 暂停跟随 · 会话 1/1
-  用户任务
+  用户任务  19:30:29
     │ 核对寄存器复位行为，保留已有接口并补充测试。
 
-  成员回复
+  成员回复  19:30:39
     已核对接口约束。接下来修正复位值，再执行边界测试。
 
     - 保留现有图形接口
     - 用实际测试结果提交监督员复核
 
-▶ 编辑文件 · src/register.ts  [展开]
+▶ 编辑文件 · src/register.ts  [展开]  19:30:58 · 耗时 1.2秒
     src/register.ts
     - const reset = 1;
     + const reset = 0;
 
-  工具返回 · edit
+  工具返回 · edit  19:30:59 · 耗时 1.2秒
     Updated src/register.ts
 
-  执行命令 · powershell
+  执行命令 · powershell  19:31:14 · 耗时 4.5秒
     npm test -- --filter register
 
-  工具返回 · powershell
+  工具返回 · powershell  19:31:19 · 耗时 4.5秒
     PASS register-interface
 ↑↓ 选择 · Enter 展开 · m 发消息 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新 · [ ] 历史
 Esc 返回团队 · q 退出工作台 · 当前页面不使用右侧分栏

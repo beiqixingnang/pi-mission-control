@@ -2,6 +2,8 @@
 
 Pi Mission Control is a small, session-local extension package for Pi. Contributions should preserve Pi's extension model and should not require a fork of Pi or changes to a user's global Pi configuration.
 
+The optional Pi1.3.0 message-time presentation adapter is an explicit exception for native rendering metadata. Keep it opt-in, version/shape checked and reversible; never apply it as an installation or extension-load side effect. See docs/design/mission-control-v2/TIMESTAMPS.md.
+
 ## Before opening a change
 
 Run the offline checks with Node.js 24 or newer and a local Pi 1.3.0 installation:

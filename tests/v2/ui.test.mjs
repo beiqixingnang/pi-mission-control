@@ -302,8 +302,13 @@ test("command and edit previews retain full logical arguments when copied", asyn
         },
       },
     ];
+    for (const row of panel.records)
+      row.entry.messageTimestamp = new Date(2026, 9, 17, 23, 41, 8).getTime();
+    panel.records[2].entry.durationMs = 2500;
     const visible = panel.render(120).join("\n");
     assert.match(visible, /执行命令 · powershell/);
+    assert.match(visible, /23:41:/);
+    assert.match(visible, /耗时 2\.5秒/);
     assert.match(visible, /编辑文件 · module.ts/);
     assert.match(visible, /- old/);
     assert.match(visible, /\+ new/);
@@ -316,7 +321,10 @@ test("command and edit previews retain full logical arguments when copied", asyn
     await new Promise((resolve) => setImmediate(resolve));
     assert.match(copied, /"command": "npm test"/);
     assert.match(copied, /"timeout": 120/);
-    assert.doesNotMatch(copied, /\x1b|[│┌┐└┘]|Enter 展开/);
+    assert.doesNotMatch(
+      copied,
+      /\x1b|[│┌┐└┘]|Enter 展开|23:41:|耗时|时间未记录/,
+    );
   } finally {
     panel.dispose();
     await kernel.close();

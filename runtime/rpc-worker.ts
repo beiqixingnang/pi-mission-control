@@ -10,6 +10,7 @@ import type {
   WorkerOutcome,
 } from "./types.ts";
 import { lfLines } from "./jsonl.ts";
+import { readTime } from "./time.ts";
 
 const ENV_ALLOW = [
   "PATH",
@@ -56,7 +57,14 @@ export function workerPreview(event: any): WorkerEvent | undefined {
       if (text)
         return {
           type: "public",
-          preview: { id, kind: "assistant", title: "成员正在回复", text, at },
+          preview: {
+            id,
+            kind: "assistant",
+            title: "成员正在回复",
+            text,
+            at,
+            timestamp: readTime(event.message.timestamp),
+          },
         };
     }
   }
@@ -86,15 +94,33 @@ export function workerPreview(event: any): WorkerEvent | undefined {
           `参数：\n${args}\n${event.type === "tool_execution_update" ? "已上报输出：\n" + textOf(event.partialResult) : "等待工具返回"}`,
         ),
         at,
+        timestamp: readTime(event.startedAt),
+        startedAt: readTime(event.startedAt),
       },
     };
   }
 }
 /** Pi 1.3 RPC sends deltas without cumulative message/partial snapshots. */
 export class WorkerPublicStream {
-  private timestamp = 0;
+  private timestamp?: number;
   private text = new Map<number, string>();
+  private toolStarts = new Map<string, number>();
   accept(event: any): WorkerEvent | undefined {
+    if (
+      ["tool_execution_start", "tool_execution_update"].includes(event.type)
+    ) {
+      if (!this.toolStarts.has(event.toolCallId)) {
+        this.toolStarts.set(event.toolCallId, Date.now());
+        if (this.toolStarts.size > 128)
+          this.toolStarts.delete(this.toolStarts.keys().next().value!);
+      }
+      return workerPreview({
+        ...event,
+        startedAt: this.toolStarts.get(event.toolCallId),
+      });
+    }
+    if (event.type === "tool_execution_end")
+      this.toolStarts.delete(event.toolCallId);
     if (event.type === "message_start" && event.message?.role === "assistant") {
       this.timestamp = event.message.timestamp;
       this.text.clear();
