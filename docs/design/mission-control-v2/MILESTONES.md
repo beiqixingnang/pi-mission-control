@@ -99,3 +99,8 @@ Windows、Node24.16.0、Pi1.3.0。普通测试全部使用临时Pi agent目录�
 - 临时`subagent`成员在任务完成或失败并且没有未完成子任务后自动归档；目标完成保留关闭状态和验收证据，结果投递仍由原回合确认。
 - 新增生命周期历史和陈旧提醒投递回归；本机完整99项测试95通过、4个容器用例跳过。
 - GitHub Actions运行39039477003的Ubuntu与Windows Node24 job均成功，提交76a9125的生命周期改动通过跨平台离线检查。
+
+## 2.0.10恢复旧会话工具目录
+
+- Pi恢复旧会话时会保留历史 active-tool 集合；插件在`session_start`重新激活当前版本注册的Mission Control工具，避免新工具只存在于注册表而不出现在模型声明中。
+- 新增真实Pi回归：把活动工具缩减为旧集合后reload，`goal_stop`、`team_disband`、`lifecycle_history`和`schedule`均重新可见。

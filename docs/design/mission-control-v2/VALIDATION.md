@@ -7,8 +7,8 @@
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；30个lead工具、5个Mission Control命令和1个独立压缩命令；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.9通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.9本机完整99用例：95通过、0失败、4个需显式镜像的容器用例跳过；耗时约52.3秒 |
+| `npm run typecheck` | 2.0.10通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
+| `npm test` | 2.0.10本机完整100用例：96通过、0失败、4个需显式镜像的容器用例跳过；耗时约52.1秒 |
 | GitHub Actions | 2.0.9代码提交76a9125，运行39039477003成功；Ubuntu与Windows / Node24均通过，生命周期改动与25文件严格类型检查已在CI验证 |
 | 网络MCP framing回归 | 已纳入上述完整99用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
@@ -105,6 +105,10 @@ tests/v2/pi-integration.test.mjs共19用例通过：
 - 新增20个Kernel/集成生命周期断言：目标更新与停止、完成目标归档、临时成员自动归档、提醒更新/暂停/恢复/删除以及陈旧提醒投递取消。
 - `npm run check`验证30个lead工具、5个Mission Control命令和1个独立压缩命令；`npm run typecheck`继续严格检查25个直接源码文件。
 - 本机`npm test`完整99项中95通过、4个需要显式Podman镜像的容器用例跳过、0失败；真实provider、关闭Pi后的独立运行和跨平台动态结果仍不在本轮范围。
+
+## 2.0.10旧会话工具目录验证
+
+- 新增真实Pi集成回归：恢复旧 active-tool 集合后执行reload，当前版本注册的生命周期工具重新进入模型工具目录，同时保留原会话和运行时状态。
 
 ## 核心和工具验证
 

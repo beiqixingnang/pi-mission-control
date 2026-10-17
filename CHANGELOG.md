@@ -1,3 +1,9 @@
+# 2.0.10 — reactivate tools on resumed sessions (2026-10-17)
+
+- Re-add Mission Control's registered tools to Pi's active tool set during `session_start`, so resumed sessions see tools introduced after their original transcript was created.
+- Preserve the old session ID and Mission Control state while refreshing the model-facing tool declaration; no new conversation is required just to pick up a plugin tool addition.
+- Add a real Pi regression covering an old active-tool set and update the local version to 2.0.10.
+
 # 2.0.9 — lifecycle closure and archive records (2026-10-17)
 
 - Add explicit `goal_update` and `goal_stop` tools with revisioned goal records and durable lifecycle history.

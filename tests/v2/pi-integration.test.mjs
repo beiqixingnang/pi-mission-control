@@ -347,6 +347,24 @@ test(
 );
 
 test(
+  "real Pi reactivates newly added Mission Control tools when an old session is reloaded",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      h.session.setActiveToolsByName(["read", "team_spawn"]);
+      await h.session.reload();
+      const active = h.session.agent.state.tools.map((tool) => tool.name);
+      for (const name of [
+        "goal_stop",
+        "team_disband",
+        "lifecycle_history",
+        "schedule",
+      ])
+        assert.ok(active.includes(name), `missing reactivated tool ${name}`);
+    }),
+);
+
+test(
   "real Pi tools: model cannot turn off maintenance, readonly host is rejected, native commands remain registered",
   { timeout: 10000 },
   () =>

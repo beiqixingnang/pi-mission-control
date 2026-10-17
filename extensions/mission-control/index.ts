@@ -113,6 +113,12 @@ export default function (pi: ExtensionAPI) {
     renderTimer: ReturnType<typeof setTimeout> | undefined;
   let panel: MissionPanel | undefined;
   let agentsOpen = false;
+  const missionToolNames = new Set<string>();
+  const activateMissionTools = () => {
+    const active = new Set(pi.getActiveTools());
+    for (const name of missionToolNames) active.add(name);
+    pi.setActiveTools([...active]);
+  };
   const current = () => {
     if (!kernel)
       throw new Error("Mission Control is not attached to a Pi session");
@@ -180,6 +186,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, context) => {
     await close();
     ctx = context;
+    // Resumed sessions replay their historical active-tool set. Re-add tools
+    // introduced by a newer plugin version before the next model request.
+    activateMissionTools();
     const settingsFile = path.join(getAgentDir(), "mission-control.json");
     let settings: Partial<Settings> = {};
     try {
@@ -348,6 +357,7 @@ export default function (pi: ExtensionAPI) {
     ) => unknown | Promise<unknown>,
     terminate: boolean | ((context: any) => boolean) = false,
   ) {
+    missionToolNames.add(name);
     pi.registerTool({
       name,
       label,
