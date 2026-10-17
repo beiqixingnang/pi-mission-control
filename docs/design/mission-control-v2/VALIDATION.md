@@ -9,7 +9,7 @@
 | `npm run check` | 两个v2入口加载无错误；25个lead工具、6个用户命令（含独立压缩命令）；测试provider不被默认加载 |
 | `npm run typecheck` | 2.0.7通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
 | `npm test` | 2.0.7本机完整95用例：91通过、0失败、4个需显式镜像的容器用例跳过；耗时约48.5秒 |
-| GitHub Actions | 2.0.6代码提交8257d07，运行39026681452成功；Ubuntu与Windows / Node24.21.0各82通过、4跳过、0失败，入口和23文件严格类型检查全部通过 |
+| GitHub Actions | 2.0.7代码提交7c59b10，运行39029356454成功；Ubuntu与Windows / Node24各91通过、4跳过、0失败，入口和25文件严格类型检查全部通过 |
 | 网络MCP framing回归 | 已纳入上述完整95用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
 | npm tarball | 实际生成、检查内容、解包后加载v2入口成功；不含.reference、vendor、用户会话/认证配置或默认加载测试provider |
@@ -86,7 +86,8 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 - dark/light/system实际主题覆盖重复正文的不同时间、保存时间/日期格式、缺失时间、稳定流式时间、真实工具耗时和UI异常回退；成员复制排除时间/耗时，原生HTML导出回归继续通过。
 - Windows全局Pi1.3.0已显式适配6个运行时文件，备份保留；实际restore→零适配状态→重新apply通过。实际独立模块与CLI bundle的用户消息构造入口均保留重复正文的不同timestamp，CLI版本入口和chunk导入成功。
 - 重新生成五个真实Pi组件隔离预览，检查了原生主对话和成员对话的时间/耗时PNG，未操作用户终端；生效需要重启Pi，/reload不足以更新核心模块。
-- 完整实现和恢复方式见[TIMESTAMPS](TIMESTAMPS.md)。没有给Linux安装写适配；Debian本次只执行静态类型检查，跨平台动态结果需核对后续对应提交的CI。
+- 代码提交7c59b10的GitHub运行39029356454最终成功：Windows job117386517804与Ubuntu job117386517938均91通过、4容器跳过、0失败，入口与25文件严格类型检查通过。CI使用未适配的原装Pi，原生组件测试在隔离副本中检验适配，没有给runner全局安装写补丁。
+- 完整实现和恢复方式见[TIMESTAMPS](TIMESTAMPS.md)。没有给本机Linux安装写适配；Debian这里只执行静态类型检查。真实终端人工完整交互、付费provider与整夜负载仍未由CI覆盖。
 
 ## 核心和工具验证
 

@@ -2,7 +2,7 @@
 
 非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **2.0.7**，已完成核心重写与本机离线验证；2.0.6的Windows/Ubuntu CI均通过，新增消息时间的验证见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。真实模型网关兼容、整夜运行和各平台实际工具链仍待验收。
+当前版本 **2.0.7**，已完成核心重写，新增消息时间的Windows/Ubuntu CI均通过，详见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。真实模型网关兼容、整夜运行和各平台实际工具链仍待验收。
 
 需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
 
