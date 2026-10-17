@@ -59,7 +59,7 @@ lead主动team_collect或同步等待时，toolResult的有界details标记deliv
 
 ### 用户控制与自动维护
 
-根派工自动ensureMission，不依赖模型goal_start；维护器从session启动即存在。模型没有pause/stop/delete-schedule工具，supervisor_control只兼容查询。回答临时问题不改变目标/报告。用户等待裁决状态收到新用户输入可重新处理，但humanPaused仍必须/mission resume。用户resume恢复失败投递的尝试额度和预算。
+根派工自动ensureMission，不依赖模型goal_start；维护器从session启动即存在。模型不能关闭维护或整个Mission，但有`goal_update`/`goal_stop`、`team_disband`和`schedule`生命周期操作；归档记录留在SQLite中，活动视图只返回未关闭对象。回答临时问题不改变目标/报告。用户等待裁决状态收到新用户输入可重新处理，但humanPaused仍必须/mission resume。用户resume恢复失败投递的尝试额度和预算。
 
 运行中的任务超时会abort并结束受管进程树；结束状态不能确认时保留unknown。该成员禁止再次派工，只有用户检查残留进程后/mission reconcile明确确认才解除。异常收束的成员session退役，旧记录不删除，避免不完整工具调用历史被下一attempt重放。
 

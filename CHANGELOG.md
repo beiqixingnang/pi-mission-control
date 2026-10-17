@@ -1,3 +1,10 @@
+# 2.0.9 — lifecycle closure and archive records (2026-10-17)
+
+- Add explicit `goal_update` and `goal_stop` tools with revisioned goal records and durable lifecycle history.
+- Add `team_disband`; persistent identities can be stopped and archived, while temporary `subagent` members leave the active roster after their task settles.
+- Extend `schedule` with update, pause, resume and delete actions. One-shot schedules and stale reminder deliveries are archived or cancelled together.
+- Keep completed goals inspectable while removing closed objects from active member/reminder views. Add lifecycle regression coverage; local suite now reports 95 passed and 4 opt-in container skips.
+
 # 2.0.8 — plugin-owned main timeline, withdraw native patch (2026-10-17)
 
 - Restore native Pi files and remove the timestamp renderer bridge, prototype decoration and patch generator. Keep only checksum-guarded recovery for installations that used 2.0.7; reject `apply`.

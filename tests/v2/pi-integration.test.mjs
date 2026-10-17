@@ -794,7 +794,15 @@ test(
         second = state.tasks.find((t) => t.id === accepted[1].taskId);
       assert.equal(second.dependsOn, first.id);
       assert.ok(second.startedAt >= first.finishedAt);
-      assert.notEqual(state.members[0].sessionId, state.members[1].sessionId);
+      assert.equal(state.members.length, 0);
+      const history = JSON.parse(
+        (await h.tool("lifecycle_history")).content[0].text,
+      );
+      const archived = history.members.filter((member) =>
+        [first.member, second.member].includes(member.name),
+      );
+      assert.equal(archived.length, 2);
+      assert.notEqual(archived[0].sessionId, archived[1].sessionId);
     }),
 );
 

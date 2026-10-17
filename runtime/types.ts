@@ -39,6 +39,9 @@ export interface Member {
   sessionFile?: string;
   createdAt: number;
   temporary: boolean;
+  revision?: number;
+  archivedAt?: number;
+  archiveReason?: string;
 }
 export interface Task {
   id: string;
@@ -65,6 +68,7 @@ export interface Task {
   reviewDeliveryIds: string[];
   sessionFile?: string;
   blockedReason?: string;
+  archivedAt?: number;
 }
 export interface Delivery {
   id: string;
@@ -90,6 +94,8 @@ export interface Delivery {
   leaseUntil?: number;
   reason?: string;
   missionId?: string;
+  scheduleId?: string;
+  scheduleRevision?: number;
 }
 export interface Mission {
   id: string;
@@ -113,6 +119,9 @@ export interface Mission {
   lastReportAt: number;
   nextContinueAt: number;
   humanPaused: boolean;
+  revision?: number;
+  archivedAt?: number;
+  archiveReason?: string;
 }
 export interface Schedule {
   id: string;
@@ -120,9 +129,15 @@ export interface Schedule {
   prompt: string;
   nextAt: number;
   intervalMs?: number;
-  state: "active" | "ended";
+  state: "active" | "paused" | "ended";
   createdAt: number;
+  updatedAt?: number;
+  missionId?: string;
+  revision?: number;
+  archivedAt?: number;
+  archiveReason?: string;
 }
+export type ArchiveKind = "goal" | "member" | "schedule";
 export interface Settings {
   reconnect?: import("./reconnect.ts").ReconnectOptions;
   maxParallel: number;

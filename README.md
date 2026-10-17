@@ -2,7 +2,7 @@
 
 非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **2.0.8**，时间功能恢复为纯插件实现：成员显示时间，主会话通过插件时间线查看，不修改Pi程序。验证结果见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。真实模型网关兼容、整夜运行和各平台实际工具链仍待验收。
+当前版本 **2.0.9**，时间功能恢复为纯插件实现：成员显示时间，主会话通过插件时间线查看，不修改Pi程序。验证结果见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。真实模型网关兼容、整夜运行和各平台实际工具链仍待验收。
 
 需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
 
@@ -22,11 +22,11 @@ pi install C:/tools/pi-mission-control
 
 > 建立CPU执行员与监督员、GPU执行员与监督员。执行员在各自仓库实现和测试，监督员独立审查，组内返工自行闭环。只有阶段交付、真实阻塞或裁决才找主会话。持续推进当前目标，按小时汇报。
 
-模型用`team_spawn`建成员、`team_send`派发。首次派发自动建立工作会话，保存最近用户目标，启用维护、完成唤醒和默认一小时进度检查。`goal_start`只用于补充明确验收条件；是否有Goal不影响成员交付。
+模型用`team_spawn`建成员、`team_send`派发。首次派发自动建立工作会话，保存最近用户目标，启用维护、完成唤醒和默认一小时进度检查。`goal_start`只用于补充明确验收条件；是否有Goal不影响成员交付。`goal_update`和`goal_stop`管理目标生命周期，`team_disband`归档成员身份，临时`subagent`在任务收束后自动退出活动成员列表；历史通过`lifecycle_history`保留。
 
 主模型用`mission_wait`结束当前生成，成员继续工作。结果进入持久消息箱，主会话空闲时集中开启一个新回合；忙时不向Pi原生follow-up无限排队。常规成员进度合并保存，不单独唤醒；结果、失败、裁决及计划报告触发处理。
 
-**模型工具不能关闭维护器或删除计划任务。** 回答临时问题不会改变维护或报告设置。兼容工具`supervisor_control`只能查询状态，`off/interval`会被拒绝。
+**模型工具不能关闭维护器。** 目标、成员和提醒可以通过明确的生命周期工具更新、暂停或关闭；完成的目标、结束的一次性提醒和临时成员退出活动列表，历史仍可查询。回答临时问题不会改变维护或报告设置。兼容工具`supervisor_control`只能查询状态，`off/interval`会被拒绝。
 
 任务completed表示成员回合收束并保存了交付，不等于产品验收通过。`mission_complete`/`goal_finish`要求无未完成任务、无未交付结果，以及每条验收条件的证据；证据质量仍需模型和用户复核。
 
@@ -227,7 +227,7 @@ Pi1.3.0自带的模型回合重试默认3次、2秒起指数退避、最长60秒
 
 2.0.6已通过真实Pi会话调用默认Exa搜索与Pi官方文档抓取，结果进入后续模型上下文。两项专用工具目前只注册给主会话；host成员可通过宿主命令联网，files/sandbox不因此获得联网能力。实现、配置与实测边界见[联网记录](docs/design/mission-control-v2/NETWORK.md)。
 
-`schedule`支持含时区ISO一次性时间、afterSeconds或everySeconds固定间隔，任务推进与消息入箱在同一事务完成，独立于Goal。daily/weekly/cron日历规则暂未提供，everySeconds=86400不能当成DST安全daily。
+`schedule`支持含时区ISO一次性时间、afterSeconds或everySeconds固定间隔，也支持通过ID更新、暂停、恢复和删除；任务推进与消息入箱在同一事务完成，独立于Goal。daily/weekly/cron日历规则暂未提供，everySeconds=86400不能当成DST安全daily。
 
 ## 验证与资料
 

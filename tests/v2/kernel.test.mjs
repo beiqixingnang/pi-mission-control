@@ -511,3 +511,87 @@ test("a fresh human answer reopens decision-waiting work but never overrides a u
     h.kernel.onHumanInput("Explain the progress");
     assert.equal(h.kernel.store.mission().status, "paused");
   }));
+
+test("goal update and stop have explicit lifecycle records", () =>
+  using(async (h) => {
+    const goal = h.kernel.setGoal("old objective", ["old criterion"]);
+    const updated = h.kernel.updateGoal(
+      "new objective",
+      ["new criterion"],
+      goal.id,
+    );
+    assert.equal(updated.id, goal.id);
+    assert.equal(updated.revision, 1);
+    assert.deepEqual(updated.criteria, ["new criterion"]);
+    const stopped = await h.kernel.stopGoal(goal.id, "test cleanup");
+    assert.equal(stopped.status, "stopped");
+    assert.equal(h.kernel.store.mission(), undefined);
+    assert.equal(h.kernel.lifecycleHistory().goals[0].archiveReason, "stopped");
+  }));
+
+test("completed goals remain inspectable while temporary subagents leave the active roster", () =>
+  using(async (h) => {
+    const member = h.kernel.addMember({
+      name: "temporary-worker",
+      role: "temporary",
+      thinkingLevel: "off",
+      workspace: {
+        root: h.directory,
+        access: "read-only",
+        execution: "files",
+        extraReadRoots: [],
+      },
+      allow: [],
+      temporary: true,
+    });
+    const task = h.kernel.dispatch(member.name, "finish once");
+    await flush();
+    h.workers[0].resolve({
+      ok: true,
+      text: "verified",
+      processState: "stopped",
+    });
+    await flush();
+    assert.equal(h.kernel.store.member(member.name), undefined);
+    const delivery = h.kernel.store.deliveries("lead")[0];
+    h.kernel.leadStarted();
+    h.kernel.includeCollected([delivery.id]);
+    h.kernel.leadMessage(false);
+    h.kernel.leadSettled();
+    const completed = h.kernel.complete([
+      { criterion: 1, evidence: "verified temporary result" },
+    ]);
+    assert.equal(completed.status, "complete");
+    assert.equal(h.kernel.store.mission().status, "complete");
+    assert.equal(h.kernel.store.members().length, 0);
+    assert.equal(h.kernel.lifecycleHistory().counts.goal, 1);
+    assert.equal(h.kernel.lifecycleHistory().counts.member, 1);
+    assert.equal(h.kernel.store.task(task.id).state, "completed");
+  }));
+
+test("reminders can be revised, paused and deleted without stale deliveries", () =>
+  using(async (h) => {
+    const schedule = h.kernel.addSchedule("old", "check old", 101000, 1000);
+    const updated = h.kernel.updateSchedule(schedule.id, {
+      title: "new",
+      prompt: "check new",
+      state: "paused",
+    });
+    assert.equal(updated.title, "new");
+    assert.equal(updated.state, "paused");
+    h.kernel.updateSchedule(schedule.id, { state: "active", nextAt: 101000 });
+    h.advance(1000);
+    await h.kernel.tick();
+    h.kernel.deleteSchedule(schedule.id);
+    assert.equal(h.kernel.store.schedules().length, 0);
+    assert.equal(
+      h.kernel.store.schedule(schedule.id, true).archiveReason,
+      "deleted",
+    );
+    assert.ok(
+      h.kernel.store
+        .deliveries("lead")
+        .filter((delivery) => delivery.scheduleId === schedule.id)
+        .every((delivery) => delivery.state === "cancelled"),
+    );
+  }));

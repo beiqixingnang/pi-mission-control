@@ -72,7 +72,7 @@ Mission拥有目标、验收项、任务和继续预算。Goal工具编辑同一
 
 维护循环约每秒检查一次，通常只是读取本地状态，不代表每秒调用模型。固定进度报告按lastReportAt及用户间隔判断，派工start不提前报告。没有未完成任务、目标仍active时，核心生成继续通知；连续3个没有任务或目标进展的自动回合会进入attention。
 
-模型工具不能pause/stop整个Mission、关闭维护或删除提醒；用户可用`/mission pause|resume|stop`控制。pause停止新的自动派工和唤醒，已运行成员可继续收束；stop还会取消活动任务。原生Escape只中止当前主回合，并暂缓自动唤醒，直到新用户输入；显式humanPaused仍需`/mission resume`解除。普通问答不会解除用户暂停。
+模型工具不能pause/stop整个Mission或关闭维护，但可以用`goal_update`/`goal_stop`管理目标，用`team_disband`归档成员，用`schedule`更新、暂停、恢复和删除提醒。用户可用`/mission pause|resume|stop`控制整个工作会话。pause停止新的自动派工和唤醒，已运行成员可继续收束；stop还会取消活动任务。原生Escape只中止当前主回合，并暂缓自动唤醒，直到新用户输入；显式humanPaused仍需`/mission resume`解除。普通问答不会解除用户暂停。
 
 模型仍可通过mission_decision提出有理由的用户裁决，或通过mission_complete申请完成。完成前代码要求无活动任务、相关结果已进入处理流程，以及每个验收项都有证据文本。代码不能独立证明证据文本为真，业务验收仍需模型或用户核实。
 

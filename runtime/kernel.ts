@@ -168,6 +168,14 @@ export class MissionKernel {
     let mission = this.store.mission();
     if (mission && !["complete", "stopped"].includes(mission.status))
       return mission;
+    if (mission)
+      this.store.archiveMission(
+        mission,
+        this.now(),
+        mission.status === "complete"
+          ? "replaced-by-new-objective"
+          : "replaced",
+      );
     const objective = cleanText(this.lastHuman || input, 8000),
       now = this.now();
     mission = {
@@ -189,6 +197,33 @@ export class MissionKernel {
     this.store.event("mission.created", mission.id, { automatic: true });
     return mission;
   }
+  private cleanTemporaryMembers(reason: string) {
+    for (const member of this.store.members()) {
+      if (!member.temporary) continue;
+      const tasks = this.store.memberTasks(member.id);
+      if (
+        tasks.some((task) => !terminal(task) || task.processState === "unknown")
+      )
+        continue;
+      this.store.archive("member", member, this.now(), reason);
+      this.store.removeMember(member.id);
+      this.previews.delete(member.id);
+      this.store.event("member.archived", member.id, { reason });
+    }
+  }
+  private archiveMission(
+    mission: Mission,
+    reason: string,
+    retainClosed = false,
+  ) {
+    mission.updatedAt = this.now();
+    const archived = this.store.archiveMission(mission, this.now(), reason);
+    if (retainClosed) this.store.set("mission", archived);
+    this.cleanTemporaryMembers(reason);
+    this.userHold = false;
+    this.changed();
+    return archived;
+  }
   setGoal(objective: string, criteria: string[] = []) {
     if (!objective.trim()) throw new Error("Goal objective is required");
     let m = this.ensureMission(objective);
@@ -206,6 +241,59 @@ export class MissionKernel {
     this.changed();
     return m;
   }
+  updateGoal(objective: string, criteria: string[] = [], goalId?: string) {
+    if (!objective.trim()) throw new Error("Goal objective is required");
+    const m = this.store.mission();
+    if (!m || ["complete", "stopped"].includes(m.status))
+      throw new Error("No unfinished goal to update");
+    if (goalId && goalId !== m.id) throw new Error("Goal identity changed");
+    m.objective = cleanText(objective, 8000);
+    m.criteria = (criteria.length ? criteria : [objective])
+      .slice(0, 30)
+      .map((x) => cleanText(x, 2000));
+    m.revision = (m.revision ?? 0) + 1;
+    m.status = "active";
+    m.humanPaused = false;
+    m.reason = "Goal definition updated; prior evidence was cleared.";
+    m.evidence = undefined;
+    m.budgetStartedAt = this.now();
+    m.turns = 0;
+    m.outputTokens = 0;
+    m.emptyTurns = 0;
+    m.nextContinueAt = this.now() + 1000;
+    m.updatedAt = this.now();
+    this.userHold = false;
+    this.store.set("relocationHold", false);
+    this.store.set("mission", m);
+    this.store.event("mission.updated", m.id, { revision: m.revision });
+    this.turnActed = true;
+    this.changed();
+    return m;
+  }
+  async stopGoal(goalId?: string, reason = "Stopped by the lead") {
+    const m = this.store.mission();
+    if (!m || ["complete", "stopped"].includes(m.status))
+      throw new Error("No unfinished goal to stop");
+    if (goalId && goalId !== m.id) throw new Error("Goal identity changed");
+    m.status = "stopped";
+    m.humanPaused = true;
+    m.reason = cleanText(reason, 2000);
+    this.generation++;
+    this.userHold = true;
+    this.reservation = undefined;
+    const roots = this.store
+      .tasks(true)
+      .filter((task) => !task.parentId && task.missionId === m.id);
+    await Promise.all(roots.map((task) => this.cancelTask(task.id, m.reason)));
+    for (const delivery of this.store.deliveries("lead"))
+      if (delivery.missionId === m.id && delivery.state !== "observed") {
+        delivery.state = "cancelled";
+        this.store.putDelivery(delivery);
+      }
+    const archived = this.archiveMission(m, "stopped");
+    this.turnActed = true;
+    return archived;
+  }
   complete(evidence: Array<{ criterion: number; evidence: string }>) {
     const m = this.store.mission();
     if (!m || m.status !== "active")
@@ -213,6 +301,14 @@ export class MissionKernel {
     if (this.store.tasks(true).length || this.live.size)
       throw new Error(
         "Work is still running, queued, waiting or being stopped. Collect results before completion.",
+      );
+    if (
+      this.store
+        .missionTasks(m.id)
+        .some((task) => task.processState === "unknown")
+    )
+      throw new Error(
+        "A completed task still has unknown process state. Reconcile it before accepting completion.",
       );
     if (
       this.store
@@ -244,11 +340,10 @@ export class MissionKernel {
       evidence: cleanText(e.evidence, 2000),
     }));
     m.updatedAt = this.now();
-    this.store.set("mission", m);
     this.store.event("mission.completed", m.id);
+    const archived = this.archiveMission(m, "completed", true);
     this.turnActed = true;
-    this.changed();
-    return m;
+    return archived;
   }
   addMember(input: Omit<Member, "id" | "sessionId" | "createdAt">) {
     if (this.store.members().length >= 100)
@@ -271,6 +366,7 @@ export class MissionKernel {
       id: randomUUID(),
       sessionId: randomUUID(),
       createdAt: this.now(),
+      revision: 1,
     };
     this.store.putMember(member);
     this.turnActed = true;
@@ -290,10 +386,53 @@ export class MissionKernel {
         "Finish or cancel member work before changing its capabilities",
       );
     Object.assign(m, patch);
+    m.revision = (m.revision ?? 0) + 1;
     this.store.putMember(m);
     this.turnActed = true;
     this.changed();
     return m;
+  }
+  async disbandMember(name: string, reason = "Disbanded by the lead") {
+    if (name === "lead" || name === "all")
+      throw new Error("The lead identity cannot be disbanded");
+    const members =
+      name === "*"
+        ? this.store.members().filter((member) => !member.temporary)
+        : [this.store.member(name)].filter((member): member is Member =>
+            Boolean(member),
+          );
+    if (!members.length) throw new Error("Unknown member");
+    const removed: string[] = [];
+    for (const member of members) {
+      const active = this.store
+        .tasks(true)
+        .filter((task) => task.memberId === member.id);
+      await Promise.all(active.map((task) => this.cancelTask(task.id, reason)));
+      if (
+        this.store
+          .memberTasks(member.id)
+          .some((task) => task.processState === "unknown")
+      )
+        throw new Error(
+          `Member ${member.name} has unknown process state; reconcile its task before archiving the identity`,
+        );
+      for (const delivery of this.store.deliveries())
+        if (
+          (delivery.from === member.name || delivery.to === member.name) &&
+          delivery.state !== "observed"
+        ) {
+          delivery.state = "cancelled";
+          this.store.putDelivery(delivery);
+        }
+      this.store.archive("member", member, this.now(), reason);
+      this.store.removeMember(member.id);
+      this.previews.delete(member.id);
+      this.store.event("member.archived", member.id, { reason });
+      removed.push(member.name);
+    }
+    this.turnActed = true;
+    this.changed();
+    return { removed };
   }
   dispatch(
     name: string,
@@ -476,7 +615,12 @@ export class MissionKernel {
   }
   delivery(
     input: Pick<Delivery, "key" | "from" | "to" | "kind" | "summary"> &
-      Partial<Pick<Delivery, "taskId" | "artifact">>,
+      Partial<
+        Pick<
+          Delivery,
+          "taskId" | "artifact" | "scheduleId" | "scheduleRevision"
+        >
+      >,
   ): Delivery {
     if (input.kind === "progress" && input.from !== "maintenance") {
       input = {
@@ -499,6 +643,8 @@ export class MissionKernel {
           : input.taskId
             ? this.store.task(input.taskId)?.missionId
             : this.store.mission()?.id,
+      scheduleId: input.scheduleId,
+      scheduleRevision: input.scheduleRevision,
       summary: cleanText(input.summary, 2000),
       id: randomUUID(),
       state: "pending",
@@ -540,6 +686,9 @@ export class MissionKernel {
       intervalMs,
       state: "active",
       createdAt: this.now(),
+      updatedAt: this.now(),
+      revision: 1,
+      missionId: this.store.mission()?.id,
     };
     this.store.putSchedule(s);
     this.turnActed = true;
@@ -547,11 +696,74 @@ export class MissionKernel {
     return s;
   }
   deleteSchedule(id: string) {
-    const s = this.store.schedules().find((s) => s.id === id);
+    const s = this.store.schedule(id);
     if (!s) throw new Error("Unknown reminder");
     s.state = "ended";
+    s.updatedAt = this.now();
+    s.archiveReason = "deleted";
+    s.revision = (s.revision ?? 0) + 1;
     this.store.putSchedule(s);
+    for (const delivery of this.store.deliveries("lead"))
+      if (delivery.scheduleId === id && delivery.state !== "observed") {
+        delivery.state = "cancelled";
+        this.store.putDelivery(delivery);
+      }
+    this.turnActed = true;
     this.changed();
+  }
+  updateSchedule(
+    id: string,
+    patch: {
+      title?: string;
+      prompt?: string;
+      nextAt?: number;
+      intervalMs?: number;
+      state?: "active" | "paused";
+    },
+  ) {
+    const s = this.store.schedule(id);
+    if (!s || s.state === "ended") throw new Error("Unknown active reminder");
+    if (patch.title !== undefined) {
+      if (!patch.title.trim()) throw new Error("Reminder title is required");
+      s.title = cleanText(patch.title, 120);
+    }
+    if (patch.prompt !== undefined) {
+      if (!patch.prompt.trim()) throw new Error("Reminder prompt is required");
+      s.prompt = cleanText(patch.prompt, 8000);
+    }
+    if (patch.nextAt !== undefined) {
+      if (!Number.isSafeInteger(patch.nextAt) || patch.nextAt <= this.now())
+        throw new Error("Reminder time must be in the future");
+      s.nextAt = patch.nextAt;
+    }
+    if (
+      patch.intervalMs !== undefined &&
+      (!Number.isSafeInteger(patch.intervalMs) ||
+        patch.intervalMs < 1000 ||
+        patch.intervalMs > 604_800_000)
+    )
+      throw new Error("Invalid recurrence interval");
+    if (patch.intervalMs !== undefined) s.intervalMs = patch.intervalMs;
+    if (patch.state) s.state = patch.state;
+    s.revision = (s.revision ?? 0) + 1;
+    s.updatedAt = this.now();
+    this.store.putSchedule(s);
+    for (const delivery of this.store.deliveries("lead"))
+      if (delivery.scheduleId === id && delivery.state === "pending") {
+        delivery.state = "cancelled";
+        this.store.putDelivery(delivery);
+      }
+    this.turnActed = true;
+    this.changed();
+    return s;
+  }
+  lifecycleHistory(limit = 100) {
+    return {
+      goals: this.store.archives<Mission>("goal", limit),
+      members: this.store.archives<Member>("member", limit),
+      schedules: this.store.archives<Schedule>("schedule", limit),
+      counts: this.store.archiveCounts(),
+    };
   }
   setReportInterval(ms: number) {
     this.settings = resolveSettings({
@@ -744,6 +956,7 @@ export class MissionKernel {
         .deliveries("lead")
         .filter((d) => d.state !== "cancelled"),
       schedules: this.store.schedules(),
+      lifecycle: this.store.archiveCounts(),
       maintenance: !this.closing,
       held: this.userHold,
       nextReportAt: m
@@ -797,9 +1010,13 @@ export class MissionKernel {
               to: "lead",
               kind: "reminder",
               summary: `${s.title}: ${s.prompt}`,
+              scheduleId: s.id,
+              scheduleRevision: s.revision ?? 1,
             });
             if (s.intervalMs) s.nextAt = occurrence + s.intervalMs;
             else s.state = "ended";
+            s.updatedAt = this.now();
+            if (s.state === "ended") s.archiveReason = "one-shot-fired";
             this.store.putSchedule(s);
           }
       });
@@ -1288,6 +1505,9 @@ export class MissionKernel {
       });
       this.store.event("task.finished", task.id, { state: task.state });
     });
+    this.cleanTemporaryMembers(
+      task.state === "completed" ? "task-completed" : "task-failed",
+    );
     if (!outcome.ok) {
       for (const child of this.store.children(task.id))
         if (!terminal(child))

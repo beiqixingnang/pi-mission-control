@@ -6,11 +6,11 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm run check` | 两个v2入口加载无错误；25个lead工具、6个用户命令（含独立压缩命令）；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.8通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.8本机完整96用例：92通过、0失败、4个需显式镜像的容器用例跳过；耗时约50.1秒 |
-| GitHub Actions | 2.0.8代码提交1b55f9c，运行39036068823成功；Ubuntu与Windows / Node24各92通过、4跳过、0失败，入口和25文件严格类型检查全部通过 |
-| 网络MCP framing回归 | 已纳入上述完整96用例 |
+| `npm run check` | 两个v2入口加载无错误；30个lead工具、5个Mission Control命令和1个独立压缩命令；测试provider不被默认加载 |
+| `npm run typecheck` | 2.0.9通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
+| `npm test` | 2.0.9本机完整99用例：95通过、0失败、4个需显式镜像的容器用例跳过；耗时约52.3秒 |
+| GitHub Actions | 2.0.8代码提交1b55f9c，运行39036068823成功；Ubuntu与Windows / Node24各92通过、4跳过、0失败，入口和25文件严格类型检查全部通过（生命周期改动待下一次CI） |
+| 网络MCP framing回归 | 已纳入上述完整99用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
 | npm tarball | 实际生成、检查内容、解包后加载v2入口成功；不含.reference、vendor、用户会话/认证配置或默认加载测试provider |
 | Git whitespace | `git diff --check`核对；历史文档已标v1，v2仅加载新清单 |
@@ -99,6 +99,12 @@ tests/v2/pi-integration.test.mjs共19用例通过：
 - 本机完整96项中92通过、4容器跳过、0失败，约50.1秒；Windows与Debian25文件严格类型检查通过，25工具/6命令入口加载通过。跨平台动态结果以对应提交的Actions为准。
 - 六帧预览在恢复原样的Pi上重新生成，并检查原生主界面、成员页与主时间线PNG；它们是隔离组件预览，不是桌面截图。本轮未调用付费模型或重跑实际Podman。
 - 代码提交1b55f9c的GitHub运行39036068823最终成功：Windows job117405965592与Ubuntu job117405965794均96项中92通过、4容器跳过、0失败；入口与25文件严格类型检查通过。runner使用原装Pi，真实时间线测试也核对前后文件哈希/原生render引用不变。
+
+## 2.0.9生命周期验证
+
+- 新增20个Kernel/集成生命周期断言：目标更新与停止、完成目标归档、临时成员自动归档、提醒更新/暂停/恢复/删除以及陈旧提醒投递取消。
+- `npm run check`验证30个lead工具、5个Mission Control命令和1个独立压缩命令；`npm run typecheck`继续严格检查25个直接源码文件。
+- 本机`npm test`完整99项中95通过、4个需要显式Podman镜像的容器用例跳过、0失败；真实provider、关闭Pi后的独立运行和跨平台动态结果仍不在本轮范围。
 
 ## 核心和工具验证
 

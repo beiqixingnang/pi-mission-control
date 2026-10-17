@@ -514,6 +514,16 @@ export default function (pi: ExtensionAPI) {
       return current().configureMember(args.name, patch);
     },
   );
+  tool(
+    "team_disband",
+    "Remove team member",
+    "Stop a member's current work, archive its identity and remove it from the active roster. Use * for all persistent members; temporary subagents are removed automatically after their task settles.",
+    Type.Object({
+      name: Type.String({ minLength: 1, maxLength: 48 }),
+      reason: Type.Optional(Type.String({ maxLength: 2000 })),
+    }),
+    (args) => current().disbandMember(args.name, args.reason),
+  );
   const collected = (data: unknown, ids: string[]) => ({
     data,
     $deliveryIds: current()
@@ -819,6 +829,27 @@ export default function (pi: ExtensionAPI) {
     (args) => current().setGoal(args.objective, args.criteria),
   );
   tool(
+    "goal_update",
+    "Update goal",
+    "Revise the active goal definition and acceptance criteria. Prior evidence is cleared and a new revision starts with a fresh continuation budget.",
+    Type.Object({
+      goalId: Type.Optional(Type.String()),
+      objective: Type.String({ minLength: 1, maxLength: 8000 }),
+      criteria: Type.Optional(Type.Array(Type.String(), { maxItems: 30 })),
+    }),
+    (args) => current().updateGoal(args.objective, args.criteria, args.goalId),
+  );
+  tool(
+    "goal_stop",
+    "Stop goal",
+    "Stop the active goal, cancel its unfinished task tree, suppress stale deliveries and archive the goal. A later objective starts a new goal identity.",
+    Type.Object({
+      goalId: Type.Optional(Type.String()),
+      reason: Type.Optional(Type.String({ maxLength: 2000 })),
+    }),
+    (args) => current().stopGoal(args.goalId, args.reason),
+  );
+  tool(
     "mission_complete",
     "Accept mission",
     "Mark the whole approved objective complete only after all work has settled and every acceptance criterion has verified evidence. Answering an intermediate question is not completion.",
@@ -844,6 +875,15 @@ export default function (pi: ExtensionAPI) {
     (args) => current().requireDecision(args.reason),
   );
   tool(
+    "lifecycle_history",
+    "Lifecycle history",
+    "Inspect archived goals, members and reminders after they leave the active roster.",
+    Type.Object({
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    }),
+    (args) => current().lifecycleHistory(args.limit),
+  );
+  tool(
     "supervisor_control",
     "Maintenance status",
     "Maintenance is runtime-owned and automatically active. Model calls can inspect it but cannot disable it or change user report timing.",
@@ -862,9 +902,17 @@ export default function (pi: ExtensionAPI) {
   tool(
     "schedule",
     "Schedule reminder",
-    "Create or list persistent reminders. Delivery is independent of Goal state. Intervals are fixed seconds; at must include an explicit timezone. Only user commands can delete schedules.",
+    "Create, list and manage persistent reminders. Delivery is independent of Goal state. Intervals are fixed seconds; at must include an explicit timezone. Deleting or pausing a reminder cancels its stale pending deliveries.",
     Type.Object({
-      action: Type.Union([Type.Literal("create"), Type.Literal("list")]),
+      action: Type.Union([
+        Type.Literal("create"),
+        Type.Literal("list"),
+        Type.Literal("update"),
+        Type.Literal("delete"),
+        Type.Literal("pause"),
+        Type.Literal("resume"),
+      ]),
+      id: Type.Optional(Type.String()),
       title: Type.Optional(Type.String({ maxLength: 120 })),
       prompt: Type.Optional(Type.String({ maxLength: 8000 })),
       at: Type.Optional(Type.String()),
@@ -875,6 +923,34 @@ export default function (pi: ExtensionAPI) {
     }),
     (args) => {
       if (args.action === "list") return current().store.schedules();
+      if (!args.id && args.action !== "create")
+        throw new Error("id is required for reminder updates and deletion");
+      if (args.action === "delete") {
+        current().deleteSchedule(args.id);
+        return { deleted: args.id };
+      }
+      if (args.action === "pause" || args.action === "resume")
+        return current().updateSchedule(args.id, {
+          state: args.action === "pause" ? "paused" : "active",
+        });
+      if (args.action === "update") {
+        const next = args.at
+          ? Date.parse(args.at)
+          : args.afterSeconds !== undefined
+            ? Date.now() + args.afterSeconds * 1000
+            : undefined;
+        if (args.at && !/(Z|[+-]\d\d:\d\d)$/.test(args.at))
+          throw new Error("at requires an ISO timestamp with timezone");
+        return current().updateSchedule(args.id, {
+          title: args.title,
+          prompt: args.prompt,
+          nextAt: next,
+          intervalMs:
+            args.everySeconds === undefined
+              ? undefined
+              : args.everySeconds * 1000,
+        });
+      }
       const selectors = [args.at, args.afterSeconds, args.everySeconds].filter(
         (v) => v !== undefined,
       );

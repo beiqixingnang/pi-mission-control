@@ -2,7 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Delivery, Member, Mission, Schedule, Task } from "./types.ts";
+import type {
+  Delivery,
+  Member,
+  Mission,
+  Schedule,
+  Task,
+  ArchiveKind,
+} from "./types.ts";
 
 /** One session owner, normalized transactional state, immutable large artifacts. */
 export class Store {
@@ -58,6 +65,7 @@ export class Store {
     CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,key TEXT UNIQUE NOT NULL,recipient TEXT NOT NULL,state TEXT NOT NULL,created INTEGER NOT NULL,data TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS delivery_state ON deliveries(recipient,state,created);
     CREATE TABLE IF NOT EXISTS schedules(id TEXT PRIMARY KEY,state TEXT NOT NULL,due INTEGER NOT NULL,data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS lifecycle_archive(kind TEXT NOT NULL,id TEXT NOT NULL,closed INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id));
     CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,at INTEGER NOT NULL,kind TEXT NOT NULL,entity TEXT,data TEXT NOT NULL);`);
       const version = this.get<number>("schema");
       if (version !== undefined && version !== 2)
@@ -108,6 +116,54 @@ export class Store {
       )
       .run(key, JSON.stringify(value));
   }
+  unset(key: string) {
+    this.db.prepare("DELETE FROM meta WHERE key=?").run(key);
+  }
+  archiveMission(mission: Mission, at: number, reason: string) {
+    const archived = this.archive("goal", mission, at, reason);
+    this.unset("mission");
+    return archived;
+  }
+  archive<T extends { id: string }>(
+    kind: ArchiveKind,
+    value: T,
+    at: number,
+    reason: string,
+  ) {
+    const archived = { ...value, archivedAt: at, archiveReason: reason };
+    this.db
+      .prepare(
+        "INSERT INTO lifecycle_archive VALUES(?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET closed=excluded.closed,data=excluded.data",
+      )
+      .run(kind, value.id, at, JSON.stringify(archived));
+    return archived;
+  }
+  archived<T>(kind: ArchiveKind, id: string): T | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM lifecycle_archive WHERE kind=? AND id=?")
+      .get(kind, id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
+  }
+  archives<T>(kind: ArchiveKind, limit = 100): T[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT data FROM lifecycle_archive WHERE kind=? ORDER BY closed DESC,id LIMIT ?",
+        )
+        .all(kind, Math.max(1, Math.min(1000, limit))) as { data: string }[]
+    ).map((row) => JSON.parse(row.data));
+  }
+  archiveCounts() {
+    return Object.fromEntries(
+      (
+        this.db
+          .prepare(
+            "SELECT kind,COUNT(*) AS count FROM lifecycle_archive GROUP BY kind",
+          )
+          .all() as { kind: string; count: number }[]
+      ).map((row) => [row.kind, row.count]),
+    );
+  }
   mission() {
     return this.get<Mission>("mission");
   }
@@ -118,18 +174,37 @@ export class Store {
       )
       .run(m.id, m.name, JSON.stringify(m));
   }
-  members(): Member[] {
-    return (
+  members(includeArchived = false): Member[] {
+    const active = (
       this.db.prepare("SELECT data FROM members ORDER BY name").all() as {
         data: string;
       }[]
     ).map((x) => JSON.parse(x.data));
+    return includeArchived
+      ? [
+          ...new Map(
+            [...this.archives<Member>("member", 1000), ...active].map(
+              (member) => [member.id, member],
+            ),
+          ).values(),
+        ]
+      : active;
   }
-  member(name: string): Member | undefined {
+  member(name: string, includeArchived = false): Member | undefined {
     const r = this.db
       .prepare("SELECT data FROM members WHERE name=? OR id=?")
       .get(name, name) as { data: string } | undefined;
-    return r ? JSON.parse(r.data) : undefined;
+    return r
+      ? JSON.parse(r.data)
+      : includeArchived
+        ? (this.archived<Member>("member", name) ??
+          (this.archives<Member>("member", 1000).find(
+            (member) => member.name === name,
+          ) as Member | undefined))
+        : undefined;
+  }
+  removeMember(id: string) {
+    this.db.prepare("DELETE FROM members WHERE id=?").run(id);
   }
   putTask(t: Task) {
     this.db
@@ -151,13 +226,13 @@ export class Store {
       | undefined;
     return r ? JSON.parse(r.data) : undefined;
   }
-  tasks(activeOnly = false): Task[] {
+  tasks(activeOnly = false, includeArchived = false): Task[] {
     return (
       this.db
         .prepare(
           activeOnly
             ? "SELECT data FROM tasks WHERE state IN ('queued','running','waiting') ORDER BY created"
-            : "SELECT data FROM tasks ORDER BY created DESC LIMIT 1000",
+            : `SELECT data FROM tasks ${includeArchived ? "" : "WHERE json_extract(data,'$.archivedAt') IS NULL"} ORDER BY created DESC LIMIT 1000`,
         )
         .all() as { data: string }[]
     ).map((r) => JSON.parse(r.data));
@@ -170,6 +245,22 @@ export class Store {
         )
         .get(memberId),
     );
+  }
+  missionTasks(id: string): Task[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT data FROM tasks WHERE json_extract(data,'$.missionId')=? ORDER BY created",
+        )
+        .all(id) as { data: string }[]
+    ).map((row) => JSON.parse(row.data));
+  }
+  memberTasks(id: string): Task[] {
+    return (
+      this.db
+        .prepare("SELECT data FROM tasks WHERE member=? ORDER BY created DESC")
+        .all(id) as { data: string }[]
+    ).map((row) => JSON.parse(row.data));
   }
   children(id: string): Task[] {
     return (
@@ -214,18 +305,47 @@ export class Store {
     ];
   }
   putSchedule(s: Schedule) {
+    if (s.state === "ended") {
+      this.archive(
+        "schedule",
+        s,
+        s.archivedAt ?? s.updatedAt ?? Date.now(),
+        s.archiveReason ?? "ended",
+      );
+      this.db.prepare("DELETE FROM schedules WHERE id=?").run(s.id);
+      return;
+    }
     this.db
       .prepare(
         "INSERT INTO schedules VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,due=excluded.due,data=excluded.data",
       )
       .run(s.id, s.state, s.nextAt, JSON.stringify(s));
   }
-  schedules(): Schedule[] {
-    return (
+  schedule(id: string, includeArchived = false): Schedule | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM schedules WHERE id=?")
+      .get(id) as { data: string } | undefined;
+    return row
+      ? JSON.parse(row.data)
+      : includeArchived
+        ? this.archived<Schedule>("schedule", id)
+        : undefined;
+  }
+  schedules(includeArchived = false): Schedule[] {
+    const active = (
       this.db.prepare("SELECT data FROM schedules ORDER BY due").all() as {
         data: string;
       }[]
     ).map((x) => JSON.parse(x.data));
+    return includeArchived
+      ? [
+          ...new Map(
+            [...this.archives<Schedule>("schedule", 1000), ...active].map(
+              (schedule) => [schedule.id, schedule],
+            ),
+          ).values(),
+        ]
+      : active;
   }
   artifact(id: string, kind: string, body: string): string {
     if (!/^[\w-]+$/.test(id) || !/^[\w-]+$/.test(kind))
