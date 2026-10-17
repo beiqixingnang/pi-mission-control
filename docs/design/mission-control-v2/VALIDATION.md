@@ -7,8 +7,8 @@
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；30个lead工具、5个Mission Control命令和1个独立压缩命令；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.10通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.10本机完整100用例：96通过、0失败、4个需显式镜像的容器用例跳过；耗时约52.1秒 |
+| `npm run typecheck` | 2.0.11通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
+| `npm test` | 2.0.11本机完整100用例：96通过、0失败、4个需显式镜像的容器用例跳过；耗时约48.7秒 |
 | GitHub Actions | 2.0.10代码提交56360dc，运行39041177202成功；Ubuntu与Windows / Node24均通过，工具目录刷新改动与25文件严格类型检查已在CI验证 |
 | 网络MCP framing回归 | 已纳入上述完整99用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
@@ -109,6 +109,11 @@ tests/v2/pi-integration.test.mjs共19用例通过：
 ## 2.0.10旧会话工具目录验证
 
 - 新增真实Pi集成回归：恢复旧 active-tool 集合后执行reload，当前版本注册的生命周期工具重新进入模型工具目录，同时保留原会话和运行时状态。
+
+## 2.0.11请求前工具目录验证
+
+- `before_agent_start`重新应用当前工具集合，覆盖恢复会话的首次模型请求；已有` schedule` schema和新增生命周期工具共同进入请求。
+- 本机完整100项测试96通过、4个容器用例跳过、0失败；真实Pi集成回归通过。
 
 ## 核心和工具验证
 

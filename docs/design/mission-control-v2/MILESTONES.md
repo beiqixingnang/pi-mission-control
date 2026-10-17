@@ -105,3 +105,8 @@ Windows、Node24.16.0、Pi1.3.0。普通测试全部使用临时Pi agent目录�
 - Pi恢复旧会话时会保留历史 active-tool 集合；插件在`session_start`重新激活当前版本注册的Mission Control工具，避免新工具只存在于注册表而不出现在模型声明中。
 - 新增真实Pi回归：把活动工具缩减为旧集合后reload，`goal_stop`、`team_disband`、`lifecycle_history`和`schedule`均重新可见。
 - GitHub Actions运行39041177202的Ubuntu与Windows Node24 job均成功，提交56360dc的工具目录刷新改动通过跨平台离线检查。
+
+## 2.0.11请求前工具目录刷新
+
+- 在每次`before_agent_start`重新激活当前注册工具，覆盖恢复会话首次请求仍使用历史工具快照的时序窗口。
+- 同时刷新已有工具的参数 schema，确保`schedule`的新操作在模型请求中可见。

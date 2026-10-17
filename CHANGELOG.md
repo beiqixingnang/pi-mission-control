@@ -1,3 +1,8 @@
+# 2.0.11 — refresh the tool loadout before every model request (2026-10-17)
+
+- Reapply the current Mission Control tool registry in `before_agent_start`, closing the startup timing gap where a resumed session could still send its historical tool snapshot to the first model request.
+- Refresh existing tool schemas as well as newly added tool names, including the expanded `schedule` action union.
+
 # 2.0.10 — reactivate tools on resumed sessions (2026-10-17)
 
 - Re-add Mission Control's registered tools to Pi's active tool set during `session_start`, so resumed sessions see tools introduced after their original transcript was created.

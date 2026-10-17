@@ -269,6 +269,10 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("before_agent_start", (event, context) => {
     ctx = context;
+    // A resumed session can restore its historical tool declaration before
+    // session_start finishes. Reapply the current registry immediately before
+    // building this model request, including schema changes to existing tools.
+    activateMissionTools();
     const wake =
       event.messageType === "custom" &&
       event.message.customType === "mission-control-wake"
