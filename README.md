@@ -2,7 +2,7 @@
 
 非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **2.0.11**，时间功能恢复为纯插件实现：成员显示时间，主会话通过插件时间线查看，不修改Pi程序。验证结果见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。真实模型网关兼容、整夜运行和各平台实际工具链仍待验收。
+当前版本 **2.0.12**，时间功能恢复为纯插件实现：成员显示时间，主会话通过插件时间线查看，不修改Pi程序。验证结果见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。真实模型网关兼容、整夜运行和各平台实际工具链仍待验收。
 
 需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
 
@@ -159,11 +159,15 @@ Pi原生Esc继续停止当前主回合，不替换成全局停止；成员继续
 
 ```text
 /compaction-model provider/model-id
+/compaction-model lead provider/model-id
+/compaction-model member provider/model-id
 /compaction-model status
 /compaction-model off
 ```
 
-保留`PI_COMPACTION_SUMMARY_MODEL`和`<Pi agent目录>/compaction-summary.json`：
+不带范围时，主对话设置当前会话的压缩模型；`lead`明确设置当前主会话，`member`设置当前主会话未来启动的子智能体默认模型。成员对话自己执行命令时，设置的是该成员自己的压缩模型。`off`可关闭对应范围的自定义摘要并恢复Pi默认压缩。
+
+主会话配置保存在当前Mission Control session目录，成员默认配置保存在该session目录的`member-compaction-summary.json`；旧的`PI_COMPACTION_SUMMARY_MODEL`和`<Pi agent目录>/compaction-summary.json`仍作为兼容回退：
 
 ```json
 {
@@ -177,7 +181,7 @@ Pi原生Esc继续停止当前主回合，不替换成全局停止；成员继续
 
 字符预算是保守估算，不等于所有provider的精确tokenizer；真实模型/网关仍需分别验证。
 
-旧版同名命令、配置文件和环境变量继续有效。环境变量优先于文件，空白环境值忽略；status会显示配置来源。`PI_COMPACTION_DEBUG=1`保留阶段诊断，只记录模型与阶段，不写入对话正文、摘要或私有块。摘要模型设置也会传给成员进程。显式环境变量仍覆盖命令写入的配置，界面会给出说明。
+旧版同名命令、配置文件和环境变量继续有效。主会话中环境变量优先于旧兼容文件；显式的成员范围配置优先于环境变量，保证主对话可以给子智能体选择不同的摘要模型。空白环境值忽略；status会显示主会话和成员默认配置来源。`PI_COMPACTION_DEBUG=1`保留阶段诊断，只记录模型与阶段，不写入对话正文、摘要或私有块。
 
 ## 工作区切换与改名
 

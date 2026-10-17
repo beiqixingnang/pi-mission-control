@@ -693,18 +693,27 @@ test(
   { timeout: 20000 },
   () =>
     harness(async (h) => {
-      const config = path.join(
-        process.env.PI_CODING_AGENT_DIR,
-        "compaction-summary.json",
-      );
+      const agentDir = process.env.PI_CODING_AGENT_DIR;
+      const legacyConfig = path.join(agentDir, "compaction-summary.json");
       const previous = process.env.MC_FIXTURE_SUMMARY;
       const previousSummaryModel = process.env.PI_COMPACTION_SUMMARY_MODEL;
       const previousDebug = process.env.PI_COMPACTION_DEBUG;
       process.env.MC_FIXTURE_SUMMARY = "success";
       process.env.PI_COMPACTION_SUMMARY_MODEL = "   ";
       process.env.PI_COMPACTION_DEBUG = "1";
+      const sessionDir = path.join(
+        agentDir,
+        "mission-control",
+        "v2",
+        h.session.sessionManager.getSessionId(),
+      );
+      const leadConfig = path.join(sessionDir, "compaction-summary.json");
+      const memberConfig = path.join(
+        sessionDir,
+        "member-compaction-summary.json",
+      );
       await fs.writeFile(
-        config,
+        legacyConfig,
         JSON.stringify({
           model: "mission-fixture/model",
           maxTokens: 1024,
@@ -712,8 +721,13 @@ test(
         }),
       );
       try {
-        await h.session.prompt("/compaction-model mission-fixture/model");
-        const saved = JSON.parse(await fs.readFile(config, "utf8"));
+        await h.session.prompt(
+          "/compaction-model member mission-fixture/model",
+        );
+        const savedMember = JSON.parse(await fs.readFile(memberConfig, "utf8"));
+        assert.equal(savedMember.model, "mission-fixture/model");
+        await h.session.prompt("/compaction-model lead mission-fixture/model");
+        const saved = JSON.parse(await fs.readFile(leadConfig, "utf8"));
         assert.equal(saved.maxTokens, 1024);
         assert.equal(saved.maxInputChars, 4000);
         h.settings.applyOverrides({
@@ -738,7 +752,7 @@ test(
         const compacted = await h.session.compact();
         assert.match(compacted.summary, /Summary retained/);
         const trace = await fs.readFile(
-          path.join(process.env.PI_CODING_AGENT_DIR, "compaction-summary.log"),
+          path.join(sessionDir, "compaction-summary.log"),
           "utf8",
         );
         assert.match(trace, /compact:success/);
@@ -759,7 +773,9 @@ test(
           /AFTER_CUSTOM_COMPACTION/,
         );
       } finally {
-        await fs.rm(config, { force: true });
+        await fs.rm(legacyConfig, { force: true });
+        await fs.rm(leadConfig, { force: true });
+        await fs.rm(memberConfig, { force: true });
         if (previous === undefined) delete process.env.MC_FIXTURE_SUMMARY;
         else process.env.MC_FIXTURE_SUMMARY = previous;
         if (previousSummaryModel === undefined)

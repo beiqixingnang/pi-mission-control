@@ -1,3 +1,9 @@
+# 2.0.12 — scoped compaction models for leads and members (2026-10-17)
+
+- Add scoped `/compaction-model lead ...` and `/compaction-model member ...` settings. The lead setting is stored per current Mission Control session; the member setting is inherited by future subagent sessions.
+- Keep per-member overrides available inside member conversations, preserve the legacy global config as a fallback, and keep custom summaries isolated by scope/cache directory.
+- Add regression coverage for writing the member default and lead session configuration independently.
+
 # 2.0.11 — refresh the tool loadout before every model request (2026-10-17)
 
 - Reapply the current Mission Control tool registry in `before_agent_start`, closing the startup timing gap where a resumed session could still send its historical tool snapshot to the first model request.

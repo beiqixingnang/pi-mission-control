@@ -110,3 +110,8 @@ Windows、Node24.16.0、Pi1.3.0。普通测试全部使用临时Pi agent目录�
 
 - 在每次`before_agent_start`重新激活当前注册工具，覆盖恢复会话首次请求仍使用历史工具快照的时序窗口。
 - 同时刷新已有工具的参数 schema，确保`schedule`的新操作在模型请求中可见。
+
+## 2.0.12主会话与成员压缩模型分离
+
+- `/compaction-model lead ...`写入当前Mission Control session；`/compaction-model member ...`写入该session下未来子智能体的默认配置。
+- 子智能体可在自己的会话内覆盖摘要模型；旧全局配置和环境变量仍作为兼容回退。
