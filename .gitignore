@@ -14,3 +14,6 @@ coverage/
 .pi/
 .pi-agent/
 compaction-summary.json
+
+# Local reference sources and private session analysis
+/.reference/

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { WorkspaceAccess, resolveInput, type ResolvedWorkspace } from "./policy.ts";
 import { getAgentDir, getPackageDir } from "@earendil-works/pi-coding-agent";
 
@@ -25,6 +25,12 @@ export interface SandboxRunStatus {
 	receipt: Record<string, unknown>;
 	processState: "running" | "stopped" | "unknown";
 	error?: string;
+}
+
+export interface SandboxResult {
+	runId: string; ok: boolean; exitCode: number | null; cancelled: boolean; timedOut: boolean;
+	output: string; receiptPath: string; logPath: string; artifactPaths: string[];
+	containerStopped: boolean | "unknown"; containerId?: string; error?: string;
 }
 
 interface SandboxPolicy {
@@ -87,7 +93,7 @@ class OutputLog {
 		this.bytes += copy.length;
 		this.queue = this.queue.then(() => fs.appendFile(this.filePath, copy)).catch(() => { this.failed = true; });
 	}
-	async flush() { await this.queue; }
+	async flush() { await this.queue; if(this.failed)throw new Error("Sandbox output log could not be persisted."); }
 }
 
 interface CliResult {
@@ -438,7 +444,7 @@ function runPodman(args: string[], options: { signal?: AbortSignal; timeoutMs?: 
 		let settled = false;
 		let timer: NodeJS.Timeout | undefined;
 		let abortReason: "cancelled" | "timeout" | undefined;
-		let child: ChildProcessWithoutNullStreams | undefined;
+		let child: ChildProcess | undefined;
 		const finish = (action: () => void) => {
 			if (settled) return;
 			settled = true;
@@ -830,7 +836,7 @@ export async function runSandbox(policy: SandboxPolicy, args: SandboxArgs, signa
 			if (timeoutHandle) clearTimeout(timeoutHandle);
 			setupAbort.signal.removeEventListener("abort", relayAbort);
 		}
-		await outputLog.flush();
+		try{await outputLog.flush();}catch(cause){error=textError(cause);}
 		if (timedOut) throw new CliAbortError("timeout");
 		if (cancelled) throw new CliAbortError("cancelled");
 		if (policy.access === "read-write") {
@@ -864,10 +870,10 @@ export async function runSandbox(policy: SandboxPolicy, args: SandboxArgs, signa
 		}
 		if (staging) await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
 		signal?.removeEventListener("abort", onAbort);
-		const ok = !error && !cancelled && !timedOut && containerStopped === true && exitCode === 0;
+		let ok = !error && !cancelled && !timedOut && containerStopped === true && exitCode === 0;
 		const state = cancelled ? "cancelled" : timedOut ? "timed-out" : error || exitCode !== 0 ? "failed" : "completed";
 		Object.assign(receipt, { state, finishedAt: new Date().toISOString(), ok, exitCode, cancelled, timedOut, containerId, containerStopped, artifactPaths, error });
-		await saveReceipt(receiptPath, receipt, true).catch(() => undefined);
+		try{await saveReceipt(receiptPath, receipt, true);}catch(cause){ok=false;error=`Sandbox receipt persistence failed: ${textError(cause)}`;}
 		resultValue = { runId, ok, exitCode, cancelled, timedOut, output, receiptPath, logPath, artifactPaths, containerStopped, ...(containerId ? { containerId } : {}), ...(error ? { error } : {}) };
 	}
 	return resultValue!;

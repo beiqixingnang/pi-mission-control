@@ -1,0 +1,130 @@
+{
+  "date": "2026-10-17",
+  "timezone": "Asia/Shanghai",
+  "interpretation": "Exact source snapshots inspected or collected. Collection does not mean exhaustive audit. Published package version may differ from Git HEAD.",
+  "local_plugin_baseline": "c34e32fec02d43808c2e4d8b313017dba2347993",
+  "pi_runtime_baseline": "1.3.0",
+  "sources": [
+    {
+      "name": "codex",
+      "repository": "https://github.com/openai/codex.git",
+      "commit": "e16b631d08cdf82773831f9bbfb793da687d5299",
+      "commit_date": "2026-10-17T01:08:30Z",
+      "local_reference": ".reference/sources/codex"
+    },
+    {
+      "name": "deepseek-harness",
+      "repository": "https://github.com/deepseek-ai/DeepSeek-Harness.git",
+      "commit": "1517a4dbca0a2789ff1d41ba439600f8547d23fa",
+      "commit_date": "2026-10-16T19:02:34+08:00",
+      "local_reference": ".reference/sources/deepseek-harness"
+    },
+    {
+      "name": "pi",
+      "repository": "https://github.com/earendil-works/pi.git",
+      "commit": "8efd314fa3d3232ce197d8d7a6a5660530b9d83e",
+      "commit_date": "2026-10-16T21:53:00+01:00",
+      "local_reference": ".reference/sources/pi"
+    },
+    {
+      "name": "pi-mcp-adapter",
+      "repository": "https://github.com/nicobailon/pi-mcp-adapter",
+      "commit": "efe943e637e503e10af382d0ace1aec834989c69",
+      "local_reference": ".reference/sources/plugins/pi-mcp-adapter",
+      "published_version": "5.3.1",
+      "published_sha512": "sha512-3b7DxTc7g1vbHngJY59nfcykel1iihSSJ1jv+4kkMSGJteTI/W7N8NNV2MrqX/HTdVFgd5OIcET8OeIcgG175A==",
+      "published_sha1": "a73705e135c923c9070b5a94991e419f9d258640",
+      "published_reference": ".reference/published/pi-mcp-adapter-5.3.1"
+    },
+    {
+      "name": "billion-context",
+      "repository": "https://github.com/ranxianglei/billion-context",
+      "commit": "269accde8bcdf994a0dcf7fdda58494736074b20",
+      "local_reference": ".reference/sources/plugins/billion-context",
+      "published_version": "0.1.197",
+      "published_sha512": "sha512-IurTCF93xLDxS/Ci6f5Tn+V/33eVOSo5uRnwYCvKkF0y521ZV0gT4rnAR3R6aaDWocGVeQJjAcfdBjd75yfSpQ==",
+      "published_sha1": "421d6dd0b9fa8050a4e8e7b1a060e49bab4eaafb",
+      "published_reference": ".reference/published/billion-context-0.1.197"
+    },
+    {
+      "name": "pi-web-access",
+      "repository": "https://github.com/nicobailon/pi-web-access",
+      "commit": "b3f676d8448ede197d8cd22589beeb9e44f1cf44",
+      "local_reference": ".reference/sources/plugins/pi-web-access",
+      "published_version": "0.41.0",
+      "published_sha512": "sha512-8+UoNENGHKlYBxrtwh7Hwoh2twVfs+tcdR1Ciq7sRUtTur0mOXP8N/o7/y72JbdYij3NuSyCNjShbWBPPJ8JPA==",
+      "published_sha1": "ee8167f963d6c81a474b2d4db7be3bf6c681402a",
+      "published_reference": ".reference/published/pi-web-access-0.41.0"
+    },
+    {
+      "name": "pi-subagents",
+      "repository": "https://github.com/nicobailon/pi-subagents",
+      "commit": "f8ada81303db6ee76ed22fee5605dc8a8d62a83a",
+      "local_reference": ".reference/sources/plugins/pi-subagents",
+      "published_version": "0.78.0",
+      "published_sha512": "sha512-AsOvPL1xaVFV4bqIlheQKNI2LmAoiAKTPXXxi39/BsWJTdMJIqAkZJ3iLi6bTsh2PZHG7Ur08b7VJOtgAMIAig==",
+      "published_sha1": "0ea458dd0942d1f37eb25c374b84091cb2ec23f7",
+      "published_reference": ".reference/published/pi-subagents-0.78.0"
+    },
+    {
+      "name": "pi-goal-x",
+      "repository": "https://github.com/tmonk/pi-goal-x",
+      "commit": "64c5ace87f3400c0b55ef87f2d2912167f53dbaa",
+      "local_reference": ".reference/sources/plugins/pi-goal-x",
+      "published_version": "0.32.3",
+      "published_sha512": "sha512-Jip/7p+yuOx/+ckV6IQDr+WhlVvXVw16aR9HMWadc5itciABHdt4HU0Gi3pJU7gJdnB1W3yjdcq6hMwVo/6YIw==",
+      "published_sha1": "a6092303bfaca5f83676993c51a399a48e769874",
+      "published_reference": ".reference/published/pi-goal-x-0.32.3"
+    },
+    {
+      "name": "pi-background-tasks",
+      "repository": "https://github.com/ismailsaleekh/pi-background-tasks",
+      "commit": "799182ff65d7040732aea23b2001ea860b688531",
+      "local_reference": ".reference/sources/plugins/pi-background-tasks",
+      "published_version": "2.6.10",
+      "published_sha512": "sha512-ank/oCRst44FVCr4zwDvedzAxpf+Ttmm4XwB9SfKFJtvFWWX9T2YC+g2pWCdQnbGy/4X+BgoSr6YFCW+fWuhSw==",
+      "published_sha1": "4e92b160144a2a600563f104b6b214e05a5f69a8",
+      "published_reference": ".reference/published/pi-background-tasks-2.6.10"
+    },
+    {
+      "name": "@gotgenes/pi-permission-system",
+      "repository": "https://github.com/gotgenes/pi-packages",
+      "commit": "085d8bb9d36ff57fe8c155f6da8ce8b86ad42087",
+      "local_reference": ".reference/sources/plugins/gotgenes--pi-permission-system",
+      "published_version": "40.2.2",
+      "published_sha512": "sha512-Ju1aG+1uhU0OpVSP+dBY2xxCuGAhgkTyPfMMtLfMAqbGCMMX//2YLNzc91g4aMN/uwc5tD5aRd4VVcyN2W3Rmw==",
+      "published_sha1": "8a647377aa1697cb7f9b62348729424f73e93c31",
+      "published_reference": ".reference/published/gotgenes--pi-permission-system-40.2.2"
+    },
+    {
+      "name": "pi-web-search",
+      "repository": "https://github.com/ttttmr/pi-web-search",
+      "commit": "6b69f3fbd562840308025a2e4bcb749ecaede768",
+      "local_reference": ".reference/sources/plugins/pi-web-search",
+      "published_version": "1.7.0",
+      "published_sha512": "sha512-VthBC7G6v4vkQMgL6atADMi6XjKjoQbI0QUvn76Ldhzv+ewCTlJEN7441PSiz7reDk5AyU8kZZabOQQVNfDXjg==",
+      "published_sha1": "9737455f3557241efd48e00d0ed52408a9973a29",
+      "published_reference": ".reference/published/pi-web-search-1.7.0"
+    },
+    {
+      "name": "agent-comms",
+      "repository": "https://github.com/ExaDev/agent-comms",
+      "commit": "0faf73b095815bf68e6749fa5696b7e457a7484f",
+      "local_reference": ".reference/sources/plugins/agent-comms",
+      "published_version": "8.13.20",
+      "published_sha512": "sha512-OG9Mni2K1mFzgsPz2jbCXiTWQakjgvwvHOKW6exQ7uFnIYDNYqM0xuQh0no7Rhvhtc4rsec/ujHrFILKVCn4TQ==",
+      "published_sha1": "b98dd076232c3f8b5b873f641d0f6742f0900384",
+      "published_reference": ".reference/published/agent-comms-8.13.20"
+    },
+    {
+      "name": "pi-harness-runtime",
+      "repository": "https://github.com/ManotLuijiu/pi-harness-runtime",
+      "commit": "4f3dc3fd0d7ae0f4b1720ffb6300cf323d6401ed",
+      "local_reference": ".reference/sources/plugins/pi-harness-runtime",
+      "published_version": "1.1.318",
+      "published_sha512": "sha512-ixhlIbYjQFviB1oocbh7N2rjx+MC6d7l7xkBsnVU8wRwmgs7SrWH6wPYLail+Mt7p3QqAHk0AE0lqdCIEtKI4g==",
+      "published_sha1": "c3dcee0f78af3ddd442c231fdc755a553650d0f1",
+      "published_reference": ".reference/published/pi-harness-runtime-1.1.318"
+    }
+  ]
+}

@@ -1,39 +1,21 @@
 # Security policy
 
-Pi Mission Control runs inside the user's Pi installation and can start model-driven workers, invoke configured tools, write files, and run configured verification commands. Treat it as trusted local automation, not as an operating-system sandbox.
+Mission Control v2 is trusted local automation inside Pi, not a separate user account or universal sandbox.
 
-## Supported versions
+- Member file tools always enforce workspace checks, including host mode. Trusted extensions and host shell commands can bypass application file-tool rules.
+- `host` intentionally grants the host user's command authority. Read-only host workers are rejected. Windows native PowerShell is separate from bash/WSL.
+- `sandbox` requires an explicitly configured local Podman image, without image pull or host fallback. Snapshot inputs, no network, resource limits and validated output export constrain container commands; the engine, image and host kernel remain trusted.
+- RPC worker environments use an allowlist, including known provider credential variables and explicit user additions. Worker Pi still resolves its model credentials through Pi; this is not per-provider credential isolation.
+- The bridge binds127.0.0.1, requires a random capability token, and checks task/epoch. Sender identity is server-derived. An arbitrary same-user host command can still interfere with local files/processes.
+- `web_fetch` rejects private/local addresses and URL credentials, rechecks redirects, pins validated DNS addresses and bounds response size/duration. Configured SearXNG services may be local by explicit user choice.
+- Model tools cannot disable maintenance or delete reminders. `/mission` user commands own pause/resume/stop/reminder removal. Verified mission completion and concrete decision requests remain model operations.
+- Delivery states distinguish pending, leased, admitted and observed successful response; they do not guarantee exactly-once side effects or correct model understanding.
+- Interrupted commands never automatically replay after restart. Unknown termination remains unknown; reconcile before retry. Unclean member histories are retained but retired from subsequent execution attempts.
+- Workspace changes stop managed work and preserve paused continuation state. Rename rebases only paths inside the renamed root; switching projects does not broaden member permissions. Model changes require exact, expiring user grants. Recovery backups preserve the full original log and must remain private.
+- Provider reconnect accepts custom errors, uses finite fixed waits and counts observed native failures. It does not certify exactly-once model actions or alter native global retry settings. User abort cancels waits; context overflow stays with compaction.
+- Pi export, input, footer, clipboard and Escape are not replaced. Native HTML exports may contain private history; filtered public export uses bounded excerpts and is not a lossless backup.
+- This session-local runtime does not install a daemon, OS scheduler, Windows token sandbox or universal network policy. Closing Pi stops maintenance.
 
-Security fixes target the latest `main` branch and the latest documented Pi release. Older tags may not receive fixes.
+Use private vulnerability reporting. Include commit, Pi/Node/OS version, minimal configuration and reproducible steps. Remove credentials, transcripts and private project contents.
 
-## Reporting a vulnerability
-
-Please do not open a public issue for a security vulnerability. Use GitHub's private vulnerability reporting for this repository, or contact the repository maintainers through the private contact method shown in the repository settings.
-
-Include:
-
-- the affected commit or release;
-- operating system, Node.js, and Pi versions;
-- the smallest reproducible configuration or prompt;
-- the observed impact and any logs with credentials removed.
-
-Do not include API keys, auth files, session transcripts, or private project contents. If a credential was exposed during reproduction, revoke it immediately before reporting.
-
-## Security boundaries
-
-- `workspace` policies are extension-level file-tool checks. They are not an OS sandbox.
-- `execution: "sandbox"` uses a preinstalled local Podman image when configured; without a working Podman backend or local image it is rejected and never silently becomes unrestricted host execution.
-- `execution: "host"` is a separate trusted mode. The lead model can enable it for a named member through `team_spawn` or `team_configure`; it gives the member ordinary host command access and is not an OS sandbox.
-- `goal_finish` may run configured commands through the active `bash` tool.
-- Workspace rename/switch is manual by default. `/project allow` creates one exact-target grant that expires in ten minutes; `project_apply` cannot grant itself permission. This does not sandbox unrestricted shell tools.
-- Migration snapshots contain full private transcripts and are stored under `<agent-dir>/project-migrations/`. Treat them like ordinary session files; never upload them in a public report.
-- Unrestricted members and subagents may use the tools granted by Pi and may modify files in their workspace.
-- The supervisor can create additional model turns and therefore additional model usage.
-- The extension does not provide a separate credential store or isolation layer for Pi providers.
-
-Run the offline test suite before reporting a suspected regression:
-
-```bash
-npm run check
-npm test
-```
+Run`npm run check`, `npm run typecheck`, `npm test`. Podman tests require an explicit local image. Offline tests do not certify every platform or actual provider.

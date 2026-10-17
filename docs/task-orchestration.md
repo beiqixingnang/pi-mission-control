@@ -1,3 +1,5 @@
+> v1历史记录，非v2使用说明。当前行为见根README与docs/design/mission-control-v2/。
+
 # 团队任务树、执行收据与恢复
 
 ## 受信通知

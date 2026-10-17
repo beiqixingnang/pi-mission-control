@@ -1,227 +1,242 @@
-# Pi Mission Control
+# Pi Mission Control v2
 
-这是一个非官方的 Pi 扩展包，与 Pi 上游项目没有隶属或背书关系。
+非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **1.4.0** 增加稳定工作区身份、Podman 受限执行、父子任务树、交付去重和分层超时；详见 [任务编排说明](docs/task-orchestration.md)。工作区重命名、切换和对话延续见 [工作区迁移说明](extensions/project/README.md)。全局停止、成员取消、宽屏侧栏等见 [界面与中断说明](docs/ui-and-interruption-1.1.0.md)。历史验证记录保留在 [验证记录](docs/verification-1.0.1.md)。
+当前版本 **2.0.5**，已完成核心重写与本机离线集成验证，可开始真实任务试用；真实模型网关兼容、整夜运行和跨平台动态验证仍待验收。具体结果见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
 
-适用于 Pi 1.3.0 的本地功能包，并保留 Pi 1.2.0 的历史兼容记录；当前版本 1.4.0 已在 Windows 与 Debian WSL 的 Pi 1.3.0 环境通过兼容测试，见 [升级评估](docs/pi-1.3.0-compatibility.md)。支持 Windows 与 WSL/Linux，包含：
+需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。Linux代码路径未在Linux主机执行；离线provider测试不等于真实模型兼容性认证。
 
-| 功能 | 用法 |
-| --- | --- |
-| 受限容器执行 | `workspace_exec`，需要显式配置本地 Podman 镜像；支持 Python、Yosys、Verilator 等镜像内工具 |
-| 统一任务树 | `team_tree`、`team_wait`、`team_resume`；下游任务、交付收据和 Goal 等待统一关联 |
-| 稳定工作区身份 | `project_status`、`project_resolve`；改名后路径映射不修改旧证据 |
-| 工作区重命名与对话延续 | `/project rename`、`switch`；AI 需先经 `/project allow` 一次性授权 |
-| 持久智能体团队 | `team_spawn`、`team_send`、`team_broadcast`、`team_disband` |
-| 后台完成后唤醒 | 异步派活 `wait:false`；完成/失败自动送回主对话 |
-| Goal 模式 | `/goal start`、`status`、`pause`、`resume`、`stop` |
-| 自适应 TUI 状态区 | 窄屏最多 3 行，宽屏右侧分栏；`/agents auto|compact|wide` |
-| 成员消息时间与历史 | `Alt+J` 选择、`Alt+O` 查看；`/agents view 名称` |
-| 成员定向取消 | `team_cancel` / `team-cancel` 取消成员任务但保留成员；`subagent_cancel` 取消普通子智能体 |
-| 全局停止 | Esc 或 `/stop` 同时取消主请求和成员任务、暂停自动推进 |
-| 成员工作区限制 | `workspace.root`、`access`、`extraReadRoots` |
-| 普通子智能体 | `subagent` 的单次、并行和链式模式 |
-| 上游错误重试 | `retry-any` 扩展补足未被 Pi 内置分类的 provider 错误 |
-| 成员间通信 | `team_spawn.communication.allow` 控制成员之间的 `team_message` |
-| 团队持久化 | 默认保存成员定义和独立 session，重启/恢复主会话后尝试重新连接 |
-| 会话内监督器 | `/supervisor on|off|status|interval`，只在当前 Pi 进程活动时检查 Goal/团队 |
-
-包内自带 `worker`、`planner`、`scout` 和 `reviewer` 预设。用户 `~/.pi/agent/agents` 中同名定义优先，项目定义仍需按原有方式显式启用。无需把包内 agents 复制到用户配置目录。
-
-## 导入
-
-解压 ZIP 后，进入包目录的上级目录运行：
-
-```bash
-pi install ./pi-mission-control
-```
-
-也可以使用绝对路径：
-
-```bash
-pi install /path/to/pi-mission-control
-```
-
-Windows 示例：
+## 安装与切换
 
 ```powershell
 pi install C:/tools/pi-mission-control
 ```
 
-这是 **本地路径安装**：Pi 在个人 settings.json 中记录包目录并直接加载，不会把代码复制到另一个目录。因此安装后请保留该目录；可以先把它放到固定的 tools 目录再安装。
+本地安装直接加载此目录。新窗口按package.json只加载两个v2入口；旧十个协调扩展不再通过本包清单启用。不要同时启用v1散装扩展和v2。
 
-当前已打开的 Pi 输入 `/reload`；新会话会自动加载包里的工具、参数和关键使用规则。完整 README 不会自动全文加入模型上下文。
+切换前先在旧窗口停止成员任务并退出Pi，再开启新窗口。**不要在真实测试或命令仍运行时直接 `/reload`。** v2不导入并重跑v1活动任务，不改写旧主/成员日志。v1代码仍在Git历史和当前未启用目录中。
 
-检查或移除：
+## 日常使用
 
-```bash
-pi list
-pi remove /path/to/pi-mission-control
-```
+可以直接告诉模型：
 
-`.tgz` 是 npm 格式归档，可以先 `tar -xzf pi-mission-control-1.4.0.tgz`，再 `pi install ./package`。Pi 的本地路径安装按目录发现资源，这里不依赖直接导入压缩文件的行为。没有向 npm 发布这个包。
+> 建立CPU执行员与监督员、GPU执行员与监督员。执行员在各自仓库实现和测试，监督员独立审查，组内返工自行闭环。只有阶段交付、真实阻塞或裁决才找主会话。持续推进当前目标，按小时汇报。
 
-## 已经安装散装扩展时
+模型用`team_spawn`建成员、`team_send`派发。首次派发自动建立工作会话，保存最近用户目标，启用维护、完成唤醒和默认一小时进度检查。`goal_start`只用于补充明确验收条件；是否有Goal不影响成员交付。
 
-不要同时启用原来的散装目录和本包，否则相同的工具/命令可能重复注册。当前这台电脑的 Windows 与 Debian WSL 共用同一个 agent 配置目录（WSL 的 `~/.pi/agent` 是符号链接），在一边改个人配置会影响另一边。
+主模型用`mission_wait`结束当前生成，成员继续工作。结果进入持久消息箱，主会话空闲时集中开启一个新回合；忙时不向Pi原生follow-up无限排队。常规成员进度合并保存，不单独唤醒；结果、失败、裁决及计划报告触发处理。
 
-本次导入验证使用独立的测试配置，未自动迁移或覆盖你正在用的散装扩展。迁移时先备份并移走旧的 `agent-monitor`、`compaction-model`、`goal`、`subagent`、`team`、`workspace` 六个扩展目录，再安装本包。
+**模型工具不能关闭维护器或删除计划任务。** 回答临时问题不会改变维护或报告设置。兼容工具`supervisor_control`只能查询状态，`off/interval`会被拒绝。
 
-## 工作区改名后继续对话
+任务completed表示成员回合收束并保存了交付，不等于产品验收通过。`mission_complete`/`goal_finish`要求无未完成任务、无未交付结果，以及每条验收条件的证据；证据质量仍需模型和用户复核。
 
-默认手动执行，例如将当前 `D:/projects/1` 改名为同级的 `2`：
+## 用户控制
 
-```text
-/project rename 2
-```
+| 操作 | 行为 |
+| --- | --- |
+| `/mission` | 打开团队任务树工作台，可选择成员进入公开对话；Tab切换目标/提醒 |
+| `/mission view 成员名` | 直接打开指定成员的对话查看器 |
+| `/agents [成员名]` | 打开全屏团队工作台，或直接进入指定成员 |
+| `/mission status` | 查询当前状态 |
+| `/mission start 目标 \| 条件一 \| 条件二` | 主动建立明确目标；派发任务也会自动建立 |
+| `/mission pause` | 暂停新派工和主会话唤醒，已运行成员可收束，结果保留 |
+| `/mission resume` | 用户明确恢复，并给予新的接续预算 |
+| `/mission stop` | 取消任务树和受管执行，保留身份及证据 |
+| `/stop` | 明确停止主回合和当前任务树；保留Pi原生Escape语义 |
+| `/mission report 3600` | 设置常规进度间隔，不改变完成/失败通知 |
+| `/mission schedules` | 查看持久提醒 |
+| `/mission unschedule ID` | 结束指定提醒，不影响任务维护 |
+| `/mission reconcile 任务ID` | 检查并停止残留进程后，用户确认unknown执行已结束，允许新attempt |
+| `/mission export 文件.jsonl` | LF流式导出主/成员公开历史，过滤私有块与重复状态 |
 
-当前窗口会延续原有对话；以后从 `D:/projects/2` 打开终端运行 `pi -r`，可找到延续会话。切换到已有目录使用 `/project switch "D:/projects/other"`。若要让 AI 代办，先 `/project allow rename 2`，再告诉 AI 继续；授权仅限这一次目标，十分钟后过期，可用 `/project revoke` 撤销。
+Pi原生Esc继续停止当前主回合，不替换成全局停止；成员继续工作、结果保留，自动唤醒暂时抑制。发送新指令解除这次回合中断抑制；用户通过`/mission pause/stop`暂停时则必须明确resume。详情面板Esc只返回，不取消任务。
 
-迁移会保存原会话和备份、重建成员进程并保留记忆；Goal 暂停、Supervisor 关闭。插件安装目录必须位于待重命名的业务项目之外。详见 [工作区迁移说明](extensions/project/README.md)。
+原生`/export`、复制、输入框、footer、模型选择和会话树保留。**既有约1GB旧日志仍可能触发Pi原生HTML整体字符串化限制**；v2不改写它，另提供流式公开导出。公开导出是有界可读记录，不是包含所有私有字段的无损备份。
 
-## 模型与默认设置
+## 实时查看成员
 
-本包不包含 API 密钥、models.json、auth.json、settings.json、会话记录或测试输出。导入目标 Pi 应自行配置所需模型。包内示例使用通用的 `provider/model-id` 形式，不假设某个特定 provider 已安装。
+输入框正上方常驻横向任务看板，显示目标、进度汇报时间、最近定时提醒，以及每个成员的状态和当前工具。成员各占一整行，没有左右分栏；看板按终端高度限制为4–10行，超出的成员在`/agents`工作台查看。进入工作台时看板暂时隐藏，退出后恢复。
 
-团队成员可以使用该 Pi 已配置的任何兼容聊天模型。压缩摘要模型可以通过 `/compaction-model provider/model-id`、`PI_COMPACTION_SUMMARY_MODEL` 或配置文件设置；没有设置时使用 Pi 的正常压缩。
+输入`/agents`或`/mission`后，用↑↓选择任务或成员，←→折叠/展开下游任务，Enter进入对应公开对话；Tab切换目标/验收及定时提醒。更多成员可滚动选择。
 
-重试设置由目标 Pi 自己管理，**安装包不会修改全局重试、模型或思考等级**。若需要最多重试 5 次，手动合并以下设置到目标的 settings.json：
+对话页使用和主 Pi 对话相同的 Markdown、代码块和工具结果层次，显示任务消息、公开回复、工具参数、返回和错误。成员文字流与工具已经上报的进度会实时显示；工具本身没有进度事件时，需要等它返回，不虚构中间输出。长内容默认折叠，Enter展开；↑↓选择消息、PgUp/PgDn滚动，Home加载更早记录，End回到最新，f暂停/恢复跟随，`[`/`]`切换该成员历史会话。`m`打开 Pi 原生编辑器给当前成员发消息：成员运行时发送 steer，成员空闲时创建新回合。`c`复制当前逻辑消息，不包含边框、分隔线或其他面板内容。Esc先回团队，再退出工作台。主会话正在运行时也可使用这些用户命令。
 
-```json
-{
-  "retry": {
-    "enabled": true,
-    "maxRetries": 5,
-    "baseDelayMs": 2000,
-    "maxAgentDelayMs": 60000,
-    "provider": { "maxRetries": 0 }
-  }
-}
-```
+动作块使用Pi原生主题底色：执行中、成功、错误分别对应宿主工具面板样式，回复保持普通背景。命令直接显示命令文本，编辑显示增删行；`c`复制仍保留完整原始参数，包括未在预览中显示的超时等字段。看板和动作块均不添加竖向边框；工作台使用全屏路由，终端选择时没有邻列的分隔线。
 
-## 安全边界
+查看器不发模型请求、不接管成员会话、不暂停任务、不确认交付；不提供隐式发送消息或修改权限。只展示公开内容，过滤思考、签名及私有系统正文。日志按LF分页读取，忽略尚未写完的尾记录；窗口、缓存和单条展示均有上限，超大记录会提示略过，不是无损备份或任意日志文件浏览器。
 
-这是运行在本地 Pi 进程中的自动化扩展，不是操作系统沙箱。默认受限成员只能使用文件工具；显式配置 `execution: "sandbox"` 和本地 Podman 镜像后，成员可以通过 `workspace_exec` 在隔离容器中运行镜像内命令。`goal_finish` 仍可以通过当前会话的 `bash` 工具执行配置的验证命令，不受限成员也可以使用 Pi 授予的工具。详见 [安全政策](SECURITY.md) 和 [任务编排说明](docs/task-orchestration.md)。
+从2.0.x更新到2.0.5无需另开Pi会话。先等成员任务收束并结束当前主回合，再`/reload`，或正常退出后恢复该会话；运行中直接reload仍会将旧执行记为中断。v1状态不会因此自动迁移。
 
-## 成员间通信
+2.0.3的成员视图存在主题色适配崩溃，2.0.4已修复。若Pi已因此退出，本地路径安装加载更新后，在原工作目录运行`pi -r`选择原会话，再用`/agents`查看；不用删除日志或重建已保存的成员。崩溃前尚未完成的执行仍按中断恢复规则处理。
 
-团队成员默认不能互相通信。创建成员时指定允许的对象：
-
-```json
-{
-  "name": "cpu-supervisor",
-  "role": "CPU 监督员",
-  "communication": { "allow": ["cpu-builder"] }
-}
-```
-
-允许关系按成员对检查：任一方明确允许另一方即可建立这对成员的通信。主 AI 始终可以和全部成员通信。成员通过 `team_message`（受限工作区中为 `workspace_team_message`）发送短消息；发送到 `lead` 时必须使用 `wait:false`，否则容易造成同步循环。通信由父 Pi 进程校验 ACL 和超时，成员不能通过消息扩大文件工作区或命令权限。
-
-## 持久团队
-
-`team_spawn` 默认 `persistent:true`。主会话会保存成员名称、角色、模型、工作区、通信 ACL 和独立 child session ID。重启 Pi 或恢复同一个主会话时，团队扩展会重新启动持久成员并恢复其子会话上下文。正在执行的单次请求不能跨进程继续，恢复时会保留中断标记，主模型或 Goal 可以重新派发。
-
-设为 `persistent:false` 可以创建只在当前 Pi 进程存活的临时成员。恢复时会先加载完整 roster，再等待成员启动，避免启动中写入部分 roster 覆盖其余成员。新成员使用 UUID；1.0.0 生成的 `team-父会话ID-成员名` 仍按原 ID 打开，保留原有子会话历史，无需手动替换快照里的 ID。`/reload` 会停止旧进程，再从当前会话里的 roster 记录尝试恢复持久成员；不要在持久成员正在执行关键写操作时随意重载。
-
-## 会话内监督器
-
-监督器默认关闭，避免无任务时消耗模型请求：
-
-```text
-/supervisor on
-/supervisor status
-/supervisor interval 300
-/supervisor off
-```
-
-它只在 Pi 当前进程运行时存在，不写入系统计划任务。开启后，只有活动 Goal 或未完成团队任务时才每隔一段时间提醒主 AI检查进度。主 AI正在运行、有排队消息或已有监督检查时不会重复排队。主模型 provider 错误会触发有限次数的恢复检查。关闭终端或 Pi 进程崩溃后监督器不会运行；需要这种能力时使用 Windows 任务计划程序、cron 或 systemd。
-
-## 重试策略
-
-Goal 只在整个重试链最终结束仍然失败时进入 `paused`，并记录 `pauseCause: provider-error`。重试期间或重试成功后保持运行。开启监督器后，这种上游失败暂停即使没有后台任务，也会继续获得周期检查；检查启动时在原预算内恢复 Goal。手动暂停、`blocked`、停止及预算耗尽均不会自动恢复。Goal 状态变化不会把周期定时器强行提前，避免错误风暴和重复排队。
-
-Pi 内置重试负责已识别的网络、限流和服务端错误。`retry-any` 扩展补足未被 Pi 分类的 assistant/provider 错误，例如中转站返回的随机 `upstream_error` 或模型选择错误。它读取 `settings.json` 的 `retry.maxRetries`，默认最多 5 次，并使用指数退避。
-
-为避免已知错误被内置层和扩展层重复重试，已知 429、5xx、timeout 等模式交给 Pi 内置重试；扩展主要处理其余 provider error。额度、账单和用户主动中断不会被无限重试。若需要统一测试，请在目标 settings 中启用 retry，并确认 `maxRetries`。
-
-## 停止与插话
-
-运行中按 **Esc** 或输入 `/stop`，会同时停止主 AI 和成员当前/排队任务、暂停 Goal、关闭监督器并取消插件重试；保留成员身份与历史。停止尚未收束时的新普通输入会暂存，等停止完成后发送。
-
-普通 Enter 保留 Pi 原生 **steer 插话**：当前响应/工具结束后优先交接。它不是任务全部结束后的 follow-up；显式追加仍使用 Windows/WSL 的 Ctrl+Q 或其他终端的 Alt+Enter。输入区提供相应提示。
-
-宽屏自动显示右栏，Alt+J 选择成员、Alt+O 查看只读对话；Esc 在执行任务时优先全局停止，完全空闲时只退出查看器。详见 [界面与全局停止](docs/ui-and-interruption-1.1.0.md)。
-
-成员定向取消：`team_cancel` 按成员名或 jobId 取消，保留成员身份和历史；`subagent_list` 查看 runId/invocationId，`subagent_cancel` 可按 runId、invocationId 或唯一 agent 名取消普通子智能体，`subagent_collect` 读取后台结果。
-
-## 快速使用
-
-```text
-/goal start 完成任务 | 验收条件一 | 验收条件二
-/agents status
-/team-wake status
-/compaction-model
-```
-
-可以直接告诉模型：“创建一个已配置的成员，只读这个目录”。创建成员的工作区参数示例：
+## 成员与权限
 
 ```json
 {
+  "name": "cpu-executor",
+  "role": "在批准范围内实现、测试并保存证据",
+  "model": "provider/model-id",
+  "thinkingLevel": "max",
   "workspace": {
-    "root": "/home/me/project",
-    "access": "read-only",
-    "extraReadRoots": ["/home/me/shared-docs"]
+    "root": "D:/projects/cpu",
+    "access": "read-write",
+    "execution": "host"
+  },
+  "communication": { "allow": ["cpu-reviewer"] }
+}
+```
+
+通信ACL是有向的，发送者allow必须包含接收者；双方互通需分别配置。成员始终可向lead发分类note。组内`team_message`创建下游任务，`team_wait`结束成员回合，下游完成后自动恢复同一成员会话复核。向祖先重新派工会拒绝，应使用note。
+
+| execution | 文件工具 | 命令能力 |
+| --- | --- | --- |
+| `files` | 工作区路径、读写和链接检查 | 无命令，适合只读调查/审查 |
+| `host` | 仍经过受控路径工具 | bash、Windows powershell拥有宿主用户权限；不是OS沙箱 |
+| `sandbox` | 同样有路径检查 | 显式本机Podman镜像、快照、禁网络、资源限制及产物写回；失败不回退host |
+
+普通可写执行员默认host，只读成员默认files。read-only+host会拒绝，因为命令能写宿主文件。环境仅继承系统运行项、已知provider密钥变量和用户显式inheritEnv；这不等于不同OS用户的凭据隔离。
+
+容器配置示例：
+
+```json
+{
+  "root": "D:/projects/cpu",
+  "access": "read-write",
+  "execution": "sandbox",
+  "sandbox": {
+    "engine": "podman",
+    "image": "本地镜像ID",
+    "cpus": 2,
+    "memoryMb": 2048,
+    "maxSeconds": 600
   }
 }
 ```
 
-Windows 使用 `C:/projects/example` 这类原生路径；WSL 使用 `/home/...` 或 `/mnt/c/...`。配置是共享的也不代表文件路径能在两种系统中原样互用。
+不会自动安装Podman、下载镜像或修改系统策略。Windows bash可能是WSL，原生Windows路径/工具优先用powershell；容器用镜像内`/bin/sh`。
 
-工作区限制是文件工具和可选容器后端的访问控制，受限成员不能执行宿主机命令、MCP 或再派生智能体；容器后端仍需本地 Podman 和用户显式配置的镜像。没有后端或镜像时会拒绝启动，不会降级成宿主机执行。
+`subagent`支持单次、tasks并行、chain依赖顺序，同样自动维护。scout/planner/reviewer默认files只读。`team_cancel`只取消指定子树或成员工作；`team_resume`在审查证据后创建新attempt。
 
-详见各功能说明：
+2.0.1兼容可选字段被填为null、空数组和空容器配置的调用：空tasks不会遮住有效chain，空chain不会把并行任务变成依赖链。多个非空任务模式会明确拒绝；有效容器配置与files/host冲突仍会拒绝，不自动提升权限。派工前先校验全部条目，避免参数错误产生半支团队。
 
-- [Goal 与唤醒](extensions/goal/README.md)
-- [TUI 状态区](extensions/agent-monitor/README.md)
-- [任务树与受限执行](docs/task-orchestration.md)
-- [工作区重命名与对话延续](extensions/project/README.md)
-- [工作区访问限制与容器执行](extensions/workspace/README.md)
+## 恢复和持续运行边界
 
-## Pi 源码参考
+状态保存于`<Pi agent目录>/mission-control/v2/<sessionId>/state.sqlite`，大输入/交付在artifacts，成员Pi日志在sessions。owner lock阻止同会话被两个窗口同时调度。
 
-仓库内的 [vendor/pi-1.3.0](vendor/pi-1.3.0) 保存 Pi 1.3.0 源码快照，方便查阅插件依赖的底层 API。来源、归档校验值和许可证见 [vendor/README.md](vendor/README.md)。该目录不参与插件自动加载，也不包含在 npm 功能包中；运行插件仍需单独安装 Pi。
+重启/reload不重跑旧running/waiting任务，保留interrupted记录并发恢复通知；需要新attempt。未正常收束的成员session退役，下一attempt使用新sessionId，旧日志保留，避免回放缺少toolResult的历史。未启动排队工作、消息箱和提醒意图持久保存。
 
-## 验证
+如果进程结束无法确认，该成员不能直接再次派工；先检查和停止残留进程，再用`/mission reconcile 任务ID`明确确认。它不会自行终止未知外部进程。
 
-需要目标机器已安装 Pi；无需安装本包的 peer dependencies，它们由 Pi 提供。
+**维护器依赖Pi进程存活。关闭Pi或系统休眠期间不会启动模型回合。** 恢复后扫描到期提醒，循环提醒只补最近一次。没有安装独立服务、Windows计划任务或cron。失败恢复有退避与次数上限，预算耗尽明确显示需要处理。
 
-```bash
+默认预算：4并行、每任务10分钟、主任务12小时、200次自动接续、2,000,000主模型输出token，不含所有成员完整计费。用户配置`<Pi agent目录>/mission-control.json`：
+
+```json
+{
+  "maxParallel": 4,
+  "taskTimeoutMs": 600000,
+  "progressIntervalMs": 3600000,
+  "maxMissionMs": 43200000,
+  "maxAutonomousTurns": 200,
+  "maxOutputTokens": 2000000,
+  "defaultExecution": "host",
+  "workerExtensions": [],
+  "inheritEnv": [],
+  "searchProvider": "exa"
+}
+```
+
+自定义provider由扩展注册时，将受信任扩展路径加入workerExtensions；模型不能指定加载任意扩展。Pi的models/auth正文不被插件复制。
+
+## 独立压缩模型
+
+```text
+/compaction-model provider/model-id
+/compaction-model status
+/compaction-model off
+```
+
+保留`PI_COMPACTION_SUMMARY_MODEL`和`<Pi agent目录>/compaction-summary.json`：
+
+```json
+{
+  "model": "provider/summary-model",
+  "maxTokens": 4096,
+  "maxInputChars": 24000
+}
+```
+
+按有界字符预算逐块摘要、分层合并，完成块按内容哈希缓存。截断、空结果、工具调用或错误会取消本次压缩并保留历史与缓存，**不静默回退发送同一个巨型请求**。未配置时保留Pi默认压缩。
+
+字符预算是保守估算，不等于所有provider的精确tokenizer；真实模型/网关仍需分别验证。
+
+旧版同名命令、配置文件和环境变量继续有效。环境变量优先于文件，空白环境值忽略；status会显示配置来源。`PI_COMPACTION_DEBUG=1`保留阶段诊断，只记录模型与阶段，不写入对话正文、摘要或私有块。摘要模型设置也会传给成员进程。显式环境变量仍覆盖命令写入的配置，界面会给出说明。
+
+## 工作区切换与改名
+
+```text
+/project status
+/project switch "D:/projects/another project"
+/project rename new-name
+/project resolve "D:/projects/old-name/evidence.txt"
+```
+
+在同一个Pi窗口延续对话，重建新cwd的原生工具、资源和项目指令；保留原会话及备份，新延续会话使用新ID。关闭后可在新目录`pi -r`找到它；自定义会话存储也保留。switch不移动原目录，rename不覆盖既有目标、不能跨盘搬迁；本插件及Pi agent存储须位于被改名目录之外。
+
+迁移先暂停维护唤醒、停止本会话管理的成员执行，再复制主历史、SQLite状态、成员日志、结果文件。主/成员历史正文不全局替换路径。rename只映射原目录内的成员权限路径；switch到另一项目保留成员原授权，不自动授权新目录。迁移后的目标和提醒保持暂停，核对路径后`/mission resume`；已停止任务需明确创建新attempt，不能自动重放。未知进程状态需要先reconcile。
+
+AI执行工作区操作仍需要用户给一次性授权：`/project allow rename <名称>`或`/project allow switch <路径>`，然后使用`project_apply`。授权绑定当前会话、动作、目标，十分钟过期；`/project revoke`撤销。TUI/RPC在当前回合保存后切换；print/json一次性模式拒绝模型排队迁移，可先执行用户命令。
+
+备份与日志在`<agentDir>/project-migrations/<操作ID>/`。准备失败或原生取消切换会回滚；宿主已替换后失败则保留恢复会话和日志，按提示重新打开，必要时`/project recover`完成项目身份登记。迁移复制按LF处理，Pi原生接入仍会加载历史；未在旧1GB会话上实测热迁移。
+
+## 模型连接失败恢复
+
+新增重连适用于主模型和成员模型，默认**10次、插件每次固定等待5秒**。不按502/429白名单筛选；提供方以error失败的自定义错误同样重连。取消、停止、切换会话会中止等待；上下文超限由压缩流程处理，工具执行错误不作为网络重连。
+
+```text
+/reconnect status
+/reconnect on
+/reconnect retries 10
+/reconnect delay 5
+```
+
+这些用户命令将本会话设置保存到运行状态，后续成员继承。也可在`mission-control.json`中设置`"reconnect": {"enabled": true, "maxRetries": 10, "delayMs": 5000}`。没有显式enabled时尊重Pi持久配置中的retry.enabled。
+
+Pi1.3.0自带的模型回合重试默认3次、2秒起指数退避、最长60秒，主要覆盖它识别的临时错误；插件在原生恢复结束后补充兜底。已经观察到的原生失败会计入同一连续失败预算，避免再乘上十个原生批次，但当前原生批次仍可能略超剩余额度。插件的5秒不改变原生等待参数，`/reconnect off`只关闭插件兜底；状态页分开列出两层。它们都不保证网络恢复、不会重启退出的Pi，也不主动重放已执行命令。
+
+若希望Pi原生等待也固定为5秒，可自行在Pi的settings.json配置：
+
+```json
+{"retry":{"enabled":true,"maxRetries":10,"baseDelayMs":5000,"maxAgentDelayMs":5000}}
+```
+
+插件不会自动改写全局Pi设置。次数指提供方请求回合，不是底层HTTP库的每个网络包。
+
+## 联网与提醒
+
+`web_search`默认向Exa公开MCP发送查询文本；可用`searchProvider=brave`和BRAVE_API_KEY，或`searxng`和searchUrl。默认联网工具在lead，files/sandbox成员不自动获联网能力。
+
+`web_fetch`限制public HTTP(S)、体积和重定向，检查每跳并固定已验证DNS地址连接。仅提取有界文本，不替代浏览器。返回来源/时间不代表事实已验证；服务失败明确返回错误。
+
+`schedule`支持含时区ISO一次性时间、afterSeconds或everySeconds固定间隔，任务推进与消息入箱在同一事务完成，独立于Goal。daily/weekly/cron日历规则暂未提供，everySeconds=86400不能当成DST安全daily。
+
+## 验证与资料
+
+```text
+npm ci --ignore-scripts --legacy-peer-deps
 npm run check
+npm run typecheck
 npm test
 ```
 
-`check` 验证十个扩展入口可加载；`test` 使用临时配置执行单元及集成测试，不访问模型 API，也不修改用户全局设置。集成测试会实际启动 Pi 子进程，验证受限成员双向通信、组外拒绝、磁盘快照/旧成员历史恢复，以及真实 Pi 生命周期中的失败重试与监督恢复；模型由包内测试 fixture 提供确定性响应。
+容器实测需设置PI_SANDBOX_TEST_IMAGE为已有镜像，再运行`node scripts/test-v2.mjs tests/v2/container.test.mjs`。测试使用临时目录和离线provider，不调用真实模型。
 
-有模型配置时可额外运行真实测试（会产生模型用量）：
+- [产品与验收规格](docs/design/mission-control-v2/PRODUCT.md)
+- [实现机制](docs/design/mission-control-v2/TECH.md)
+- [旧版能力对照与恢复机制](docs/design/mission-control-v2/PARITY.md)
+- [实施与验证记录](docs/design/mission-control-v2/MILESTONES.md)
+- [完整验证结果与局限](docs/design/mission-control-v2/VALIDATION.md)
+- [参考机制调查](docs/research/2026-10-17-agent-mechanisms/README.md)
+- [安全边界](SECURITY.md)
 
-```bash
-node extensions/goal/tests/live-team.mjs
-node extensions/agent-monitor/tests/live-monitor.mjs
-node extensions/workspace/tests/live-workspace.mjs
-```
-
-真实测试使用通过环境变量配置的 Pi 模型，并会产生模型用量。设置 `PI_LIVE_LEAD_MODEL` 和 `PI_LIVE_MEMBER_MODEL`（或各测试文件说明的更细分变量）后再运行；测试会把报告放到系统临时目录，支持 `PI_GOAL_TEST_OUTPUT`、`PI_MONITOR_TEST_OUTPUT`、`PI_WORKSPACE_TEST_OUTPUT` 覆盖。
-
-如果自动查找不到 Pi 安装目录，设置 `PI_TEST_PACKAGE_DIR`，例如：
-
-```bash
-PI_TEST_PACKAGE_DIR=/home/me/.local/lib/node_modules/@earendil-works/pi-coding-agent npm test
-```
-
-## 限制与兼容性
-
-- 已针对 Pi 1.3.0 验证，另保留 Pi 1.2.0 的历史兼容记录。依赖 Pi 的扩展 API、RPC 与生命周期行为；进一步升级后应重新运行测试。
-- 等待时主模型不持续推理，但 Pi 进程必须保持运行。退出 Pi 后不会继续运行后台团队。
-- 恢复未完成 Goal 时会暂停，需 `/goal resume` 并重新派发中断工作。
-- 本包团队调用使用安全 RPC 等待封装，规避 Pi 1.2.0 的未处理超时拒绝缺陷；不会修改 Pi 安装包。
-- 包使用 MIT 许可，部分基础实现改编自 Pi 的 MIT 示例，见 [NOTICE](NOTICE.md)。
+许可证MIT。旧版`/goal`、`/supervisor`及`/agents`界面由`/mission`统一替代；不同时加载旧入口。

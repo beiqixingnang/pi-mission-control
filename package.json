@@ -1,39 +1,69 @@
 {
   "name": "pi-mission-control",
-  "version": "1.4.0",
+  "version": "2.0.5",
   "private": true,
-  "description": "Pi team agents, completion wakeups, Goal mode, compact TUI monitor, workspace policies and compaction routing.",
+  "description": "Pi task runtime with automatic completion wakeups, persistent teams, runtime-owned maintenance, bounded compaction and native UI integration.",
   "type": "module",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/beiqixingnang/pi-mission-control.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beiqixingnang/pi-mission-control.git"
+  },
   "homepage": "https://github.com/beiqixingnang/pi-mission-control",
-  "bugs": { "url": "https://github.com/beiqixingnang/pi-mission-control/issues" },
-  "keywords": ["pi-package"],
-  "engines": { "node": ">=22.19.0" },
-  "files": ["extensions", "agents", "scripts", "docs", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "LICENSE", "NOTICE.md"],
+  "bugs": {
+    "url": "https://github.com/beiqixingnang/pi-mission-control/issues"
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "files": [
+    "extensions/mission-control",
+    "extensions/workspace/policy.ts",
+    "extensions/workspace/sandbox.ts",
+    "extensions/project/identity.ts",
+    "extensions/workspace/tests/sandbox.test.mjs",
+    "extensions/workspace/tests/sandbox-live.test.mjs",
+    "runtime",
+    "scripts/check.mjs",
+    "scripts/host.mjs",
+    "scripts/test-v2.mjs",
+    "scripts/typecheck-v2.mjs",
+    "scripts/preview-mission-panel.mjs",
+    "scripts/render-terminal-preview.py",
+    "tests/v2",
+    "agents",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
   "pi": {
     "extensions": [
-      "./extensions/agent-monitor/index.ts",
-      "./extensions/compaction-model/index.ts",
-      "./extensions/goal/index.ts",
-      "./extensions/project/index.ts",
-      "./extensions/retry-any/index.ts",
-      "./extensions/run-control/index.ts",
-      "./extensions/subagent/index.ts",
-      "./extensions/supervisor/index.ts",
-      "./extensions/team/index.ts",
-      "./extensions/workspace/index.ts"
+      "./extensions/mission-control/index.ts",
+      "./extensions/mission-control/compaction.ts"
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "@earendil-works/pi-agent-core": ">=1.3.0 <2",
+    "@earendil-works/pi-ai": ">=1.3.0 <2",
+    "@earendil-works/pi-coding-agent": ">=1.3.0 <2",
+    "@earendil-works/pi-tui": ">=1.3.0 <2",
+    "typebox": "^1.3.0"
   },
   "scripts": {
-    "test": "node scripts/test.mjs",
-    "check": "node scripts/check.mjs"
+    "test": "node scripts/test-v2.mjs",
+    "check": "node scripts/check.mjs",
+    "typecheck": "node scripts/typecheck-v2.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3"
   }
 }

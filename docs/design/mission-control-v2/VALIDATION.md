@@ -1,0 +1,115 @@
+# v2 验证记录
+
+日期：2026-10-17，Asia/Shanghai。环境：Windows、Node24.16.0、已安装Pi1.3.0。不是跨平台或真实provider兼容性认证。
+
+## 已执行检查
+
+| 检查 | 结果 |
+| --- | --- |
+| `npm run check` | 两个v2入口加载无错误；25个lead工具、6个用户命令（含独立压缩命令）；测试provider不被默认加载 |
+| `npm run typecheck` | strict TypeScript检查通过，包括所复用的workspace policy/Podman后端 |
+| `npm test` | 2.0.5完整运行86用例：82通过、0失败、4个需显式镜像的容器用例跳过；耗时约40.1秒 |
+| 网络MCP framing回归 | 已纳入上述完整86用例 |
+| 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
+| npm tarball | 实际生成、检查内容、解包后加载v2入口成功；不含.reference、vendor、用户会话/认证配置或默认加载测试provider |
+| Git whitespace | `git diff --check`核对；历史文档已标v1，v2仅加载新清单 |
+
+2.0.5重新执行了`npm run check`、`npm run typecheck`和完整`npm test`。加载检查为两个入口、25个lead工具、6个用户命令，errors为空。本轮改动只涉及UI及主题适配，未重复运行真实Podman；容器结果为同日2.0.2验证记录。测试通过不等于真实provider与长期运行验收通过，未验证范围见文末。
+
+普通测试全部由scripts/test-v2.mjs建立临时Pi agent目录；不读取用户auth/models/settings正文，不调用真实模型。真实Pi生命周期使用确定性离线provider，并非仅用mock替代Pi事件系统。
+
+## 真实Pi流程
+
+tests/v2/pi-integration.test.mjs共18用例通过：
+
+1. 模型未创建Goal、未开启监督器，只派工并结束主回合；成员实际调用read拿到标记，随后自动唤醒主回合，交付观察确认，原生HTML导出成功。
+2. 模型off维护被拒绝，read-only+host配置被拒绝，原生export/copy/tree/model命令未被覆盖。
+3. 监督员给执行员派下游任务、结束等待回合、同session启动复核；父任务在复核后才完成。
+4. host成员的文件工具拒绝根外路径，原生Windows PowerShell实际执行Node命令。
+5. 长命令创建孙进程后取消任务，确认受管命令及孙进程退出。
+6. 连续75次较大的成员配置修改不增加Pi主日志字节，原生HTML和流式公开导出仍可用。
+7. 一次性print模式等待成员并返回结果，不退出后遗留被截断的后台任务。
+8. 自定义摘要provider失败后取消compact、保留原历史；不走静默默认回退。
+9. 分块摘要经真实Pi compact hook安装checkpoint，压缩后仍可正常请求下一回合。
+10. 子智能体chain执行顺序按依赖，使用不同持久session。
+11. Pi reload保留成员身份和用户pause，旧运行任务标interrupted、不自动重放，并保留恢复通知。
+12. 通过真实模型工具验证路径发送null、空容器配置等占位参数，成员按files只读启动并交付；空configure不重置原模型与权限。
+13. 多个非空派工模式、空任务条目或后续成员模型无效时，在创建任何成员/任务前明确拒绝。
+14. 通过真实Pi的`/mission view`与公开custom组件，在成员完成前看到RPC公开文字增量，完成后看到实际工具返回；两级Esc返回不abort主回合、不改变任务状态、不展示私有fixture块。
+15. 主会话和成员自定义提供方错误重连，默认十次预算耗尽、原生502衔接、取消退避均通过；成员继承策略。
+16. 工作区rename/switch保留主/成员记忆、任务和权限，重启延续、原生取消回滚、运行成员停止、授权撤销/过期及新会话首响应前切换均通过。
+17. 独立摘要模型的命令/环境优先级、预算配置和metadata-only debug通过；未把提示或摘要正文写进debug。
+18. `project_resolve`按稳定项目身份解析历史路径，迁移历史LF正文只改新header，SQLite/产物副本和暂停提醒状态通过。
+
+## 2.0.3 UI验证
+
+- 全屏团队工作台与成员Markdown对话快照已用实际Pi TUI组件生成到`docs/ui-preview-mission-panel.txt`；宽屏/窄屏均保持行宽限制。
+- `/agents`、`/mission`、`/mission view`入口加载检查通过；成员消息路由和逻辑复制新增回归通过。
+
+## 2.0.4主题崩溃回归
+
+- 用户实际TUI报错`Unknown theme color: mdItalic`。2.0.3上述快照使用了宽松的简化主题，真实Pi命令测试也传空主题；这些检查验证了内容和流程，但没有验证真实Theme token，因此漏掉mdItalic/mdBullet。
+- 2.0.4的`tests/v2/theme.test.mjs`使用安装Pi的真实dark/light/system主题，并断言对应主题确实加载。覆盖用户引用、斜体、粗体、删除线、列表、链接、表格、代码块及工具返回，在20/50/80/120/180列渲染；不允许靠错误页降级冒充成功。
+- 主题异常注入后，渲染错误留在工作台内，Esc两级返回仍可用，运行核心快照不变；完成目标隐藏过期倒计时，完成成员对话标题保持完成状态。
+- 真实Pi custom命令集成也改用实际主题；预览脚本移除假主题，改用实际Theme，渲染降级时脚本明确失败。重新生成了预览。
+- 2.0.4没有进行Windows终端截图/人工全流程验收；本次新增证据是实际Theme、实际Markdown和真实Pi命令流程，不等同于终端视觉验收。
+
+## 2.0.5横向看板和动作底色
+
+- 针对主题、UI和真实Pi流程的28项专项测试通过；最终完整测试为86项中的82项通过、4项容器跳过、0失败。
+- 真实dark/light/system主题覆盖看板的20/50/80/120列与12/24/30/40行；检查高度上限、中文可见宽度、目标/定时提醒、多余成员提示和不存在竖向分隔符。
+- 使用真实Theme.bg记录验证userMessageBg、toolPendingBg、toolSuccessBg和toolErrorBg，确认回复正文不被动作底色覆盖；保留2.0.4主题崩溃与异常兜底回归。
+- 命令和编辑预览回归验证实际命令、增删行、不输出多余围栏；c复制仍保留完整参数JSON（包括timeout），且无ANSI或边框字符。
+- 真实Pi命令测试检查widget的aboveEditor位置、进入工作台隐藏、收到运行中更新后保持隐藏、退出后恢复；原有实时公开增量、任务继续运行、两级Esc与原生导出回归均通过。
+- 预览脚本使用真实安装Pi的TuiAltScreen/VStack/ScrollView/Markdown和dark主题，生成宽屏120×30、窄屏70×24主界面、团队页、成员页及编辑展开页共五帧；经Pillow栅格化后查看宽屏、窄屏、成员与编辑PNG，根据预览改进了命令/编辑布局和符号字体。公开纯文本保存在docs/ui-preview-mission-panel.txt；ANSI和PNG位于忽略的.reference/artifacts/ui。
+- 上述PNG是隔离夹具的真实组件渲染预览，输入区为固定草稿，不是用户桌面截图。没有热重载用户Pi，也未验收真实终端鼠标拖选；逻辑复制通过脚本键盘路径验证。
+
+## 2.0.2恢复验证
+
+- 自定义重连错误不依赖HTTP状态码；固定5秒在单元测试中可取消，实际Pi使用0秒夹具验证次数与取消，默认配置断言为10/5000。
+- 原生Pi1.3.0默认重试3次/2秒指数退避/60秒上限；插件没有修改全局设置。
+- `/project`迁移使用临时真实Pi运行时，覆盖rename、switch、重启、回滚、精确授权和运行成员停止；用户真实1GB日志未热迁移。
+
+## 核心和工具验证
+
+- 自动mission登记、无Goal唤醒、busy主会话持久保留、发送租约与响应观察分离。
+- 固定30分钟报告不因peer派工提前；普通progress合并、不单独唤醒。
+- 有向通信ACL、祖先任务环拒绝、幂等request ID、旧epoch token拒绝。
+- 组内等待释放成员进程、同任务review回合；运行中peer note通过steer接入。
+- user stop保留身份、迟到成功不覆盖取消；普通提问不解除humanPaused。
+- 有限唤醒失败退避、重启不重放副作用、owner lock、unknown进程禁止盲目重试。
+- 提醒到期outbox/nextAt同事务，错过循环不补多条旧提醒。
+- 摘要输入预算、缓存复用、部分失败恢复、长度截断拒绝。
+- 约96MB合成日志LF流式导出，U+2028不拆记录，过滤系统/思考/签名及状态快照。
+- Exa请求与结果归一化、MCP SSE framing、private/mapped目标和私网重定向拒绝、环境允许项。
+- TUI renderer在20/50/80/120/180列、中文宽度、稳定排序下检查通过；无自动成员轮播。
+- 2.0.1查看器覆盖5/20/50/80/120/180列；键盘选择/折叠任务树、Enter展开、Tab目标/提醒、翻页、暂停跟随和新消息提示、End回最新、历史session切换、两级Esc及不触发模型/改变任务。
+- 有界反向LF日志分页、未完成尾记录、跨块与Unicode分隔符、超大记录分窗扫描、公开结构过滤；Pi1.3无累计message的RPC文字增量与thinking增量丢弃。
+- 空tasks不遮住chain、空chain不改变并行语义、可选null/空workspace/sandbox占位、有效权限冲突仍拒绝；整批预检防止半支团队。
+
+## 真实Podman
+
+显式使用本机已有镜像：
+
+```text
+73f6c8647ffd48490e5c1953a9dab250781c75d2b985fc61d5a40fdbb4c7f30d
+```
+
+命令（PowerShell）：
+
+```powershell
+$env:PI_SANDBOX_TEST_IMAGE='73f6c8647ffd48490e5c1953a9dab250781c75d2b985fc61d5a40fdbb4c7f30d'
+node scripts/test-v2.mjs tests/v2/container.test.mjs
+```
+
+4项实际执行：Python读取隔离输入与只读参考、受控产物写回；最小Yosys/Verilator模块；超时删除容器并保留部分日志/收据；取消仅停止本次容器并保留元数据。共约60秒，全部通过。未下载镜像、未修改真实硬件项目，结束时`podman ps`返回空列表。
+
+## 本轮没有验证或提供的事项
+
+- 没有对真实GPT/DeepSeek/其它provider网关发送请求；推理和tool协议仍需针对配置实测。
+- 未在Linux/macOS主机运行动态测试，未做整夜负载或进程强杀的完整故障注入。
+- TUI未做真实Windows终端截图与人工完整交互验收；已检查隔离夹具PNG，并通过公开组件渲染/宽度、脚本键盘事件及真实Pi命令接入验收。
+- 未安装独立daemon、OS scheduler或原生Windows token沙箱；维护器仍需要Pi存活。
+- 提醒提供ISO/after/fixed interval，暂不提供calendar cron/daily/weekly规则。
+- 没有修改已存在1GB旧Pi日志或声称其原生HTML导出限制已修复；新会话回归已通过，旧记录可流式公开导出。
+- 没有热重载用户当前真实Pi会话，也未修改其全局安装配置。package.json已指向v2，新打开的本地包会话使用新清单。
