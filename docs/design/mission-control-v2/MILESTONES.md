@@ -90,3 +90,4 @@ Windows、Node24.16.0、Pi1.3.0。普通测试全部使用临时Pi agent目录�
 - 删除原生显示装饰器、Symbol桥和补丁生成模块，维护脚本仅允许status/restore，apply明确拒绝；更新贡献与安全规则，禁止通过程序补丁/prototype改写实现功能。
 - 复用公开custom UI和LF查看器，新增主会话时间线入口/mission time、/mission timeline及工作台t；实时预览只接收公开事件，m退出查看回原生编辑器。
 - 真实Pi集成验证回复期间可见公开增量、完成后可见工具返回，未泄露私有fixture，未创建任务或中断主会话；前后Pi组件/CLI chunks哈希及旧全局渲染槽位不变。纯插件预览已检查。
+- 代码提交1b55f9c的GitHub运行39036068823成功：Windows/Ubuntu各92通过、4容器跳过、0失败，25文件严格类型和入口加载通过。
