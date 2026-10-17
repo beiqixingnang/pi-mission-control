@@ -82,6 +82,8 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 
 ## 核心和工具验证
 
+2.0.6另做真实公网检查：实际Pi会话通过离线模型驱动调用Exa搜索、抓取Pi官方扩展文档、拒绝本机地址，三项结果均正确进入后续模型上下文；不调用付费模型、不修改用户配置。另有example.com单次ECONNRESET失败记录；Brave与SearXNG未实测。详见[联网实现与实测](NETWORK.md)。
+
 - 自动mission登记、无Goal唤醒、busy主会话持久保留、发送租约与响应观察分离。
 - 固定30分钟报告不因peer派工提前；普通progress合并、不单独唤醒。
 - 有向通信ACL、祖先任务环拒绝、幂等request ID、旧epoch token拒绝。

@@ -218,6 +218,8 @@ Pi1.3.0自带的模型回合重试默认3次、2秒起指数退避、最长60秒
 
 `web_fetch`限制public HTTP(S)、体积和重定向，检查每跳并固定已验证DNS地址连接。仅提取有界文本，不替代浏览器。返回来源/时间不代表事实已验证；服务失败明确返回错误。
 
+2.0.6已通过真实Pi会话调用默认Exa搜索与Pi官方文档抓取，结果进入后续模型上下文。两项专用工具目前只注册给主会话；host成员可通过宿主命令联网，files/sandbox不因此获得联网能力。实现、配置与实测边界见[联网记录](docs/design/mission-control-v2/NETWORK.md)。
+
 `schedule`支持含时区ISO一次性时间、afterSeconds或everySeconds固定间隔，任务推进与消息入箱在同一事务完成，独立于Goal。daily/weekly/cron日历规则暂未提供，everySeconds=86400不能当成DST安全daily。
 
 ## 验证与资料
