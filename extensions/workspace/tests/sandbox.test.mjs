@@ -16,7 +16,7 @@ const jiti = createJiti(import.meta.url, { alias: { typebox: require.resolve("ty
 const { probeSandbox, runSandbox, inspectSandboxRun, validateSandboxExportPath } = await jiti.import(path.resolve(here, "../sandbox.ts"));
 
 async function fixture(fn) {
-	const base = await fs.mkdtemp(path.join(os.tmpdir(), "pi-sandbox-test-"));
+	const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "pi-sandbox-test-")));
 	const root = path.join(base, "workspace");
 	const extra = path.join(base, "reference");
 	const outside = path.join(base, "outside");

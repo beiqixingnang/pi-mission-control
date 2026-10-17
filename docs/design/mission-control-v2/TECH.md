@@ -68,7 +68,7 @@ TUI/RPC是常驻异步模式；print/json一次性模式在派工工具中join�
 
 ### 明确未提供的范围
 
-当前没有跨Pi进程退出仍工作的独立daemon、OS启动项、原生Windows token沙箱或日历cron/daily/weekly规则。仅支持显式容器强制后端和可信host。没有为真实provider网关做协议认证，没有在Linux主机跑动态验证。TUI以公开widget/详情面板呈现，未实现读取私有layoutRoot的永久右栏。
+当前没有跨Pi进程退出仍工作的独立daemon、OS启动项、原生Windows token沙箱或日历cron/daily/weekly规则。仅支持显式容器强制后端和可信host。没有为真实provider网关做协议认证；Ubuntu GitHub离线套件已执行，实际Linux硬件项目与长期负载仍未验证。TUI以公开widget/详情面板呈现，未实现读取私有layoutRoot的永久右栏。
 
 ### 2.0.1补充：派工兼容和只读对话查看
 

@@ -44,8 +44,11 @@ export class Store {
       );
       fs.closeSync(fd);
     }
+    let opened: DatabaseSync | undefined;
     try {
-      this.db = new DatabaseSync(path.join(this.directory, "state.sqlite"));
+      this.db = opened = new DatabaseSync(
+        path.join(this.directory, "state.sqlite"),
+      );
       this.db
         .exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,data TEXT NOT NULL);
@@ -70,7 +73,7 @@ export class Store {
       });
     } catch (error) {
       try {
-        this.db?.close();
+        opened?.close();
       } finally {
         this.releaseLock();
       }

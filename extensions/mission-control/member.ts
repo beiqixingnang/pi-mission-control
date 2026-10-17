@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import {
   createReadToolDefinition,
   createWriteToolDefinition,
@@ -18,6 +18,7 @@ import installReconnect from "./reconnect.ts";
 import type { Member } from "../../runtime/types.ts";
 
 const result = (value: unknown) => ({
+  details: undefined,
   content: [
     {
       type: "text" as const,
@@ -55,7 +56,9 @@ export default async function (pi: ExtensionAPI) {
     config.directory,
   ]);
   const names: string[] = [];
-  const register = (definition: ToolDefinition<any, any>) => {
+  const register = <TParams extends TSchema, TDetails, TState>(
+    definition: ToolDefinition<TParams, TDetails, TState>,
+  ) => {
     names.push(definition.name);
     pi.registerTool(definition);
   };
@@ -74,9 +77,9 @@ export default async function (pi: ExtensionAPI) {
       throw new Error(data.error ?? `Coordinator HTTP ${response.status}`);
     return data.result;
   };
-  const guard = (
-    definition: ToolDefinition<any, any>,
-  ): ToolDefinition<any, any> => {
+  const guard = <TParams extends TSchema, TDetails, TState>(
+    definition: ToolDefinition<TParams, TDetails, TState>,
+  ): ToolDefinition<TParams, TDetails, TState> => {
     const original = definition.execute;
     return {
       ...definition,
@@ -84,9 +87,14 @@ export default async function (pi: ExtensionAPI) {
         definition.description +
         " File access is restricted to the assigned roots.",
       async execute(id, args, signal, update, ctx) {
+        if (!args || typeof args !== "object")
+          throw new Error("File tool arguments must be an object");
+        const source = "path" in args ? args.path : ".";
+        if (typeof source !== "string")
+          throw new Error("File tool path must be a string");
         const writing = ["write", "edit"].includes(definition.name);
         const target = await access.authorize(
-          args.path ?? ".",
+          source,
           writing,
           definition.name === "write",
         );

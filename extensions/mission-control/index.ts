@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { finished } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import {
   getAgentDir,
   getPackageDir,
@@ -73,6 +73,7 @@ const textResult = (value: unknown) => {
   const text =
     typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return {
+    details: undefined,
     content: [
       {
         type: "text" as const,
@@ -335,7 +336,7 @@ export default function (pi: ExtensionAPI) {
     name: string,
     label: string,
     description: string,
-    parameters: any,
+    parameters: TSchema,
     execute: (
       args: any,
       signal: AbortSignal | undefined,
@@ -698,7 +699,10 @@ export default function (pi: ExtensionAPI) {
     }),
     async (args, _signal, context) => {
       const { inputs, chain } = delegationInput(args);
-      const prepared = [];
+      const prepared: {
+        definition: Awaited<ReturnType<typeof prepareMember>>;
+        task: string;
+      }[] = [];
       for (const input of inputs) {
         const name = `sub-${(input.agent ?? "worker").replace(/[^a-z0-9-]/g, "").slice(0, 20)}-${randomUUID().slice(0, 8)}`;
         const definition = await prepareMember(

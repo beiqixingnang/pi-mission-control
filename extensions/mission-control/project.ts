@@ -21,6 +21,7 @@ import {
   resolveProjectPath,
 } from "../project/identity.ts";
 const result = (value: unknown, isError = false) => ({
+  details: undefined,
   content: [
     {
       type: "text" as const,

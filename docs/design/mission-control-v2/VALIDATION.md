@@ -7,7 +7,7 @@
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；25个lead工具、6个用户命令（含独立压缩命令）；测试provider不被默认加载 |
-| `npm run typecheck` | strict TypeScript检查通过，包括所复用的workspace policy/Podman后端 |
+| `npm run typecheck` | 2.0.6通过Compiler API严格检查23个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
 | `npm test` | 2.0.5完整运行86用例：82通过、0失败、4个需显式镜像的容器用例跳过；耗时约40.1秒 |
 | 网络MCP framing回归 | 已纳入上述完整86用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
@@ -64,6 +64,15 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 - 预览脚本使用真实安装Pi的TuiAltScreen/VStack/ScrollView/Markdown和dark主题，生成宽屏120×30、窄屏70×24主界面、团队页、成员页及编辑展开页共五帧；经Pillow栅格化后查看宽屏、窄屏、成员与编辑PNG，根据预览改进了命令/编辑布局和符号字体。公开纯文本保存在docs/ui-preview-mission-panel.txt；ANSI和PNG位于忽略的.reference/artifacts/ui。
 - 上述PNG是隔离夹具的真实组件渲染预览，输入区为固定草稿，不是用户桌面截图。没有热重载用户Pi，也未验收真实终端鼠标拖选；逻辑复制通过脚本键盘路径验证。
 
+## 2.0.6推送与CI修正
+
+- 首次推送be990a4触发GitHub Actions运行39026044161：Ubuntu离线套件86项中82通过、4项容器跳过、0失败；随后严格类型检查失败。Windows有3项容器策略静态测试在临时目录规范化之前失败，其余用例正常。这些失败未被当作验收成功。
+- 类型错误包含ToolDefinition<any>丢失具体schema后使Static<any>成为unknown、工具结果缺少声明要求的details、prepared数组隐式any，以及SQLite异常清理引用尚未赋值的字段。修正泛型包装、结果结构、数组类型和已打开连接的局部引用；没有关闭strict或扩大any来压过错误。
+- 原类型检查脚本在本机返回0，却没有发现上述错误；Debian及GitHub暴露了缺口。现直接调用TypeScript Compiler API，明确核对kernel、lead/member入口、viewer和compaction被选中，并报告23个直接源码文件。Windows Node24和Debian Node22.23.3的静态检查均通过；Debian这里只执行类型检查，不用Node22运行v2。
+- 临时在runtime中注入不存在的ExtensionAPI方法和number赋给string，确认检查返回1且报告两种错误，随后删除探针；防止空检查或宿主API退化成any被误算通过。
+- Windows runner的os.tmpdir可能含8.3短路径别名。测试夹具先对mkdtemp结果取realpath，再传给沙箱策略；运行时继续拒绝模糊别名，没有放宽权限规则。容器专项6项静态检查通过、4项实机检查按默认跳过。
+- 核心修正后本机完整离线套件再次82通过、0失败、4跳过（约43.3秒）；入口加载通过。后续提交会自动运行Ubuntu/Windows Node24工作流，结果以对应提交的Actions状态为准。
+
 ## 2.0.2恢复验证
 
 - 自定义重连错误不依赖HTTP状态码；固定5秒在单元测试中可取消，实际Pi使用0秒夹具验证次数与取消，默认配置断言为10/5000。
@@ -107,7 +116,7 @@ node scripts/test-v2.mjs tests/v2/container.test.mjs
 ## 本轮没有验证或提供的事项
 
 - 没有对真实GPT/DeepSeek/其它provider网关发送请求；推理和tool协议仍需针对配置实测。
-- 未在Linux/macOS主机运行动态测试，未做整夜负载或进程强杀的完整故障注入。
+- Ubuntu GitHub已运行离线动态套件；未在macOS主机测试，也未验证Linux实际硬件项目、整夜负载或进程强杀的完整故障注入。
 - TUI未做真实Windows终端截图与人工完整交互验收；已检查隔离夹具PNG，并通过公开组件渲染/宽度、脚本键盘事件及真实Pi命令接入验收。
 - 未安装独立daemon、OS scheduler或原生Windows token沙箱；维护器仍需要Pi存活。
 - 提醒提供ISO/after/fixed interval，暂不提供calendar cron/daily/weekly规则。

@@ -1,3 +1,11 @@
+# 2.0.6 — strict tool types and CI portability (2026-10-17)
+
+- Preserve tool parameter, result-detail and renderer-state generics through member registration and file guards; include explicit result details and type prepared delegation batches.
+- Track an opened SQLite handle separately during constructor cleanup.
+- Run strict typechecking through the TypeScript compiler API, verify required source selection and report the checked file count. Confirm injected invalid API calls and primitive assignments fail the check.
+- Canonicalize sandbox test temporary directories before applying path rules so Windows runner short-name aliases do not obscure the intended assertions. Keep alias rejection in the runtime.
+- Record the initial Ubuntu test success, CI failures and focused fixes without treating local verification as complete provider or overnight validation.
+
 # 2.0.5 — horizontal task board and native action panels (2026-10-17)
 
 - Place a persistent full-width task board directly above Pi's editor, with the objective, progress report time, next reminder and one row per visible member.
