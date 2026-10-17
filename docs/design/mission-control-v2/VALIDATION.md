@@ -7,8 +7,8 @@
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；30个lead工具、5个Mission Control命令和1个独立压缩命令；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.12通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.12本机完整100用例：96通过、0失败、4个需显式镜像的容器用例跳过；耗时约47.9秒 |
+| `npm run typecheck` | 2.0.13通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
+| `npm test` | 2.0.13本机完整101用例：97通过、0失败、4个需显式镜像的容器用例跳过；耗时约54.3秒 |
 | GitHub Actions | 2.0.10代码提交56360dc，运行39041177202成功；Ubuntu与Windows / Node24均通过，工具目录刷新改动与25文件严格类型检查已在CI验证 |
 | 网络MCP framing回归 | 已纳入上述完整99用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
@@ -118,6 +118,10 @@ tests/v2/pi-integration.test.mjs共19用例通过：
 ## 2.0.12压缩模型范围验证
 
 - 真实Pi压缩回归验证主会话配置与成员默认配置写入不同文件；现有主会话压缩成功路径继续通过。
+
+## 2.0.13提醒占位参数验证
+
+- 真实Pi回归覆盖截图中的`at=""`、`afterSeconds=3600`、`everySeconds=1`组合，成功创建一次性提醒，不再返回“Supply exactly one”错误。
 
 ## 核心和工具验证
 

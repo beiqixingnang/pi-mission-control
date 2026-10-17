@@ -115,3 +115,7 @@ Windows、Node24.16.0、Pi1.3.0。普通测试全部使用临时Pi agent目录�
 
 - `/compaction-model lead ...`写入当前Mission Control session；`/compaction-model member ...`写入该session下未来子智能体的默认配置。
 - 子智能体可在自己的会话内覆盖摘要模型；旧全局配置和环境变量仍作为兼容回退。
+
+## 2.0.13提醒参数归一化
+
+- 忽略模型生成的空字符串占位字段；对`afterSeconds=实际值`同时带`everySeconds=1`的常见占位形状按一次性提醒处理，避免模型重复撞同一校验错误。

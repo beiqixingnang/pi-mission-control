@@ -1,3 +1,9 @@
+# 2.0.13 — tolerate placeholder reminder parameters (2026-10-17)
+
+- Ignore empty `at`/`id` placeholders emitted by models when creating reminders.
+- Resolve the common `afterSeconds=<meaningful>, everySeconds=1` placeholder shape as a one-shot reminder instead of repeatedly rejecting the call.
+- Add a real Pi regression for the screenshot failure pattern.
+
 # 2.0.12 — scoped compaction models for leads and members (2026-10-17)
 
 - Add scoped `/compaction-model lead ...` and `/compaction-model member ...` settings. The lead setting is stored per current Mission Control session; the member setting is inherited by future subagent sessions.

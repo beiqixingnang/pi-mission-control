@@ -392,6 +392,23 @@ test(
     }),
 );
 
+test("schedule ignores empty placeholders and resolves a meaningful one-shot selector", () =>
+  harness(async (h) => {
+    const result = await h.tool("schedule", {
+      action: "create",
+      at: "",
+      afterSeconds: 3600,
+      everySeconds: 1,
+      id: "",
+      title: "临时生命周期开关测试提醒",
+      prompt: "随后的测试会删除",
+    });
+    assert.equal(result.isError, undefined, result.content?.[0]?.text);
+    const schedule = JSON.parse(result.content[0].text);
+    assert.equal(schedule.intervalMs, undefined);
+    assert.equal((await h.snapshot()).schedules.length, 1);
+  }));
+
 test(
   "real RPC teammate review closes downstream work before the parent delivery",
   { timeout: 40000 },

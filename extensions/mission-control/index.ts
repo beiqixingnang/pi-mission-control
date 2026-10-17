@@ -916,7 +916,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "schedule",
     "Schedule reminder",
-    "Create, list and manage persistent reminders. Delivery is independent of Goal state. Intervals are fixed seconds; at must include an explicit timezone. Deleting or pausing a reminder cancels its stale pending deliveries.",
+    "Create, list and manage persistent reminders. Omit unused time fields; empty string placeholders are ignored. Delivery is independent of Goal state. Intervals are fixed seconds; at must include an explicit timezone. Deleting or pausing a reminder cancels its stale pending deliveries.",
     Type.Object({
       action: Type.Union([
         Type.Literal("create"),
@@ -948,12 +948,16 @@ export default function (pi: ExtensionAPI) {
           state: args.action === "pause" ? "paused" : "active",
         });
       if (args.action === "update") {
+        const at =
+          typeof args.at === "string" && args.at.trim()
+            ? args.at.trim()
+            : undefined;
         const next = args.at
-          ? Date.parse(args.at)
+          ? Date.parse(at!)
           : args.afterSeconds !== undefined
             ? Date.now() + args.afterSeconds * 1000
             : undefined;
-        if (args.at && !/(Z|[+-]\d\d:\d\d)$/.test(args.at))
+        if (at && !/(Z|[+-]\d\d:\d\d)$/.test(at))
           throw new Error("at requires an ISO timestamp with timezone");
         return current().updateSchedule(args.id, {
           title: args.title,
@@ -965,21 +969,56 @@ export default function (pi: ExtensionAPI) {
               : args.everySeconds * 1000,
         });
       }
-      const selectors = [args.at, args.afterSeconds, args.everySeconds].filter(
-        (v) => v !== undefined,
-      );
-      if (selectors.length !== 1)
-        throw new Error("Supply exactly one at, afterSeconds or everySeconds");
-      if (args.at && !/(Z|[+-]\d\d:\d\d)$/.test(args.at))
+      const at =
+        typeof args.at === "string" && args.at.trim()
+          ? args.at.trim()
+          : undefined;
+      const afterSeconds = Number.isSafeInteger(args.afterSeconds)
+        ? args.afterSeconds
+        : undefined;
+      const everySeconds = Number.isSafeInteger(args.everySeconds)
+        ? args.everySeconds
+        : undefined;
+      let selector: "at" | "afterSeconds" | "everySeconds";
+      if (at) selector = "at";
+      else if (afterSeconds !== undefined && everySeconds === undefined)
+        selector = "afterSeconds";
+      else if (everySeconds !== undefined && afterSeconds === undefined)
+        selector = "everySeconds";
+      else if (
+        afterSeconds !== undefined &&
+        everySeconds !== undefined &&
+        everySeconds === 1 &&
+        afterSeconds > 1
+      )
+        // Models often emit everySeconds=1 as a placeholder while intending
+        // the meaningful afterSeconds value. Treat that exact shape as a
+        // one-shot reminder instead of trapping the lead in validation retries.
+        selector = "afterSeconds";
+      else if (
+        afterSeconds !== undefined &&
+        everySeconds !== undefined &&
+        afterSeconds === 1 &&
+        everySeconds > 1
+      )
+        selector = "everySeconds";
+      else
+        throw new Error(
+          "Supply exactly one nonempty time selector: at, afterSeconds or everySeconds",
+        );
+      if (at && !/(Z|[+-]\d\d:\d\d)$/.test(at))
         throw new Error("at requires an ISO timestamp with timezone");
-      const next = args.at
-        ? Date.parse(args.at)
-        : Date.now() + (args.afterSeconds ?? args.everySeconds) * 1000;
+      const next =
+        selector === "at"
+          ? Date.parse(at!)
+          : Date.now() +
+            (selector === "afterSeconds" ? afterSeconds! : everySeconds!) *
+              1000;
       return current().addSchedule(
         args.title ?? "Reminder",
         args.prompt ?? "",
         next,
-        args.everySeconds ? args.everySeconds * 1000 : undefined,
+        selector === "everySeconds" ? everySeconds! * 1000 : undefined,
       );
     },
   );
