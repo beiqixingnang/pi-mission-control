@@ -7,10 +7,10 @@
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；25个lead工具、6个用户命令（含独立压缩命令）；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.7通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.7本机完整95用例：91通过、0失败、4个需显式镜像的容器用例跳过；耗时约48.5秒 |
+| `npm run typecheck` | 2.0.8通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
+| `npm test` | 2.0.8本机完整96用例：92通过、0失败、4个需显式镜像的容器用例跳过；耗时约50.1秒 |
 | GitHub Actions | 2.0.7代码提交7c59b10，运行39029356454成功；Ubuntu与Windows / Node24各91通过、4跳过、0失败，入口和25文件严格类型检查全部通过 |
-| 网络MCP framing回归 | 已纳入上述完整95用例 |
+| 网络MCP framing回归 | 已纳入上述完整96用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
 | npm tarball | 实际生成、检查内容、解包后加载v2入口成功；不含.reference、vendor、用户会话/认证配置或默认加载测试provider |
 | Git whitespace | `git diff --check`核对；历史文档已标v1，v2仅加载新清单 |
@@ -21,7 +21,7 @@
 
 ## 真实Pi流程
 
-tests/v2/pi-integration.test.mjs共18用例通过：
+tests/v2/pi-integration.test.mjs共19用例通过：
 
 1. 模型未创建Goal、未开启监督器，只派工并结束主回合；成员实际调用read拿到标记，随后自动唤醒主回合，交付观察确认，原生HTML导出成功。
 2. 模型off维护被拒绝，read-only+host配置被拒绝，原生export/copy/tree/model命令未被覆盖。
@@ -41,6 +41,7 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 16. 工作区rename/switch保留主/成员记忆、任务和权限，重启延续、原生取消回滚、运行成员停止、授权撤销/过期及新会话首响应前切换均通过。
 17. 独立摘要模型的命令/环境优先级、预算配置和metadata-only debug通过；未把提示或摘要正文写进debug。
 18. `project_resolve`按稳定项目身份解析历史路径，迁移历史LF正文只改新header，SQLite/产物副本和暂停提醒状态通过。
+19. 真实Pi在主回复期间打开纯插件主时间线，显示公开增量及工具返回、排除私有fixture；退出不abort或派工，Pi文件哈希和原生render引用/旧全局槽位保持不变。
 
 ## 2.0.3 UI验证
 
@@ -80,7 +81,7 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 - 原生Pi1.3.0默认重试3次/2秒指数退避/60秒上限；插件没有修改全局设置。
 - `/project`迁移使用临时真实Pi运行时，覆盖rename、switch、重启、回滚、精确授权和运行成员停止；用户真实1GB日志未热迁移。
 
-## 2.0.7消息时间验证
+## 2.0.7消息时间验证（历史，2.0.8已撤回原生补丁）
 
 - 新增9项时间与原生组件回归；当前完整95项中91通过、4容器跳过、0失败，类型检查25个直接文件及依赖通过，入口仍为25工具/6命令。
 - dark/light/system实际主题覆盖重复正文的不同时间、保存时间/日期格式、缺失时间、稳定流式时间、真实工具耗时和UI异常回退；成员复制排除时间/耗时，原生HTML导出回归继续通过。
@@ -88,6 +89,15 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 - 重新生成五个真实Pi组件隔离预览，检查了原生主对话和成员对话的时间/耗时PNG，未操作用户终端；生效需要重启Pi，/reload不足以更新核心模块。
 - 代码提交7c59b10的GitHub运行39029356454最终成功：Windows job117386517804与Ubuntu job117386517938均91通过、4容器跳过、0失败，入口与25文件严格类型检查通过。CI使用未适配的原装Pi，原生组件测试在隔离副本中检验适配，没有给runner全局安装写补丁。
 - 完整实现和恢复方式见[TIMESTAMPS](TIMESTAMPS.md)。没有给本机Linux安装写适配；Debian这里只执行静态类型检查。真实终端人工完整交互、付费provider与整夜负载仍未由CI覆盖。
+
+## 2.0.8纯插件时间线
+
+- 用户要求不修改Pi。已恢复Windows的六个Pi文件并与原始备份逐一核对SHA256，status报告patchedFiles=0、installerAvailable=false；没有强制重载用户会话。
+- 删除原生显示装饰器、Symbol桥、补丁生成模块及旧原生修改测试；保留时间解析、公开元数据、流式稳定时间、重复正文等通用回归，并增加纯插件主历史/临时预览与已撤回apply的拒绝测试。
+- 主时间线真实Pi集成已通过：公开文字在工具完成前可见，随后读到实际工具返回，私有思考/签名fixture不可见；原生组件/interactive-mode/CLI chunks前后哈希及UserMessageComponent.render引用保持一致，旧全局显示槽位未改变。
+- 主查看器覆盖40条LF分页、暂停跟随/新消息/End、历史加载、5/20/50/80/120/180列、重复时间与c复制；m仅返回原生输入，q退出，不创建成员或任务。
+- 本机完整96项中92通过、4容器跳过、0失败，约50.1秒；Windows与Debian25文件严格类型检查通过，25工具/6命令入口加载通过。跨平台动态结果以对应提交的Actions为准。
+- 六帧预览在恢复原样的Pi上重新生成，并检查原生主界面、成员页与主时间线PNG；它们是隔离组件预览，不是桌面截图。本轮未调用付费模型或重跑实际Podman。
 
 ## 核心和工具验证
 

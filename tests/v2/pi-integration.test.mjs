@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostDir } from "../../scripts/host.mjs";
+import { createHash } from "node:crypto";
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -1001,4 +1002,88 @@ test(
         0,
       );
     }),
+);
+
+test(
+  "real Pi opens the main public timeline during a live reply without modifying native Pi files",
+  { timeout: 30000 },
+  async () => {
+    const nativeBase = path.join(hostDir, "dist/modes/interactive");
+    const nativeFiles = [
+      "components/user-message.js",
+      "components/assistant-message.js",
+      "components/tool-execution.js",
+      "components/custom-message.js",
+      "interactive-mode.js",
+    ].map((file) => path.join(nativeBase, file));
+    const chunks = path.join(hostDir, "dist/bundle/chunks");
+    nativeFiles.push(
+      ...fsSync
+        .readdirSync(chunks)
+        .filter((file) => file.endsWith(".js"))
+        .map((file) => path.join(chunks, file)),
+    );
+    const fingerprint = () =>
+      nativeFiles.map((file) =>
+        createHash("sha256").update(fsSync.readFileSync(file)).digest("hex"),
+      );
+    const before = fingerprint();
+    const { UserMessageComponent } = await import(
+      pathToFileURL(path.join(nativeBase, "components/user-message.js"))
+    );
+    const nativeRender = UserMessageComponent.prototype.render;
+    const nativeKey = Symbol.for("pi-mission-control.timestamp-renderer.v1"),
+      previousRenderer = globalThis[nativeKey];
+    await harness(async (h) => {
+      let component, dispose;
+      initTheme("dark", false);
+      const runner = h.session.extensionRunner;
+      runner.setUIContext(
+        {
+          ...runner.getUIContext(),
+          custom: async (factory) =>
+            new Promise((resolve) => {
+              component = factory({ requestRender() {} }, piTheme, {}, resolve);
+              dispose = () => component.dispose?.();
+            }),
+        },
+        "tui",
+      );
+      const file = path.join(h.cwd, "main-read.txt");
+      await fs.writeFile(file, "MAIN_TOOL_RETURN_MARKER");
+      const lead = h.session.prompt(
+        "V2_TEST:" + JSON.stringify({ op: "stream-read", file }),
+      );
+      await until(() => h.session.isStreaming);
+      const viewing = h.session.prompt("/mission time");
+      try {
+        await until(
+          () =>
+            component &&
+            component.render(160).join("\n").includes("LIVE_PUBLIC_BEGIN"),
+        );
+        assert.equal(h.session.isStreaming, true);
+        assert.match(component.render(160).join("\n"), /公开时间线/);
+        assert.doesNotMatch(component.render(160).join("\n"), /PRIVATE_LIVE_/);
+        await lead;
+        await until(() =>
+          component.render(160).join("\n").includes("MAIN_TOOL_RETURN_MARKER"),
+        );
+        assert.doesNotMatch(component.render(160).join("\n"), /PRIVATE_LIVE_/);
+        component.handleInput("m");
+        await viewing;
+        dispose();
+        const state = await h.snapshot();
+        assert.equal(state.members.length, 0);
+        assert.equal(state.tasks.length, 0);
+      } finally {
+        dispose?.();
+        await h.session.abort();
+        await lead;
+      }
+    });
+    assert.deepEqual(fingerprint(), before);
+    assert.equal(UserMessageComponent.prototype.render, nativeRender);
+    assert.equal(globalThis[nativeKey], previousRenderer);
+  },
 );

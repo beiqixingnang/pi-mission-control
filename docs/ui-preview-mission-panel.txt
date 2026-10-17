@@ -1,11 +1,11 @@
 === 输入框上方横向看板 · Pi渲染器隔离预览 (120×30) ===
- 19:31:19
+
  继续推进CPU/GPU任务，保留图形输出，交付后由监督员复核。
 
- 19:31:24
+
  CPU执行员正在补充边界测试，监督员等待结果。
  GPU阶段交付已经保存，后续问题由组内继续复核。
- 19:32:09 · 耗时 4.5秒
+
 
  PS> npm test -- --filter register
 
@@ -31,13 +31,13 @@
 › 尚未发送的主对话草稿
 
 === 窄屏横向看板 · Pi渲染器隔离预览 (70×24) ===
- 19:31:19
+
  继续推进CPU/GPU任务，保留图形输出，交付后由监督员复核。
 
- 19:31:24
+
  CPU执行员正在补充边界测试，监督员等待结果。
  GPU阶段交付已经保存，后续问题由组内继续复核。
- 19:32:09 · 耗时 4.5秒
+
 
  PS> npm test -- --filter register
 
@@ -66,7 +66,7 @@ AGENTS / TEAM STATUS
   ! · gpu-reviewer · 失败 [host]
   ✓ · gpu-executor · 完成 [host]
 
-↑↓ 选择 · Enter 对话 · ←→ 折叠 · Tab 切页 · Esc 返回 · /agents 可再次打开
+↑↓ 选择 · Enter 对话 · t 主对话时间线 · ←→ 折叠 · Tab 切页 · Esc 返回
 
 
 
@@ -93,31 +93,31 @@ AGENTS / TEAM STATUS
 === 成员对话与动作底色 · Pi渲染器隔离预览 (120×44) ===
 cpu-executor · CPU执行员
 执行中 · 跟随最新 · 会话 1/1
-  用户任务  19:30:29
+  用户任务  21:09:27
     │ 核对寄存器复位行为，保留已有接口并补充测试。
 
-  成员回复  19:30:39
+  成员回复  21:09:37
     已核对接口约束。接下来修正复位值，再执行边界测试。
 
     - 保留现有图形接口
     - 用实际测试结果提交监督员复核
 
-  编辑文件 · src/register.ts  19:30:58 · 耗时 1.2秒
+  编辑文件 · src/register.ts  21:09:56 · 耗时 1.2秒
     src/register.ts
     - const reset = 1;
     + const reset = 0;
 
-  工具返回 · edit  19:30:59 · 耗时 1.2秒
+  工具返回 · edit  21:09:57 · 耗时 1.2秒
     Updated src/register.ts
 
-  执行命令 · powershell  19:31:14 · 耗时 4.5秒
+  执行命令 · powershell  21:10:12 · 耗时 4.5秒
     npm test -- --filter register
 
-  工具返回 · powershell  19:31:19 · 耗时 4.5秒
+  工具返回 · powershell  21:10:17 · 耗时 4.5秒
     PASS register-interface
     2 tests passed
 
-▶ 执行命令 · powershell  19:31:29
+▶ 执行命令 · powershell  21:10:27
     npm run verify:boundaries
 
 ↑↓ 选择 · Enter 展开 · m 发消息 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新 · [ ] 历史
@@ -139,27 +139,66 @@ Esc 返回团队 · q 退出工作台 · 当前页面不使用右侧分栏
 === 编辑内容展开 · Pi渲染器隔离预览 (100×32) ===
 cpu-executor · CPU执行员
 执行中 · 暂停跟随 · 会话 1/1
-  用户任务  19:30:29
+  用户任务  21:09:27
     │ 核对寄存器复位行为，保留已有接口并补充测试。
 
-  成员回复  19:30:39
+  成员回复  21:09:37
     已核对接口约束。接下来修正复位值，再执行边界测试。
 
     - 保留现有图形接口
     - 用实际测试结果提交监督员复核
 
-▶ 编辑文件 · src/register.ts  [展开]  19:30:58 · 耗时 1.2秒
+▶ 编辑文件 · src/register.ts  [展开]  21:09:56 · 耗时 1.2秒
     src/register.ts
     - const reset = 1;
     + const reset = 0;
 
-  工具返回 · edit  19:30:59 · 耗时 1.2秒
+  工具返回 · edit  21:09:57 · 耗时 1.2秒
     Updated src/register.ts
 
-  执行命令 · powershell  19:31:14 · 耗时 4.5秒
+  执行命令 · powershell  21:10:12 · 耗时 4.5秒
     npm test -- --filter register
 
-  工具返回 · powershell  19:31:19 · 耗时 4.5秒
+  工具返回 · powershell  21:10:17 · 耗时 4.5秒
     PASS register-interface
 ↑↓ 选择 · Enter 展开 · m 发消息 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新 · [ ] 历史
+Esc 返回团队 · q 退出工作台 · 当前页面不使用右侧分栏
+
+
+
+
+
+
+
+=== 纯插件主对话时间线 · 原生Pi保持原样 (120×44) ===
+主会话 · 公开时间线
+磁盘公开记录，非模型上下文 · 跟随最新
+  用户任务  21:09:27
+    │ 核对寄存器复位行为，保留已有接口并补充测试。
+
+  主会话回复  21:09:37
+    已核对接口约束。接下来修正复位值，再执行边界测试。
+
+    - 保留现有图形接口
+    - 用实际测试结果提交监督员复核
+
+  编辑文件 · src/register.ts  [展开]  21:09:56 · 耗时 1.2秒
+    src/register.ts
+    - const reset = 1;
+    + const reset = 0;
+
+  工具返回 · edit  21:09:57 · 耗时 1.2秒
+    Updated src/register.ts
+
+  执行命令 · powershell  21:10:12 · 耗时 4.5秒
+    npm test -- --filter register
+
+  工具返回 · powershell  21:10:17 · 耗时 4.5秒
+    PASS register-interface
+    2 tests passed
+
+▶ 执行命令 · powershell  21:10:27
+    npm run verify:boundaries
+
+↑↓ 选择 · Enter 展开 · m 返回输入 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新
 Esc 返回团队 · q 退出工作台 · 当前页面不使用右侧分栏

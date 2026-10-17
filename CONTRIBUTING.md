@@ -2,7 +2,7 @@
 
 Pi Mission Control is a small, session-local extension package for Pi. Contributions should preserve Pi's extension model and should not require a fork of Pi or changes to a user's global Pi configuration.
 
-The optional Pi1.3.0 message-time presentation adapter is an explicit exception for native rendering metadata. Keep it opt-in, version/shape checked and reversible; never apply it as an installation or extension-load side effect. See docs/design/mission-control-v2/TIMESTAMPS.md.
+Do not patch the installed Pi program, replace native component prototypes, or use a private rendering bridge. Message times belong in plugin-owned views. The withdrawn 2.0.7 adapter has only a checksum-guarded recovery utility; do not restore an installation capability. See docs/design/mission-control-v2/TIMESTAMPS.md.
 
 ## Before opening a change
 

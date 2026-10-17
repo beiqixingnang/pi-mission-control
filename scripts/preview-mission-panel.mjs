@@ -33,9 +33,6 @@ const { MissionPanel } = await jiti.import(
 const { board } = await jiti.import(
   path.join(root, "extensions/mission-control/ui.ts"),
 );
-const { ToolTimes, decorateNativeTime, TIMESTAMP_RENDERER } = await jiti.import(
-  path.join(root, "extensions/mission-control/timestamps.ts"),
-);
 const { UserMessageComponent } = await import(
   pathToFileURL(
     path.join(hostDir, "dist/modes/interactive/components/user-message.js"),
@@ -63,6 +60,7 @@ const { initTheme, theme, getMarkdownTheme } = await import(
 initTheme("dark", false);
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mc-v2-ui-preview-"));
+const leadLog = path.join(directory, "lead.jsonl");
 const kernel = new MissionKernel({
   directory,
   cwd: directory,
@@ -96,7 +94,12 @@ const panel = new MissionPanel(
   kernel,
   () => {},
   () => {},
-  { pollMs: 0, height: () => terminal.rows, theme },
+  {
+    pollMs: 0,
+    height: () => terminal.rows,
+    theme,
+    leadSessionFile: () => leadLog,
+  },
 );
 const frames = [];
 function frame(name, title, component, columns, rows) {
@@ -254,17 +257,10 @@ try {
     ].join("\n") + "\n",
   );
   kernel.store.putMember(member);
-  const nativeTimes = new ToolTimes();
-  nativeTimes.start("preview-native", now - 20000);
-  nativeTimes.end("preview-native", 4500, now - 15500);
-  globalThis[TIMESTAMP_RENDERER] = (lines, metadata) =>
-    decorateNativeTime(lines, metadata, nativeTimes, now);
-  const user = Object.assign(
-    new UserMessageComponent(
-      "继续推进CPU/GPU任务，保留图形输出，交付后由监督员复核。",
-      getMarkdownTheme(),
-    ),
-    { [Symbol.for("pi-mission-control.message-time.v1")]: now - 70000 },
+  fs.copyFileSync(member.sessionFile, leadLog);
+  const user = new UserMessageComponent(
+    "继续推进CPU/GPU任务，保留图形输出，交付后由监督员复核。",
+    getMarkdownTheme(),
   );
   const assistant = new AssistantMessageComponent(
     {
@@ -335,6 +331,14 @@ try {
   panel.render(120);
   panel.handleInput("\r");
   frame("05-edit", "编辑内容展开 · Pi渲染器隔离预览", panel, 100, 32);
+  await panel.openLead();
+  frame(
+    "06-lead-timeline",
+    "纯插件主对话时间线 · 原生Pi保持原样",
+    panel,
+    120,
+    44,
+  );
   const output = path.join(root, ".reference/artifacts/ui");
   fs.mkdirSync(output, { recursive: true });
   fs.writeFileSync(
@@ -365,7 +369,6 @@ try {
     `Rendered ${frames.length} frames to .reference/artifacts/ui/frames.json and docs/ui-preview-mission-panel.txt`,
   );
 } finally {
-  delete globalThis[TIMESTAMP_RENDERER];
   panel.dispose();
   tui.stop();
   await kernel.close();

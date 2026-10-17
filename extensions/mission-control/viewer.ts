@@ -13,7 +13,7 @@ import {
   type MarkdownTheme,
 } from "@earendil-works/pi-tui";
 import type { MissionKernel } from "../../runtime/kernel.ts";
-import type { Task } from "../../runtime/types.ts";
+import type { Task, PublicActivity } from "../../runtime/types.ts";
 import { cleanText, textOf } from "../../runtime/public.ts";
 import {
   memberSessionFiles,
@@ -65,6 +65,8 @@ interface ViewerOptions {
   theme?: ViewTheme;
   editMessage?: (memberName: string) => Promise<string | undefined>;
   copyMessage?: (text: string) => Promise<void>;
+  leadSessionFile?: () => string | undefined;
+  leadPreviews?: () => PublicActivity[];
 }
 
 function boundedRecords(records: TranscriptRecord[], newest = false) {
@@ -156,7 +158,10 @@ export function teamRows(
   return rows;
 }
 
-export function conversationItems(records: TranscriptRecord[]): Item[] {
+export function conversationItems(
+  records: TranscriptRecord[],
+  assistantLabel = "成员回复",
+): Item[] {
   const results = new Map<
     string,
     { outcome: "error" | "success"; timestamp?: number; durationMs?: number }
@@ -198,7 +203,7 @@ export function conversationItems(records: TranscriptRecord[]): Item[] {
         kind === "user"
           ? "用户任务"
           : kind === "assistant"
-            ? "成员回复"
+            ? assistantLabel
             : kind === "error"
               ? `工具错误 · ${e.toolName ?? "tool"}`
               : kind === "tool-result"
@@ -276,6 +281,7 @@ function itemMarkdown(item: Item, body: string) {
 /** Full-screen team workbench. It never uses a permanent side panel. */
 export class MissionPanel {
   view: "team" | "conversation" = "team";
+  scope: "member" | "lead" = "member";
   tab = 0;
   following = true;
   selected = 0;
@@ -308,6 +314,8 @@ export class MissionPanel {
   private theme?: ViewTheme;
   private editMessage?: (memberName: string) => Promise<string | undefined>;
   private copyMessage?: (text: string) => Promise<void>;
+  private leadSessionFile?: () => string | undefined;
+  private leadPreviews?: () => PublicActivity[];
 
   constructor(
     private kernel: MissionKernel,
@@ -318,6 +326,8 @@ export class MissionPanel {
     this.theme = options.theme;
     this.editMessage = options.editMessage;
     this.copyMessage = options.copyMessage;
+    this.leadSessionFile = options.leadSessionFile;
+    this.leadPreviews = options.leadPreviews;
     this.getHeight = options.height ?? (() => process.stdout.rows ?? 24);
     if (options.pollMs !== 0) {
       this.timer = setInterval(
@@ -337,9 +347,21 @@ export class MissionPanel {
   async openMember(id: string, taskId?: string) {
     const member = this.kernel.store.member(id);
     if (!member) throw new Error(`Unknown member: ${id}`);
-    this.revision++;
+    this.scope = "member";
     this.memberId = member.id;
     this.taskId = taskId;
+    this.resetConversation();
+    await this.refresh();
+  }
+  async openLead() {
+    this.scope = "lead";
+    this.memberId = undefined;
+    this.taskId = undefined;
+    this.resetConversation();
+    await this.refresh();
+  }
+  private resetConversation() {
+    this.revision++;
     this.view = "conversation";
     this.file = undefined;
     this.files = [];
@@ -353,11 +375,13 @@ export class MissionPanel {
     this.autoSession = true;
     this.error = "";
     this.selectedItem = undefined;
-    await this.refresh();
   }
   async refresh() {
     if (this.disposed || this.busy) return;
-    if (this.view !== "conversation" || !this.memberId) {
+    if (
+      this.view !== "conversation" ||
+      (this.scope === "member" && !this.memberId)
+    ) {
       this.redraw();
       return;
     }
@@ -365,16 +389,22 @@ export class MissionPanel {
       memberId = this.memberId;
     this.busy = true;
     try {
-      const files = await memberSessionFiles(
-        this.kernel.store.directory,
-        memberId,
-      );
+      const leadFile =
+        this.scope === "lead" ? this.leadSessionFile?.() : undefined;
+      const files =
+        this.scope === "lead"
+          ? leadFile
+            ? [leadFile]
+            : []
+          : await memberSessionFiles(this.kernel.store.directory, memberId!);
       if (this.disposed || revision !== this.revision) return;
       this.files = files;
       const preferred =
-        (this.taskId
-          ? this.kernel.store.task(this.taskId)?.sessionFile
-          : undefined) ?? this.kernel.store.member(memberId)?.sessionFile;
+        this.scope === "lead"
+          ? leadFile
+          : ((this.taskId
+              ? this.kernel.store.task(this.taskId)?.sessionFile
+              : undefined) ?? this.kernel.store.member(memberId!)?.sessionFile);
       const next =
         this.autoSession &&
         (this.following || !this.file) &&
@@ -442,23 +472,36 @@ export class MissionPanel {
     }
   }
   private items() {
-    const items = conversationItems(this.records),
-      active = this.kernel.store
-        .tasks(true)
-        .find((t) => t.memberId === this.memberId && t.state === "running");
+    const items = conversationItems(
+      this.records,
+      this.scope === "lead" ? "主会话回复" : "成员回复",
+    );
+    const append = (p: PublicActivity) =>
+      items.push({
+        id: p.id,
+        title:
+          p.kind === "assistant" && this.scope === "lead"
+            ? "主会话正在回复"
+            : p.title,
+        body: p.text,
+        kind: p.kind === "tool" ? "tool-pending" : "assistant",
+        timestamp: p.timestamp,
+        startedAt: p.startedAt,
+      });
+    if (this.scope === "lead") {
+      if (!this.file || this.file === this.leadSessionFile?.())
+        for (const p of this.leadPreviews?.() ?? []) append(p);
+      return items;
+    }
+    const active = this.kernel.store
+      .tasks(true)
+      .find((t) => t.memberId === this.memberId && t.state === "running");
     if (
       !this.file ||
       (active && (!active.sessionFile || active.sessionFile === this.file))
     )
       for (const p of this.kernel.publicActivity(this.memberId ?? ""))
-        items.push({
-          id: p.id,
-          title: p.title,
-          body: p.text,
-          kind: p.kind === "tool" ? "tool-pending" : "assistant",
-          timestamp: p.timestamp,
-          startedAt: p.startedAt,
-        });
+        append(p);
     return items;
   }
   private statusLabel(memberId: string) {
@@ -544,7 +587,7 @@ export class MissionPanel {
         if (!rows.length) lines.push("尚无成员；模型派工后会在这里显示。");
         lines.push(
           "",
-          "↑↓ 选择 · Enter 对话 · ←→ 折叠 · Tab 切页 · Esc 返回 · /agents 可再次打开",
+          "↑↓ 选择 · Enter 对话 · t 主对话时间线 · ←→ 折叠 · Tab 切页 · Esc 返回",
         );
       } else {
         const details =
@@ -684,7 +727,9 @@ export class MissionPanel {
         body.push(
           this.busy
             ? "正在读取公开记录…"
-            : "等待公开消息；成员尚未启动或尚未写入会话。",
+            : this.scope === "lead"
+              ? "等待主会话公开记录；临时会话可能没有磁盘日志。"
+              : "等待公开消息；成员尚未启动或尚未写入会话。",
           "打开此页面不会启动模型或改变任务。",
         );
       if (this.error)
@@ -699,12 +744,16 @@ export class MissionPanel {
           color(
             this.theme,
             "accent",
-            `${member?.name ?? "成员"} · ${member?.role ?? ""}`,
+            this.scope === "lead"
+              ? "主会话 · 公开时间线"
+              : `${member?.name ?? "成员"} · ${member?.role ?? ""}`,
           ),
         ),
-        `${this.statusLabel(this.memberId ?? "")} · ${this.following ? "跟随最新" : "暂停跟随"}${this.unread ? " · 有新记录" : ""} · 会话 ${this.file ? this.files.indexOf(this.file) + 1 : 0}/${this.files.length}`,
+        `${this.scope === "lead" ? (this.file ? "磁盘公开记录，非模型上下文" : "实时公开预览，尚无磁盘记录") : this.statusLabel(this.memberId ?? "")} · ${this.following ? "跟随最新" : "暂停跟随"}${this.unread ? " · 有新记录" : ""}${this.scope === "lead" ? "" : ` · 会话 ${this.file ? this.files.indexOf(this.file) + 1 : 0}/${this.files.length}`}`,
         ...body.slice(this.scroll, this.scroll + count),
-        "↑↓ 选择 · Enter 展开 · m 发消息 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新 · [ ] 历史",
+        this.scope === "lead"
+          ? "↑↓ 选择 · Enter 展开 · m 返回输入 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新"
+          : "↑↓ 选择 · Enter 展开 · m 发消息 · c 复制 · f 跟随 · Home/PgUp 更早 · End 最新 · [ ] 历史",
         "Esc 返回团队 · q 退出工作台 · 当前页面不使用右侧分栏",
       ];
     }
@@ -753,7 +802,13 @@ export class MissionPanel {
 
   handleInput(data: string) {
     if (this.disposed) return;
-    if (matchesKey(data, "escape") || data === "q") {
+    if (
+      data === "q" ||
+      (data === "m" && this.view === "conversation" && this.scope === "lead")
+    ) {
+      this.dispose();
+      this.done();
+    } else if (matchesKey(data, "escape")) {
       if (this.view === "conversation") {
         this.revision++;
         this.view = "team";
@@ -763,7 +818,9 @@ export class MissionPanel {
         this.done();
       }
     } else if (this.view === "team") {
-      if (matchesKey(data, "tab")) {
+      if (data === "t") {
+        void this.openLead();
+      } else if (matchesKey(data, "tab")) {
         this.tab = (this.tab + 1) % 3;
         this.pageScroll = 0;
       } else if (this.tab !== 0) {

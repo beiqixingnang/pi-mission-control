@@ -1,3 +1,10 @@
+# 2.0.8 — plugin-owned main timeline, withdraw native patch (2026-10-17)
+
+- Restore native Pi files and remove the timestamp renderer bridge, prototype decoration and patch generator. Keep only checksum-guarded recovery for installations that used 2.0.7; reject `apply`.
+- Add `/mission time` and `/mission timeline`, plus the workbench `t` shortcut, for a plugin-owned public main-conversation timeline with saved timestamps, tool durations, bounded LF paging and live public previews.
+- Preserve member times, Markdown/tool backgrounds and logical copy. The native main transcript and editor stay under Pi's control; `m` returns to its input, Escape returns to the team and `q` exits the workbench.
+- Verify actual Pi streaming/tool results, private-block filtering, native-file hashes before/after viewing and refusal of the withdrawn installer. Update previews and compatibility documentation.
+
 # 2.0.7 — message timestamps and tool timing (2026-10-17)
 
 - Show saved local timestamps on member messages, with date changes, stable streaming times and actual recorded tool durations. Retain full logical copy text.

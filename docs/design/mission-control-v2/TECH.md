@@ -41,9 +41,9 @@ Pi会话只保存极小版本描述和有界wake消息；不注册替换`/export
 | extensions/mission-control/ui.ts | 公开widget与详情面板、稳定成员排序和宽度约束 |
 | extensions/mission-control/viewer.ts | 全屏任务树、目标/提醒页、Pi Markdown成员对话、成员消息和逻辑复制 |
 | extensions/mission-control/presentation.ts | 真实Theme类型、按可见列宽填充底色、无边框消息行 |
-| extensions/mission-control/timestamps.ts | 主对话显示装饰器、受限工具时间索引及原生适配状态 |
+| extensions/mission-control/lead-history.ts | 主会话公开流式预览、会话生命周期清理，不替换原生渲染器 |
 | runtime/time.ts | 保存时间的解析、本地日期格式和耗时格式 |
-| scripts/pi-timestamps.mjs、scripts/lib/pi-timestamp-patch.mjs | 显式Pi1.3.0显示适配、AST校验、分安装备份与恢复 |
+| scripts/pi-timestamps.mjs | 已撤回2.0.7补丁的显式status/restore恢复工具，apply已禁用 |
 | extensions/mission-control/compaction.ts | Pi原生compact/tree hook接入独立摘要模型 |
 | extensions/mission-control/reconnect.ts | 主/成员提供方失败hook与用户重连配置，补充原生恢复 |
 | extensions/mission-control/project.ts | 用户工作区操作、精确授权及原生宿主替换 |
@@ -81,7 +81,7 @@ TUI/RPC是常驻异步模式；print/json一次性模式在派工工具中join�
 
 ### 2.0.5：横向看板和动作底色
 
-2.0.7新增逐条消息时间及原生Pi显示桥，完整数据来源、适配范围、重启/恢复和验证方式见[TIMESTAMPS](TIMESTAMPS.md)。它不是仅靠公开Markdown转换接口就能在所有Pi版本启用的功能。
+2.0.7曾提供原生Pi显示桥，2.0.8按用户要求撤回并恢复原文件。当前通过公开custom UI提供带时间的主会话/成员查看页，不修改Pi或其组件prototype。入口、数据来源、边界和旧版本恢复见[TIMESTAMPS](TIMESTAMPS.md)。
 
 `index.ts.refresh`通过公开`ctx.ui.setWidget`的`placement: aboveEditor`固定放置看板，工厂接收Pi真实theme；不替换editor或footer。`ui.ts.board`直接从kernel快照生成目标、下一报告时间、最近有效提醒和成员行。终端高度由stdout.rows提供，普通看板最多max(4,min(10,floor(rows/3)))行，其中三行摘要、一行入口，其余留给成员；超出数量在入口行提示。顺序保持稳定，没有成员轮播。完整任务树和提醒列表仍在工作台。
 

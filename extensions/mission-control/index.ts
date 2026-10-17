@@ -27,7 +27,7 @@ import { resolveWorkspace } from "../workspace/policy.ts";
 import { searchWeb, fetchPage } from "../../runtime/web.ts";
 import { board } from "./ui.ts";
 import { MissionPanel } from "./viewer.ts";
-import { installTimestamps, timestampAdapterAvailable } from "./timestamps.ts";
+import { installLeadHistory } from "./lead-history.ts";
 import installReconnect from "./reconnect.ts";
 import { installProject } from "./project.ts";
 import {
@@ -89,7 +89,6 @@ const textResult = (value: unknown) => {
 };
 
 export default function (pi: ExtensionAPI) {
-  installTimestamps(pi);
   if (process.env.MC_V2_MEMBER) return;
   pi.registerMessageRenderer(
     "mission-control-wake",
@@ -161,6 +160,9 @@ export default function (pi: ExtensionAPI) {
     }, 100);
     renderTimer.unref?.();
   };
+  const leadHistory = installLeadHistory(pi, () => {
+    if (panel?.scope === "lead") refresh();
+  });
   const close = async () => {
     panel?.dispose();
     panel = undefined;
@@ -906,7 +908,11 @@ export default function (pi: ExtensionAPI) {
     (args, signal) => fetchPage(args.url, signal),
   );
 
-  const openAgents = async (context: ExtensionContext, memberName?: string) => {
+  const openAgents = async (
+    context: ExtensionContext,
+    memberName?: string,
+    lead = false,
+  ) => {
     const k = current();
     if (agentsOpen) throw new Error("The team workbench is already open");
     if (memberName && !k.store.member(memberName))
@@ -920,9 +926,12 @@ export default function (pi: ExtensionAPI) {
           theme,
           copyMessage: copyToClipboard,
           editMessage: async (name) => context.ui.editor(`Message to ${name}`),
+          leadSessionFile: () => context.sessionManager.getSessionFile(),
+          leadPreviews: () => leadHistory.previews(),
         });
         const active = panel;
-        if (memberName) void active.openMember(memberName);
+        if (lead) void active.openLead();
+        else if (memberName) void active.openMember(memberName);
         return {
           render: (width: number) => active.render(width),
           invalidate() {},
@@ -942,7 +951,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("mission", {
     description:
-      "Mission dashboard; view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl>",
+      "Mission dashboard; time|timeline | view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl>",
     handler: async (args, context) => {
       try {
         const [command, ...rest] = args.trim().split(/\s+/);
@@ -985,13 +994,13 @@ export default function (pi: ExtensionAPI) {
           );
           return;
         }
-        if (command === "time") {
-          context.ui.notify(
-            timestampAdapterAvailable()
-              ? "消息时间已启用；主对话与成员使用本地时间。"
-              : "成员时间已启用；原生主对话需安装时间适配并重启Pi：npm run pi:timestamps -- apply",
-            "info",
-          );
+        if (command === "time" || command === "timeline") {
+          if (context.mode !== "tui")
+            context.ui.notify(
+              "主会话时间线需要Pi交互模式；时间仅在插件视图显示。",
+              "info",
+            );
+          else await openAgents(context, undefined, true);
           return;
         }
         if (command === "schedules") {

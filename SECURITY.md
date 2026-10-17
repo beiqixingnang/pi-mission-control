@@ -2,7 +2,7 @@
 
 Mission Control v2 is trusted local automation inside Pi, not a separate user account or universal sandbox.
 
-The optional native message-time adapter modifies six Pi1.3.0 presentation files only when explicitly invoked. It validates code shape, retains per-installation checksummed backups and supports guarded restore. It is not an upstream API or an install hook; upgrades can overwrite it. See docs/design/mission-control-v2/TIMESTAMPS.md.
+Message timelines use Pi's public custom UI, public events and bounded read-only log pages. The plugin does not patch Pi program files or native component prototypes. The withdrawn 2.0.7 adapter retains only explicit, checksum-guarded restoration of its own recorded changes; installation is disabled. See docs/design/mission-control-v2/TIMESTAMPS.md.
 
 - Member file tools always enforce workspace checks, including host mode. Trusted extensions and host shell commands can bypass application file-tool rules.
 - `host` intentionally grants the host user's command authority. Read-only host workers are rejected. Windows native PowerShell is separate from bash/WSL.
