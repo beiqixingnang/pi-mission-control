@@ -8,13 +8,14 @@
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；25个lead工具、6个用户命令（含独立压缩命令）；测试provider不被默认加载 |
 | `npm run typecheck` | 2.0.6通过Compiler API严格检查23个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.5完整运行86用例：82通过、0失败、4个需显式镜像的容器用例跳过；耗时约40.1秒 |
+| `npm test` | 2.0.6核心修正后本机完整86用例：82通过、0失败、4个需显式镜像的容器用例跳过；耗时约43.3秒 |
+| GitHub Actions | 2.0.6代码提交8257d07，运行39026681452成功；Ubuntu与Windows / Node24.21.0各82通过、4跳过、0失败，入口和23文件严格类型检查全部通过 |
 | 网络MCP framing回归 | 已纳入上述完整86用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
 | npm tarball | 实际生成、检查内容、解包后加载v2入口成功；不含.reference、vendor、用户会话/认证配置或默认加载测试provider |
 | Git whitespace | `git diff --check`核对；历史文档已标v1，v2仅加载新清单 |
 
-2.0.5重新执行了`npm run check`、`npm run typecheck`和完整`npm test`。加载检查为两个入口、25个lead工具、6个用户命令，errors为空。本轮改动只涉及UI及主题适配，未重复运行真实Podman；容器结果为同日2.0.2验证记录。测试通过不等于真实provider与长期运行验收通过，未验证范围见文末。
+2.0.5执行了UI/主题验证，2.0.6修正类型契约与CI夹具并重新验证。加载检查为两个入口、25个lead工具、6个用户命令，errors为空。本轮未重复运行真实Podman；容器结果为同日2.0.2验证记录。测试通过不等于真实provider与长期运行验收通过，未验证范围见文末。
 
 普通测试全部由scripts/test-v2.mjs建立临时Pi agent目录；不读取用户auth/models/settings正文，不调用真实模型。真实Pi生命周期使用确定性离线provider，并非仅用mock替代Pi事件系统。
 
@@ -71,7 +72,7 @@ tests/v2/pi-integration.test.mjs共18用例通过：
 - 原类型检查脚本在本机返回0，却没有发现上述错误；Debian及GitHub暴露了缺口。现直接调用TypeScript Compiler API，明确核对kernel、lead/member入口、viewer和compaction被选中，并报告23个直接源码文件。Windows Node24和Debian Node22.23.3的静态检查均通过；Debian这里只执行类型检查，不用Node22运行v2。
 - 临时在runtime中注入不存在的ExtensionAPI方法和number赋给string，确认检查返回1且报告两种错误，随后删除探针；防止空检查或宿主API退化成any被误算通过。
 - Windows runner的os.tmpdir可能含8.3短路径别名。测试夹具先对mkdtemp结果取realpath，再传给沙箱策略；运行时继续拒绝模糊别名，没有放宽权限规则。容器专项6项静态检查通过、4项实机检查按默认跳过。
-- 核心修正后本机完整离线套件再次82通过、0失败、4跳过（约43.3秒）；入口加载通过。后续提交会自动运行Ubuntu/Windows Node24工作流，结果以对应提交的Actions状态为准。
+- 核心修正后本机完整离线套件再次82通过、0失败、4跳过（约43.3秒）；入口加载通过。代码提交8257d07的GitHub Actions运行39026681452随后成功：Ubuntu job117378930267约21.4秒、Windows job117378930383约42.0秒，均86项中82通过、4跳过、0失败，并通过入口加载及23文件严格类型检查。此次结果是对应代码提交的证据，不替代后续提交的检查。
 
 ## 2.0.2恢复验证
 
