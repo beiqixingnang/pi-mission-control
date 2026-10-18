@@ -48,6 +48,8 @@ export interface Member {
 export interface Task {
   id: string;
   missionId: string;
+  goalId?: string;
+  goalRevision?: number;
   memberId: string;
   member: string;
   parentId?: string;
@@ -71,6 +73,73 @@ export interface Task {
   sessionFile?: string;
   blockedReason?: string;
   archivedAt?: number;
+}
+export type GoalState =
+  | "planned"
+  | "active"
+  | "review"
+  | "blocked"
+  | "accepted"
+  | "cancelled"
+  | "skipped";
+export interface GoalNode {
+  id: string;
+  rootId: string;
+  parentId?: string;
+  depth: number;
+  order: number;
+  objective: string;
+  criteria: string[];
+  dependsOn: string[];
+  module?: string;
+  state: GoalState;
+  revision: number;
+  reason?: string;
+  nextStep?: string;
+  estimateMs?: [number, number];
+  acceptanceId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface GoalDefinition {
+  key?: string;
+  parentId?: string;
+  objective: string;
+  criteria: string[];
+  dependsOn?: string[];
+  module?: string;
+  nextStep?: string;
+  estimateMs?: [number, number];
+}
+export interface GoalEvidence {
+  criterion: number;
+  summary: string;
+  source: "statement" | "artifact" | "task" | "tool" | "acceptance";
+  path?: string;
+  taskId?: string;
+  receiptId?: string;
+  acceptanceId?: string;
+  fingerprint?: { size: number; mtimeMs: number; sha256?: string };
+}
+export interface GoalAcceptance {
+  id: string;
+  goalId: string;
+  revision: number;
+  evidence: GoalEvidence[];
+  children: Array<{ goalId: string; acceptanceId: string }>;
+  at: number;
+  imported?: boolean;
+}
+export interface GoalReceipt {
+  id: string;
+  goalId: string;
+  revision: number;
+  tool: string;
+  input: string;
+  output?: string;
+  isError?: boolean;
+  startedAt: number;
+  finishedAt?: number;
 }
 export interface Delivery {
   id: string;

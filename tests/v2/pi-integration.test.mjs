@@ -1818,7 +1818,7 @@ test(
       const catalog = JSON.parse(
         (await h.tool("mission_capabilities")).content[0].text,
       );
-      assert.equal(catalog.tools.length, 44);
+      assert.equal(catalog.tools.length, 51);
       assert.ok(catalog.tools.every((t) => t.active));
       h.session.setActiveToolsByName(["read"]);
       await h.session.reload();
@@ -1935,7 +1935,15 @@ test(
       const statusResult = JSON.parse(h.session.getLastAssistantText());
       assert.equal(statusResult.isError, false);
       const statusPrefix = statusResult.text.slice(0, 6000);
-      assert.match(statusPrefix, /"version": "2\.0\.20"/);
+      assert.ok(
+        statusPrefix.includes(
+          '"version": "' +
+            JSON.parse(
+              fsSync.readFileSync(path.join(root, "package.json"), "utf8"),
+            ).version +
+            '"',
+        ),
+      );
       assert.match(statusPrefix, /"mission_reconcile": true/);
       assert.match(statusPrefix, /"mission_control": true/);
       assert.match(statusPrefix, /process_inspection_required/);
@@ -2053,6 +2061,470 @@ test("the default policy can be applied by a real model tool without turning a p
     assert.equal((await h.snapshot()).mission.status, "active");
     assert.equal((await h.snapshot()).mission.decision, undefined);
   }));
+
+test(
+  "real Pi model tools enforce staged goals, save native tool evidence and reload the same conversation",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const call = async (name, args) => {
+        await h.session.prompt(
+          "V2_TEST:" + JSON.stringify({ op: "tool", name, args }),
+        );
+        return JSON.parse(h.session.getLastAssistantText());
+      };
+      const started = JSON.parse(
+        (
+          await h.tool("goal_start", {
+            objective: "Staged processor fixture",
+            criteria: ["Inventory and implementation accepted"],
+          })
+        ).content[0].text,
+      );
+      const sessionId = h.session.sessionManager.getSessionId(),
+        sessionFile = h.session.sessionManager.getSessionFile();
+      const response = await call("goal_plan", {
+        goals: [
+          {
+            key: "inventory",
+            parentId: started.id,
+            objective: "Inventory",
+            criteria: ["Module responsibilities and checks listed"],
+          },
+          {
+            key: "implementation",
+            parentId: started.id,
+            objective: "Implementation",
+            criteria: ["Module artifact accepted"],
+            dependsOn: ["inventory"],
+          },
+          {
+            key: "module",
+            parentId: "implementation",
+            objective: "Module A",
+            criteria: ["Module file exists"],
+          },
+        ],
+      });
+      assert.equal(response.isError, false);
+      const created = JSON.parse(response.text).created,
+        p = Object.fromEntries(created.map((n) => [n.key, n]));
+      assert.equal((await h.snapshot()).goals.level2.total, 2);
+      const file = path.join(h.cwd, "module-a.py");
+      const untracked = await call("write", {
+        path: file,
+        content: "NO_FOCUS_MUST_NOT_WRITE",
+      });
+      assert.equal(untracked.isError, true);
+      assert.match(untracked.text, /Select a ready leaf/);
+      assert.equal(fsSync.existsSync(file), false);
+      const early = await call("goal_focus", {
+        goalId: p.module.id,
+        revision: 0,
+      });
+      assert.equal(early.isError, true);
+      assert.match(early.text, /Await acceptance/);
+      await call("goal_focus", { goalId: p.inventory.id, revision: 0 });
+      const spec = await call("goal_accept", {
+        goalId: p.inventory.id,
+        revision: 0,
+        evidence: [
+          {
+            criterion: 1,
+            source: "statement",
+            summary:
+              "Module A responsibilities and verification steps recorded",
+          },
+        ],
+      });
+      assert.equal(spec.isError, false);
+      await call("goal_focus", { goalId: p.module.id, revision: 0 });
+      const written = await call("write", {
+        path: file,
+        content: "MODULE_A = 64\n",
+      });
+      assert.equal(written.isError, false);
+      const detail = JSON.parse(
+        (await h.tool("goal_tree", { goalId: p.module.id })).content[0].text,
+      );
+      const receipt = detail.receipts.find((r) => r.tool === "write");
+      assert.ok(receipt);
+      assert.equal(receipt.isError, false);
+      assert.equal(
+        (await h.snapshot()).goals.level3.completed,
+        0,
+        "writing does not accept a goal",
+      );
+      const accepted = await call("goal_accept", {
+        goalId: p.module.id,
+        revision: 0,
+        evidence: [
+          {
+            criterion: 1,
+            source: "tool",
+            receiptId: receipt.id,
+            summary: "Native Pi write returned successfully for module A",
+          },
+          {
+            criterion: 1,
+            source: "artifact",
+            path: file,
+            summary: "Module A source artifact saved with its fingerprint",
+          },
+        ],
+      });
+      assert.equal(accepted.isError, false);
+      const acceptance = JSON.parse(accepted.text);
+      await h.session.reload();
+      assert.equal(h.session.sessionManager.getSessionId(), sessionId);
+      assert.equal(h.session.sessionManager.getSessionFile(), sessionFile);
+      assert.equal((await h.snapshot()).goals.level3.completed, 1);
+      const retained = JSON.parse(
+        (
+          await h.tool("goal_tree", {
+            goalId: p.module.id,
+            section: "acceptance",
+          })
+        ).content[0].text,
+      );
+      assert.equal(retained.acceptanceId, acceptance.id);
+      assert.equal(retained.entries.length, 2);
+      const group = await call("goal_accept", {
+        goalId: p.implementation.id,
+        revision: 0,
+        evidence: [
+          {
+            criterion: 1,
+            source: "acceptance",
+            acceptanceId: acceptance.id,
+            summary: "Module A acceptance supplies the implementation result",
+          },
+        ],
+      });
+      assert.equal(group.isError, false);
+      const finished = await call("goal_accept", {
+        goalId: started.id,
+        revision: 0,
+        evidence: [
+          {
+            criterion: 1,
+            source: "acceptance",
+            acceptanceId: JSON.parse(group.text).id,
+            summary:
+              "All required stages and implementation acceptance recorded",
+          },
+        ],
+      });
+      assert.equal(finished.isError, false);
+      assert.equal((await h.snapshot()).mission.status, "complete");
+      assert.deepEqual((await h.snapshot()).goals.level2, {
+        total: 2,
+        completed: 2,
+        excluded: 0,
+      });
+      const exported = path.join(h.cwd, "goal-ledger.json");
+      await h.session.prompt(`/mission goals export ${exported}`);
+      const ledger = JSON.parse(await fs.readFile(exported, "utf8"));
+      assert.equal(ledger.records.length, 4);
+    }),
+);
+
+test(
+  "real Pi reload upgrades old flat SQLite and exposes goal tools without a new session",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      const started = JSON.parse(
+        (
+          await h.tool("goal_start", {
+            objective: "Legacy goal survives reload",
+            criteria: ["Preserve original identity and usage"],
+          })
+        ).content[0].text,
+      );
+      await h.session.prompt("/mission pause");
+      const sessionId = h.session.sessionManager.getSessionId(),
+        sessionFile = h.session.sessionManager.getSessionFile();
+      const directory = path.join(
+        process.env.PI_CODING_AGENT_DIR,
+        "mission-control/v2",
+        sessionId,
+      );
+      h.session.setActiveToolsByName(["read"]);
+      await h.session.reload({
+        beforeSessionStart: () => {
+          const db = new DatabaseSync(path.join(directory, "state.sqlite"));
+          for (const name of [
+            "goal_nodes",
+            "goal_acceptances",
+            "goal_receipts",
+            "goal_missions",
+          ])
+            db.exec(`DROP TABLE ${name}`);
+          const m = JSON.parse(
+            db.prepare("SELECT data FROM meta WHERE key='mission'").get().data,
+          );
+          m.turns = 17;
+          m.outputTokens = 1299;
+          db.prepare("UPDATE meta SET data=? WHERE key='mission'").run(
+            JSON.stringify(m),
+          );
+          db.close();
+        },
+      });
+      const state = await h.snapshot();
+      assert.equal(state.mission.id, started.id);
+      assert.equal(state.mission.humanPaused, true);
+      assert.equal(state.mission.turns, 17);
+      assert.equal(state.mission.outputTokens, 1299);
+      assert.equal(h.session.sessionManager.getSessionId(), sessionId);
+      assert.equal(h.session.sessionManager.getSessionFile(), sessionFile);
+      assert.ok(h.session.getActiveToolNames().includes("goal_plan"));
+      assert.ok(h.session.getActiveToolNames().includes("goal_accept"));
+      const tree = JSON.parse((await h.tool("goal_tree")).content[0].text);
+      assert.equal(tree.nodes[0].id, started.id);
+      await h.session.prompt("/mission resume");
+      await h.session.prompt(
+        'V2_TEST:{"op":"tools","schemaFor":"goal_accept"}',
+      );
+      const declared = JSON.parse(h.session.getLastAssistantText());
+      assert.ok(declared.names.includes("goal_export"));
+      assert.equal(declared.schema.properties.revision.type, "integer");
+    }),
+);
+
+test(
+  "real Pi worker results stay attached to their leaf and do not auto-accept it",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const planResult = await h.tool("goal_plan", {
+        goals: [
+          {
+            key: "main",
+            objective: "Delegated leaf fixture",
+            criteria: ["Accepted member output"],
+          },
+          {
+            key: "leaf",
+            parentId: "main",
+            objective: "Read fixture",
+            criteria: ["Read result retained"],
+          },
+        ],
+      });
+      const created = JSON.parse(planResult.content[0].text).created,
+        rootGoal = created.find((n) => n.key === "main"),
+        leaf = created.find((n) => n.key === "leaf");
+      await h.tool("goal_focus", { goalId: leaf.id, revision: 0 });
+      const file = path.join(h.cwd, "input.txt");
+      await fs.writeFile(file, "REAL_WORKER_GOAL_EVIDENCE");
+      await h.tool("team_spawn", {
+        name: "goal-reader",
+        role: "Read a tracked leaf",
+        model: "mission-fixture/model",
+        thinkingLevel: "off",
+        workspace: { root: h.cwd, access: "read-only", execution: "files" },
+      });
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "team_send",
+            args: {
+              to: "goal-reader",
+              message: "V2_TEST:" + JSON.stringify({ op: "read", file }),
+              goalId: leaf.id,
+              wait: true,
+            },
+          }),
+      );
+      const response = JSON.parse(h.session.getLastAssistantText());
+      assert.equal(response.isError, false, response.text);
+      const state = await h.snapshot(),
+        task = state.tasks.find((t) => t.goalId === leaf.id);
+      assert.ok(task);
+      assert.equal(task.missionId, rootGoal.id);
+      assert.equal(task.state, "completed");
+      assert.equal(state.goals.level2.completed, 0);
+      const accepted = await h.tool("goal_accept", {
+        goalId: leaf.id,
+        revision: 0,
+        evidence: [
+          {
+            criterion: 1,
+            source: "task",
+            taskId: task.id,
+            summary: "Real RPC member read result was saved and collected",
+          },
+        ],
+      });
+      assert.ok(!accepted.isError, accepted.content[0].text);
+      assert.equal((await h.snapshot()).goals.level2.completed, 1);
+    }),
+);
+
+test(
+  "real Pi depth authorization and multiple main goals survive reload without automatic selection",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      const response = await h.tool("goal_plan", {
+        goals: [
+          { key: "a", objective: "Main A", criteria: ["A"] },
+          { key: "b", objective: "Main B", criteria: ["B"] },
+          {
+            key: "two",
+            parentId: "a",
+            objective: "Second level",
+            criteria: ["Two"],
+          },
+          {
+            key: "three",
+            parentId: "two",
+            objective: "Third level",
+            criteria: ["Three"],
+          },
+        ],
+      });
+      const p = Object.fromEntries(
+        JSON.parse(response.content[0].text).created.map((n) => [n.key, n]),
+      );
+      assert.equal((await h.snapshot()).mission.id, p.a.id);
+      const definition = {
+        parentId: p.three.id,
+        objective: "Authorized fourth level",
+        criteria: ["Small delivery"],
+      };
+      assert.equal(
+        (await h.tool("goal_plan", { goals: [definition] })).isError,
+        true,
+      );
+      await h.session.prompt("/mission goals depth 4");
+      assert.ok(!(await h.tool("goal_plan", { goals: [definition] })).isError);
+      const switched = await h.tool("goal_activate", { goalId: p.b.id });
+      assert.ok(!switched.isError, switched.content[0].text);
+      await h.session.reload();
+      assert.equal((await h.snapshot()).mission.id, p.b.id);
+      assert.equal((await h.snapshot()).goals.maxDepth, 4);
+      const all = JSON.parse((await h.tool("goal_tree")).content[0].text);
+      assert.equal(all.roots.filter((n) => n.selected).length, 1);
+    }),
+);
+
+test(
+  "portable /mnt/c package source discovers both plugin entrypoints from normal Pi settings",
+  { timeout: 15000 },
+  async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "mc-package-source-"));
+    try {
+      const source =
+        process.platform === "win32"
+          ? "/mnt/" +
+            root[0].toLowerCase() +
+            root.slice(2).replaceAll("\\", "/")
+          : root;
+      const settings = SettingsManager.inMemory({
+        packages: [source],
+        retry: { enabled: false },
+        cacheWarming: "off",
+      });
+      const resources = new DefaultResourceLoader({
+        cwd,
+        agentDir: process.env.PI_CODING_AGENT_DIR,
+        settingsManager: settings,
+        noSkills: true,
+        noPromptTemplates: true,
+        noContextFiles: true,
+        noThemes: true,
+      });
+      await resources.reload();
+      const loaded = resources.getExtensions();
+      assert.deepEqual(loaded.errors, []);
+      const tools = loaded.extensions.flatMap((extension) => [
+        ...extension.tools.keys(),
+      ]);
+      for (const name of [
+        "goal_plan",
+        "goal_accept",
+        "goal_export",
+        "compaction_model",
+      ])
+        assert.ok(
+          tools.includes(name),
+          `Package settings did not load ${name}`,
+        );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "large goal definitions and evidence stay readable through bounded model tool pages",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      const response = await h.tool("goal_plan", {
+        goals: [
+          {
+            key: "root",
+            objective: "Large goal ledger fixture",
+            criteria: ["All evidence retained"],
+          },
+          {
+            key: "leaf",
+            parentId: "root",
+            objective: "Long deliverable ".repeat(400),
+            criteria: Array.from(
+              { length: 30 },
+              (_, i) => `${i}:` + "Acceptance detail ".repeat(100),
+            ),
+          },
+        ],
+      });
+      assert.ok(!response.isError, response.content[0].text);
+      const nodes = JSON.parse(response.content[0].text).created,
+        leaf = nodes.find((n) => n.key === "leaf");
+      const tree = JSON.parse((await h.tool("goal_tree")).content[0].text);
+      assert.equal(tree.nodes.length, 2);
+      const exact = JSON.parse(
+        (
+          await h.tool("goal_tree", {
+            goalId: leaf.id,
+            section: "definition",
+            offset: 25,
+          })
+        ).content[0].text,
+      );
+      assert.equal(exact.criteria[0].criterion, 26);
+      assert.ok(exact.criteria[0].text.length > 1000);
+      const evidence = Array.from({ length: 100 }, (_, i) => ({
+        criterion: (i % 30) + 1,
+        source: "statement",
+        summary: "Recorded explanatory acceptance evidence ".repeat(40),
+      }));
+      const accepted = await h.tool("goal_accept", {
+        goalId: leaf.id,
+        revision: 0,
+        evidence,
+      });
+      assert.ok(!accepted.isError, accepted.content[0].text);
+      assert.equal(JSON.parse(accepted.content[0].text).evidenceCount, 100);
+      const page = JSON.parse(
+        (
+          await h.tool("goal_tree", {
+            goalId: leaf.id,
+            section: "acceptance",
+            offset: 90,
+          })
+        ).content[0].text,
+      );
+      assert.equal(page.total, 100);
+      assert.equal(page.entries.length, 10);
+      assert.equal(page.entries[0].summary, evidence[90].summary.trim());
+    }),
+);
 
 test(
   "model-visible settings, public history and export share their session command implementations",

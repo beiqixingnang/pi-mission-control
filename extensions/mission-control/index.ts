@@ -16,7 +16,11 @@ import { Text } from "@earendil-works/pi-tui";
 import { MissionKernel } from "../../runtime/kernel.ts";
 import { openBridge } from "../../runtime/bridge.ts";
 import { createWorkerFactory } from "../../runtime/rpc-worker.ts";
-import { cleanText, streamPublicSession } from "../../runtime/public.ts";
+import {
+  cleanText,
+  textOf,
+  streamPublicSession,
+} from "../../runtime/public.ts";
 import {
   terminal,
   type Settings,
@@ -27,6 +31,7 @@ import { resolveWorkspace } from "../workspace/policy.ts";
 import { searchWeb, fetchPage } from "../../runtime/web.ts";
 import { board } from "./ui.ts";
 import { MissionPanel } from "./viewer.ts";
+import { GoalPanel } from "./goals-ui.ts";
 import { installLeadHistory } from "./lead-history.ts";
 import {
   memberSessionFiles,
@@ -77,6 +82,22 @@ const evidence = Type.Array(
   }),
   { maxItems: 30 },
 );
+const goalEvidence = Type.Array(
+  Type.Object({
+    criterion: Type.Integer({ minimum: 1 }),
+    summary: Type.String({ minLength: 8, maxLength: 2000 }),
+    source: Type.Union(
+      ["statement", "artifact", "task", "tool", "acceptance"].map((value) =>
+        Type.Literal(value),
+      ),
+    ),
+    path: Type.Optional(Type.String()),
+    taskId: Type.Optional(Type.String()),
+    receiptId: Type.Optional(Type.String()),
+    acceptanceId: Type.Optional(Type.String()),
+  }),
+  { minItems: 1, maxItems: 100 },
+);
 const textResult = (value: unknown) => {
   const text =
     typeof value === "string" ? value : JSON.stringify(value, null, 2);
@@ -119,6 +140,7 @@ export default function (pi: ExtensionAPI) {
   let redraw: (() => void) | undefined,
     renderTimer: ReturnType<typeof setTimeout> | undefined;
   let panel: MissionPanel | undefined;
+  let goalPanel: GoalPanel | undefined;
   let agentsOpen = false;
   const sourceCache = new Map<string, string>();
   const sourcePath = (value: string) => {
@@ -283,6 +305,8 @@ export default function (pi: ExtensionAPI) {
     if (panel?.scope === "lead") refresh();
   });
   const close = async () => {
+    goalPanel?.dispose();
+    goalPanel = undefined;
     panel?.dispose();
     panel = undefined;
     agentsOpen = false;
@@ -393,6 +417,9 @@ export default function (pi: ExtensionAPI) {
     event.systemPromptOptions.promptGuidelines.unshift(
       "Mission Control autonomy policy: choose implementation details, retries, commands, files, member assignments and formatting within the approved scope. Ask the user only for a concrete business boundary (scope, acceptance, permission, budget, deadline, release or irreversible risk). Do not call mission_decision for generic validation, planning, implementation or execution choices.",
     );
+    event.systemPromptOptions.promptGuidelines.unshift(
+      "For work with multiple deliverables, inventory the required modules, outputs and checks, then register stages and leaf goals with goal_plan before implementation. Declare stage dependsOn gates to preserve the approved batch order. Use goal_tree to recover exact progress, goal_focus before execution, goal_edit for blockers/next steps and goal_accept for evidence against every criterion. These are directly callable tools: fill missing plan/focus/evidence yourself within approved scope. Acceptance is recorded once and reused; model statements are labelled claims. Keep multiple main goals with one selected through goal_activate. Default depth is three; flatten excess detail into execution tasks rather than routinely asking for more depth.",
+    );
     const wake =
       event.messageType === "custom" &&
       event.message.customType === "mission-control-wake"
@@ -481,7 +508,35 @@ export default function (pi: ExtensionAPI) {
       );
     }
   });
+  pi.on("tool_call", (event) => {
+    if (
+      !kernel ||
+      !["write", "edit", "bash", "powershell"].includes(event.toolName)
+    )
+      return;
+    const mission = kernel.store.mission();
+    if (!mission || ["complete", "stopped"].includes(mission.status)) return;
+    try {
+      // A pre-existing flat goal remains compatible. Planned work requires focus.
+      if (
+        kernel.goals.children(mission.id).length &&
+        (mission.status !== "active" ||
+          kernel.snapshot().held ||
+          mission.humanPaused ||
+          kernel.store.get("relocationHold"))
+      )
+        throw new Error("Resolve mission holds before executing planned work");
+      kernel.goals.captureStart(event.toolCallId, event.toolName, event.input);
+    } catch (error) {
+      return { block: true, reason: String((error as Error).message ?? error) };
+    }
+  });
   pi.on("tool_result", (event) => {
+    kernel?.goals.captureEnd(
+      event.toolCallId,
+      textOf({ content: event.content }),
+      event.isError,
+    );
     if (!event.isError && ["write", "edit"].includes(event.toolName))
       kernel?.leadActed();
   });
@@ -537,7 +592,12 @@ export default function (pi: ExtensionAPI) {
     if (!destination.trim())
       throw new Error("A new export destination is required");
     const target = path.resolve(context.cwd, destination);
-    const out = fsSync.createWriteStream(target, { flags: "wx", mode: 0o600 });
+    // Open exclusively before streaming; an asynchronous EEXIST can otherwise
+    // destroy the stream before a producer starts awaiting a drain event.
+    const out = fsSync.createWriteStream(target, {
+      fd: fsSync.openSync(target, "wx", 0o600),
+      autoClose: true,
+    });
     const completed = finished(out);
     void completed.catch(() => {});
     const abort = () =>
@@ -738,10 +798,12 @@ export default function (pi: ExtensionAPI) {
       timeoutMs: Type.Optional(
         Type.Integer({ minimum: 1000, maximum: 3600000 }),
       ),
+      goalId: Type.Optional(Type.String()),
     }),
     async (args, signal, context) => {
       const task = current().dispatch(args.to, args.message, {
         timeoutMs: args.timeoutMs,
+        goalId: args.goalId,
       });
       if (args.wait || oneShot(context))
         return collected(await waitForTask(task.id, signal), [task.id]);
@@ -788,11 +850,12 @@ export default function (pi: ExtensionAPI) {
     Type.Object({
       members: Type.Array(Type.String(), { minItems: 1, maxItems: 16 }),
       message: Type.String({ maxLength: 200000 }),
+      goalId: Type.Optional(Type.String()),
     }),
     async (args, signal, context) => {
       const tasks = current().store.transaction(() =>
         args.members.map((name: string) =>
-          current().dispatch(name, args.message),
+          current().dispatch(name, args.message, { goalId: args.goalId }),
         ),
       );
       return oneShot(context)
@@ -1042,6 +1105,297 @@ export default function (pi: ExtensionAPI) {
     (args) => current().setGoal(args.objective, args.criteria),
   );
   tool(
+    "goal_plan",
+    "Register goal plan",
+    "Atomically register main goals and stage/leaf deliverables with explicit acceptance criteria. Default maximum depth is three including the main goal. parentId/dependsOn may reference this batch's keys; no cyclic or cross-main-goal dependencies. Multiple main goals coexist, with only one selected. Plan execution stages before complex implementation.",
+    Type.Object({
+      goals: Type.Array(
+        Type.Object({
+          key: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+          parentId: Type.Optional(Type.String()),
+          objective: Type.String({ minLength: 1, maxLength: 8000 }),
+          criteria: Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), {
+            minItems: 1,
+            maxItems: 30,
+          }),
+          dependsOn: Type.Optional(
+            Type.Array(Type.String(), { maxItems: 100 }),
+          ),
+          module: Type.Optional(Type.String({ maxLength: 200 })),
+          nextStep: Type.Optional(Type.String({ maxLength: 2000 })),
+          estimateMs: Type.Optional(
+            Type.Tuple([
+              Type.Integer({ minimum: 0 }),
+              Type.Integer({ minimum: 0 }),
+            ]),
+          ),
+        }),
+        { minItems: 1, maxItems: 100 },
+      ),
+    }),
+    (args) => ({
+      created: current()
+        .planGoals(args.goals)
+        .map((node) => ({
+          id: node.id,
+          key: node.key,
+          depth: node.depth,
+          revision: node.revision,
+        })),
+      progress: current().goals.summary(),
+    }),
+  );
+  tool(
+    "goal_tree",
+    "Read goal ledger",
+    "Read persistent goal hierarchy, accepted counts and current focus. Supply goalId for acceptance history, tool receipts, blockers and task results. Main-goal selection and acceptance survive /reload. Counts mean accepted deliverables, not finished agent turns. Remaining effort is a range, not a wall-clock deadline.",
+    Type.Object({
+      rootId: Type.Optional(Type.String()),
+      goalId: Type.Optional(Type.String()),
+      section: Type.Optional(
+        Type.Union(
+          [
+            "summary",
+            "definition",
+            "acceptance",
+            "history",
+            "receipts",
+            "tasks",
+          ].map((value) => Type.Literal(value)),
+        ),
+      ),
+      offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+    }),
+    (args) => {
+      const ledger = current().goals,
+        offset = args.offset ?? 0,
+        limit = args.limit ?? 10;
+      const brief = (node: any) => ({
+        ...node,
+        objective: cleanText(node.objective, 300),
+        criteria: undefined,
+        criterionCount: node.criteria.length,
+        reason: node.reason ? cleanText(node.reason, 300) : undefined,
+        nextStep: node.nextStep ? cleanText(node.nextStep, 300) : undefined,
+      });
+      if (args.goalId) {
+        const detail = ledger.detail(args.goalId);
+        if (args.section === "definition") {
+          const pageSize = Math.min(limit, 5);
+          return {
+            goalId: detail.goal.id,
+            revision: detail.goal.revision,
+            objective: detail.goal.objective,
+            dependsOn: detail.goal.dependsOn,
+            nextStep: detail.goal.nextStep,
+            reason: detail.goal.reason,
+            total: detail.goal.criteria.length,
+            offset,
+            nextOffset:
+              offset + pageSize < detail.goal.criteria.length
+                ? offset + pageSize
+                : undefined,
+            criteria: detail.goal.criteria
+              .slice(offset, offset + pageSize)
+              .map((text, index) => ({ criterion: offset + index + 1, text })),
+          };
+        }
+        const entries =
+          args.section === "acceptance"
+            ? (detail.acceptance?.evidence ?? [])
+            : args.section === "history"
+              ? detail.history.map((r) => ({
+                  id: r.id,
+                  revision: r.revision,
+                  at: r.at,
+                  imported: r.imported,
+                }))
+              : args.section === "receipts"
+                ? detail.receipts
+                : args.section === "tasks"
+                  ? detail.tasks.map((t) => ({
+                      id: t.id,
+                      goalId: t.goalId,
+                      state: t.state,
+                      processState: t.processState,
+                      resultPath: t.resultPath,
+                    }))
+                  : undefined;
+        const pageSize =
+          args.section === "receipts" ? Math.min(limit, 4) : limit;
+        if (entries)
+          return {
+            goalId: detail.goal.id,
+            revision: detail.goal.revision,
+            acceptanceId: detail.acceptance?.id,
+            section: args.section,
+            total: entries.length,
+            offset,
+            nextOffset:
+              offset + pageSize < entries.length
+                ? offset + pageSize
+                : undefined,
+            entries: entries.slice(offset, offset + pageSize),
+            bounded: true,
+          };
+        return {
+          goal: {
+            ...brief(detail.goal),
+            criteria: detail.goal.criteria.map((c) => cleanText(c, 200)),
+          },
+          blockers: detail.blockers.slice(0, 10).map((b) => cleanText(b, 300)),
+          acceptance: detail.acceptance
+            ? {
+                id: detail.acceptance.id,
+                revision: detail.acceptance.revision,
+                evidenceCount: detail.acceptance.evidence.length,
+                children: detail.acceptance.children.slice(0, 10),
+              }
+            : undefined,
+          historyCount: detail.history.length,
+          taskCount: detail.tasks.length,
+          receipts: detail.receipts.slice(0, 3).map((r) => ({
+            ...r,
+            input: cleanText(r.input, 300),
+            output: r.output ? cleanText(r.output, 500) : undefined,
+          })),
+          bounded: true,
+          next: "Use section:definition|acceptance|history|receipts|tasks with offset/limit for retained details",
+        };
+      }
+      const snapshot = ledger.snapshot(
+        args.rootId ?? current().store.mission()?.id,
+      );
+      return {
+        ...snapshot,
+        nodes: snapshot.nodes.slice(offset, offset + limit).map(brief),
+        roots: snapshot.roots.slice(offset, offset + limit).map(brief),
+        nodeTotal: snapshot.nodes.length,
+        rootTotal: snapshot.roots.length,
+        offset,
+        nextOffset:
+          offset + limit <
+          Math.max(snapshot.nodes.length, snapshot.roots.length)
+            ? offset + limit
+            : undefined,
+        bounded: true,
+      };
+    },
+  );
+  tool(
+    "goal_edit",
+    "Update goal progress",
+    "Update a goal's definition, blockers, next step or estimate. state:planned explicitly reopens accepted work and invalidates affected parent/dependent acceptances while retaining history. Cannot accept or silently exclude scope. For a held mission, definition edits preserve all execution holds and budgets.",
+    Type.Object({
+      goalId: Type.String(),
+      revision: Type.Integer({ minimum: 0 }),
+      objective: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })),
+      criteria: Type.Optional(
+        Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), {
+          minItems: 1,
+          maxItems: 30,
+        }),
+      ),
+      dependsOn: Type.Optional(Type.Array(Type.String(), { maxItems: 100 })),
+      state: Type.Optional(
+        Type.Union(
+          ["planned", "active", "review", "blocked"].map((value) =>
+            Type.Literal(value),
+          ),
+        ),
+      ),
+      reason: Type.Optional(Type.String({ maxLength: 2000 })),
+      nextStep: Type.Optional(Type.String({ maxLength: 2000 })),
+      estimateMs: Type.Optional(
+        Type.Tuple([
+          Type.Integer({ minimum: 0 }),
+          Type.Integer({ minimum: 0 }),
+        ]),
+      ),
+    }),
+    (args) => {
+      const { goalId, revision, ...patch } = args;
+      current().editGoal(goalId, patch, revision);
+      const node = current().goals.node(goalId);
+      return {
+        id: node.id,
+        revision: node.revision,
+        state: node.state,
+        progress: current().goals.summary(),
+      };
+    },
+  );
+  tool(
+    "goal_focus",
+    "Focus leaf goal",
+    "Select a ready leaf goal for the lead's commands and default delegated tasks. Ancestor stage prerequisites must be accepted. Different ready leaves may have parallel member tasks; focus identifies the lead's current work. Reopen accepted work explicitly before more execution.",
+    Type.Object({
+      goalId: Type.String(),
+      revision: Type.Integer({ minimum: 0 }),
+    }),
+    (args) => {
+      const node = current().focusGoal(args.goalId, args.revision);
+      return {
+        id: node.id,
+        revision: node.revision,
+        state: node.state,
+        progress: current().goals.summary(),
+      };
+    },
+  );
+  tool(
+    "goal_accept",
+    "Accept goal with evidence",
+    "Register one acceptance for this exact goal revision after every criterion and required child has evidence. Artifact paths, completed task IDs, successful tool receipt IDs or current descendant acceptance IDs are checked once. statement is explicitly a model claim, suitable for explanatory planning evidence, never an automatically verified test. Reuse accepted evidence; no repeated model reviews are required. Accepting the main goal also completes the mission.",
+    Type.Object({
+      goalId: Type.String(),
+      revision: Type.Integer({ minimum: 0 }),
+      evidence: goalEvidence,
+    }),
+    (args) => {
+      current().acceptGoal(args.goalId, args.evidence, args.revision);
+      const node = current().goals.node(args.goalId),
+        record = current().store.acceptance(node.acceptanceId!)!;
+      return {
+        id: record.id,
+        goalId: node.id,
+        revision: node.revision,
+        state: node.state,
+        evidenceCount: record.evidence.length,
+        childCount: record.children.length,
+        progress: current().goals.summary(),
+      };
+    },
+  );
+  tool(
+    "goal_activate",
+    "Select main goal",
+    "Select one existing main goal while preserving its progress, evidence, activity and budget usage. Settle running/unknown executions and observe old results first. Selection cannot release user, workspace, decision, budget or recovery holds. Completion does not automatically activate another main goal.",
+    Type.Object({ goalId: Type.String() }),
+    (args) => {
+      const m = current().activateGoal(args.goalId);
+      return {
+        id: m.id,
+        status: m.status,
+        turns: m.turns,
+        outputTokens: m.outputTokens,
+        budgetStartedAt: m.budgetStartedAt,
+        progress: current().goals.summary(),
+      };
+    },
+  );
+  tool(
+    "goal_export",
+    "Export goal ledger",
+    "Export a consistent JSON snapshot on demand to a new file. Includes goal definitions, current states, immutable acceptance history, tool receipts and task/artifact references. Does not copy artifact contents or create periodic JSON files. Omit rootId for all main goals.",
+    Type.Object({
+      destination: Type.String({ minLength: 1 }),
+      rootId: Type.Optional(Type.String()),
+    }),
+    (args) => current().goals.export(args.destination, args.rootId),
+  );
+  tool(
     "goal_update",
     "Update goal",
     "Revise the goal definition and acceptance criteria. Clear prior evidence and advance its revision while preserving user holds, budgets and usage.",
@@ -1049,8 +1403,15 @@ export default function (pi: ExtensionAPI) {
       goalId: Type.Optional(Type.String()),
       objective: Type.String({ minLength: 1, maxLength: 8000 }),
       criteria: Type.Optional(Type.Array(Type.String(), { maxItems: 30 })),
+      revision: Type.Optional(Type.Integer({ minimum: 0 })),
     }),
-    (args) => current().updateGoal(args.objective, args.criteria, args.goalId),
+    (args) =>
+      current().updateGoal(
+        args.objective,
+        args.criteria,
+        args.goalId,
+        args.revision,
+      ),
   );
   tool(
     "goal_stop",
@@ -1066,18 +1427,41 @@ export default function (pi: ExtensionAPI) {
     "mission_complete",
     "Accept mission",
     "Mark the whole approved objective complete only after all work has settled and every acceptance criterion has verified evidence. Answering an intermediate question is not completion.",
-    Type.Object({ evidence }),
-    (args) => current().complete(args.evidence),
+    Type.Object({
+      evidence,
+      revision: Type.Optional(Type.Integer({ minimum: 0 })),
+    }),
+    (args) => current().complete(args.evidence, undefined, args.revision),
   );
   tool(
     "goal_finish",
     "Accept goal",
     "Compatibility alias for mission_complete. Requires no active tasks and evidence for every criterion.",
-    Type.Object({ evidence, goalId: Type.Optional(Type.String()) }),
+    Type.Object({
+      evidence,
+      goalId: Type.Optional(Type.String()),
+      revision: Type.Optional(Type.Integer({ minimum: 0 })),
+    }),
     (args) => {
+      if (args.goalId && current().store.goal(args.goalId)?.parentId) {
+        const node = current().goals.node(args.goalId);
+        if (args.revision === undefined)
+          throw new Error(
+            "Use goal_accept with an exact revision for a subgoal",
+          );
+        return current().acceptGoal(
+          node.id,
+          args.evidence.map((e: any) => ({
+            criterion: e.criterion,
+            source: "statement",
+            summary: e.evidence,
+          })),
+          args.revision,
+        );
+      }
       if (args.goalId && args.goalId !== current().store.mission()?.id)
         throw new Error("Goal identity changed");
-      return current().complete(args.evidence);
+      return current().complete(args.evidence, undefined, args.revision);
     },
   );
   tool(
@@ -1540,13 +1924,106 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
+  const openGoals = async (context: ExtensionContext) => {
+    if (context.mode !== "tui") {
+      context.ui.notify(
+        JSON.stringify(current().goals.snapshot(), null, 2),
+        "info",
+      );
+      return;
+    }
+    if (agentsOpen)
+      throw new Error("A Mission Control workbench is already open");
+    agentsOpen = true;
+    context.ui.setWidget("mission-control", undefined);
+    try {
+      await context.ui.custom<void>((tui, theme, _keys, done) => {
+        redraw = () => tui.requestRender();
+        const active = (goalPanel = new GoalPanel(current(), redraw, done, {
+          theme,
+        }));
+        return {
+          render: (width: number) => active.render(width),
+          invalidate() {},
+          handleInput: (data: string) => active.handleInput(data),
+          dispose() {
+            active.dispose();
+            if (goalPanel === active) goalPanel = undefined;
+            redraw = undefined;
+          },
+        };
+      });
+    } finally {
+      agentsOpen = false;
+      refresh();
+    }
+  };
   pi.registerCommand("mission", {
     description:
-      "Mission dashboard; policy status|business-only | time|timeline | view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl>",
+      "Mission dashboard; goals [export <new-file>|activate <id>|depth <3..12>|skip|cancel <id> <reason>] | policy status|business-only | time|timeline | view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl>",
     handler: async (args, context) => {
       try {
         const [command, ...rest] = args.trim().split(/\s+/);
         const k = current();
+        if (command === "goals") {
+          const [action, ...values] = rest;
+          if (action === "export") {
+            if (!values.length)
+              throw new Error("Use /mission goals export <new-file.json>");
+            context.ui.notify(
+              JSON.stringify(
+                k.goals.export(values.join(" ").replace(/^\"|\"$/g, "")),
+                null,
+                2,
+              ),
+              "info",
+            );
+            return;
+          }
+          if (action === "depth") {
+            const result = k.goals.setMaxDepth(Number(values[0]));
+            context.ui.notify(
+              `目标深度上限已设为 ${result.maxDepth}；超过三级不建议，优先使用执行任务记录细节。`,
+              "info",
+            );
+            return;
+          }
+          if (action === "activate") {
+            k.activateGoal(values[0]);
+            context.ui.notify(
+              "已切换主目标，进度、证据、用量和暂停限制均保留。",
+              "info",
+            );
+            return;
+          }
+          if (action === "skip" || action === "cancel") {
+            const node = k.goals.node(values[0]),
+              reason = values.slice(1).join(" ");
+            if (!node.parentId)
+              throw new Error(
+                "Use /mission stop to stop the current main goal",
+              );
+            if (!reason.trim())
+              throw new Error("Provide a reason for excluding this goal");
+            k.editGoal(
+              node.id,
+              { state: action === "skip" ? "skipped" : "cancelled", reason },
+              node.revision,
+              true,
+            );
+            context.ui.notify(
+              "已记录范围排除及原因，详细看板保留历史。",
+              "info",
+            );
+            return;
+          }
+          if (action)
+            throw new Error(
+              "Use /mission goals [export|activate|depth|skip|cancel]",
+            );
+          await openGoals(context);
+          return;
+        }
         if (command === "policy") {
           const value = rest[0] ?? "status";
           if (value === "status") {

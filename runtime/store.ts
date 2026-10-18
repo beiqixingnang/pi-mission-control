@@ -9,6 +9,9 @@ import type {
   Schedule,
   Task,
   ArchiveKind,
+  GoalNode,
+  GoalAcceptance,
+  GoalReceipt,
 } from "./types.ts";
 
 /** One session owner, normalized transactional state, immutable large artifacts. */
@@ -67,6 +70,16 @@ export class Store {
     CREATE TABLE IF NOT EXISTS schedules(id TEXT PRIMARY KEY,state TEXT NOT NULL,due INTEGER NOT NULL,data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS lifecycle_archive(kind TEXT NOT NULL,id TEXT NOT NULL,closed INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id));
     CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,at INTEGER NOT NULL,kind TEXT NOT NULL,entity TEXT,data TEXT NOT NULL);`);
+      // Additive migration: existing v2 sessions remain reloadable in place.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS goal_nodes(id TEXT PRIMARY KEY,root TEXT NOT NULL,parent TEXT,data TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS goal_root ON goal_nodes(root);
+        CREATE TABLE IF NOT EXISTS goal_acceptances(id TEXT PRIMARY KEY,goal TEXT NOT NULL,data TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS goal_acceptance_goal ON goal_acceptances(goal);
+        CREATE TABLE IF NOT EXISTS goal_receipts(id TEXT PRIMARY KEY,goal TEXT NOT NULL,data TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS goal_receipt_goal ON goal_receipts(goal);
+        CREATE TABLE IF NOT EXISTS goal_missions(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+      `);
       const version = this.get<number>("schema");
       if (version !== undefined && version !== 2)
         throw new Error(`Unsupported Mission Control state schema: ${version}`);
@@ -110,17 +123,23 @@ export class Store {
     return row ? JSON.parse(row.data) : undefined;
   }
   set(key: string, value: unknown) {
-    this.db
-      .prepare(
-        "INSERT INTO meta VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
-      )
-      .run(key, JSON.stringify(value));
+    const write = () => {
+      this.db
+        .prepare(
+          "INSERT INTO meta VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
+        )
+        .run(key, JSON.stringify(value));
+      if (key === "mission") this.putMission(value as Mission);
+    };
+    if (key === "mission") this.transaction(write);
+    else write();
   }
   unset(key: string) {
     this.db.prepare("DELETE FROM meta WHERE key=?").run(key);
   }
   archiveMission(mission: Mission, at: number, reason: string) {
     const archived = this.archive("goal", mission, at, reason);
+    this.putMission(archived);
     this.unset("mission");
     return archived;
   }
@@ -166,6 +185,84 @@ export class Store {
   }
   mission() {
     return this.get<Mission>("mission");
+  }
+  putMission(mission: Mission) {
+    this.db
+      .prepare(
+        "INSERT INTO goal_missions VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+      )
+      .run(mission.id, JSON.stringify(mission));
+  }
+  savedMission(id: string): Mission | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM goal_missions WHERE id=?")
+      .get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
+  }
+  putGoal(goal: GoalNode) {
+    this.db
+      .prepare(
+        "INSERT INTO goal_nodes VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET root=excluded.root,parent=excluded.parent,data=excluded.data",
+      )
+      .run(goal.id, goal.rootId, goal.parentId ?? null, JSON.stringify(goal));
+  }
+  goal(id: string): GoalNode | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM goal_nodes WHERE id=?")
+      .get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
+  }
+  goals(rootId?: string): GoalNode[] {
+    const rows = (
+      rootId
+        ? this.db
+            .prepare("SELECT data FROM goal_nodes WHERE root=? ORDER BY rowid")
+            .all(rootId)
+        : this.db.prepare("SELECT data FROM goal_nodes ORDER BY rowid").all()
+    ) as { data: string }[];
+    return rows.map((row) => JSON.parse(row.data));
+  }
+  putAcceptance(record: GoalAcceptance) {
+    this.db
+      .prepare("INSERT INTO goal_acceptances VALUES(?,?,?)")
+      .run(record.id, record.goalId, JSON.stringify(record));
+  }
+  acceptance(id: string): GoalAcceptance | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM goal_acceptances WHERE id=?")
+      .get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
+  }
+  acceptances(goalId: string): GoalAcceptance[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT data FROM goal_acceptances WHERE goal=? ORDER BY rowid",
+        )
+        .all(goalId) as { data: string }[]
+    ).map((row) => JSON.parse(row.data));
+  }
+  putGoalReceipt(receipt: GoalReceipt) {
+    this.db
+      .prepare(
+        "INSERT INTO goal_receipts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+      )
+      .run(receipt.id, receipt.goalId, JSON.stringify(receipt));
+  }
+  goalReceipt(id: string): GoalReceipt | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM goal_receipts WHERE id=?")
+      .get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
+  }
+  goalReceipts(goalId: string, limit = 20): GoalReceipt[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT data FROM goal_receipts WHERE goal=? ORDER BY rowid DESC LIMIT ?",
+        )
+        .all(goalId, Math.max(1, Math.min(100, limit))) as { data: string }[]
+    ).map((row) => JSON.parse(row.data));
   }
   putMember(m: Member) {
     this.db

@@ -6,6 +6,7 @@ import { cleanText } from "./public.ts";
 import { LeadRecovery } from "./recovery.ts";
 import { contextLimitError } from "./reconnect.ts";
 import { MissionActivityClock } from "./activity-clock.ts";
+import { GoalLedger } from "./goals.ts";
 import {
   resolveSettings,
   terminal,
@@ -21,6 +22,9 @@ import {
   type WorkerHandle,
   type WorkerOutcome,
   type PublicActivity,
+  type GoalDefinition,
+  type GoalEvidence,
+  type GoalNode,
 } from "./types.ts";
 
 const noProgressReason =
@@ -51,6 +55,7 @@ export interface KernelOptions {
 /** Owns work independently of model-controlled Goal and reminder tools. */
 export class MissionKernel {
   store: Store;
+  goals: GoalLedger;
   settings: Settings;
   options: KernelOptions;
   bridgeUrl = "";
@@ -102,6 +107,7 @@ export class MissionKernel {
         this.now,
       );
       this.activityClock = new MissionActivityClock(this.store, this.now);
+      this.goals = new GoalLedger(this.store, options.cwd, this.now);
     } catch (error) {
       this.store.close();
       throw error;
@@ -428,6 +434,7 @@ export class MissionKernel {
       humanPaused: false,
     };
     this.store.set("mission", mission);
+    this.goals.enroll(mission);
     this.store.event("mission.created", mission.id, { automatic: true });
     return mission;
   }
@@ -460,76 +467,279 @@ export class MissionKernel {
     return archived;
   }
   setGoal(objective: string, criteria: string[] = []) {
-    if (!objective.trim()) throw new Error("Goal objective is required");
-    let m = this.ensureMission(objective);
-    if (m.humanPaused || m.status === "stopped")
-      throw new Error(
-        "The user paused this mission. Only /mission resume can restore execution.",
-      );
-    m.objective = cleanText(objective, 8000);
-    m.criteria = (criteria.length ? criteria : [objective])
-      .slice(0, 30)
-      .map((x) => cleanText(x, 2000));
-    m.updatedAt = this.now();
-    this.store.set("mission", m);
-    this.turnActed = true;
-    this.changed();
-    return m;
+    return this.store.transaction(() => {
+      if (!objective.trim()) throw new Error("Goal objective is required");
+      const previous = this.store.mission();
+      if (previous && !["complete", "stopped"].includes(previous.status))
+        return this.updateGoal(objective, criteria, previous.id);
+      let m = this.ensureMission(objective);
+      if (m.humanPaused || m.status === "stopped")
+        throw new Error(
+          "The user paused this mission. Only /mission resume can restore execution.",
+        );
+      m.objective = cleanText(objective, 8000);
+      m.criteria = (criteria.length ? criteria : [objective])
+        .slice(0, 30)
+        .map((x) => cleanText(x, 2000));
+      m.updatedAt = this.now();
+      this.store.set("mission", m);
+      this.syncGoalDefinition(m);
+      this.turnActed = true;
+      this.changed();
+      return m;
+    });
   }
-  updateGoal(objective: string, criteria: string[] = [], goalId?: string) {
-    if (!objective.trim()) throw new Error("Goal objective is required");
-    const m = this.store.mission();
-    if (!m || ["complete", "stopped"].includes(m.status))
-      throw new Error("No unfinished goal to update");
-    if (goalId && goalId !== m.id) throw new Error("Goal identity changed");
-    m.objective = cleanText(objective, 8000);
-    m.criteria = (criteria.length ? criteria : [objective])
-      .slice(0, 30)
-      .map((x) => cleanText(x, 2000));
-    m.revision = (m.revision ?? 0) + 1;
-    if (m.decision) {
-      const old = m.decision.id;
-      m.decision = {
-        ...m.decision,
-        id: randomUUID(),
-        revision: m.revision,
-        humanVersion: this.store.get<number>("humanVersion") ?? 0,
-      };
-      for (const id of m.decision.taskIds) {
-        const task = this.store.task(id);
-        if (task?.blockedReason === `decision:${old}`) {
-          task.blockedReason = `decision:${m.decision.id}`;
-          this.store.putTask(task);
-        }
+  updateGoal(
+    objective: string,
+    criteria: string[] = [],
+    goalId?: string,
+    revision?: number,
+  ): Mission | GoalNode {
+    return this.store.transaction(() => {
+      if (!objective.trim()) throw new Error("Goal objective is required");
+      if (goalId && this.store.goal(goalId)?.parentId) {
+        if (revision === undefined)
+          throw new Error("Use goal_edit with an exact revision for a subgoal");
+        return this.editGoal(
+          goalId,
+          { objective, criteria: criteria.length ? criteria : [objective] },
+          revision,
+        );
       }
-      this.store.event("decision.revised", old, {
-        decisionId: m.decision.id,
-        revision: m.revision,
-      });
-    }
-    if (m.externalWait) {
-      const old = m.externalWait.id;
-      m.externalWait = {
-        ...m.externalWait,
-        id: randomUUID(),
-        token: randomUUID(),
-        revision: m.revision,
-      };
-      this.store.event("wait.revised", old, {
-        waitId: m.externalWait.id,
-        revision: m.revision,
-      });
-    }
-    m.evidence = undefined;
-    m.nextContinueAt = this.now() + 1000;
-    m.updatedAt = this.now();
-    // Editing an objective neither grants execution authority nor renews a budget.
-    this.store.set("mission", m);
-    this.store.event("mission.updated", m.id, { revision: m.revision });
-    this.recovery.revise(m.revision);
+      const m = this.store.mission();
+      if (!m || ["complete", "stopped"].includes(m.status))
+        throw new Error("No unfinished goal to update");
+      if (goalId && goalId !== m.id) throw new Error("Goal identity changed");
+      if (revision !== undefined && revision !== (m.revision ?? 0))
+        throw new Error("Goal revision changed");
+      m.objective = cleanText(objective, 8000);
+      m.criteria = (criteria.length ? criteria : [objective])
+        .slice(0, 30)
+        .map((x) => cleanText(x, 2000));
+      m.revision = (m.revision ?? 0) + 1;
+      if (m.decision) {
+        const old = m.decision.id;
+        m.decision = {
+          ...m.decision,
+          id: randomUUID(),
+          revision: m.revision,
+          humanVersion: this.store.get<number>("humanVersion") ?? 0,
+        };
+        for (const id of m.decision.taskIds) {
+          const task = this.store.task(id);
+          if (task?.blockedReason === `decision:${old}`) {
+            task.blockedReason = `decision:${m.decision.id}`;
+            this.store.putTask(task);
+          }
+        }
+        this.store.event("decision.revised", old, {
+          decisionId: m.decision.id,
+          revision: m.revision,
+        });
+      }
+      if (m.externalWait) {
+        const old = m.externalWait.id;
+        m.externalWait = {
+          ...m.externalWait,
+          id: randomUUID(),
+          token: randomUUID(),
+          revision: m.revision,
+        };
+        this.store.event("wait.revised", old, {
+          waitId: m.externalWait.id,
+          revision: m.revision,
+        });
+      }
+      m.evidence = undefined;
+      m.nextContinueAt = this.now() + 1000;
+      m.updatedAt = this.now();
+      // Editing an objective neither grants execution authority nor renews a budget.
+      this.store.set("mission", m);
+      this.syncGoalDefinition(m);
+      this.store.event("mission.updated", m.id, { revision: m.revision });
+      this.recovery.revise(m.revision);
+      this.turnActed = true;
+      this.changed();
+      return m;
+    });
+  }
+  private syncGoalDefinition(m: Mission) {
+    const node = this.goals.enroll(m);
+    node.objective = m.objective;
+    node.criteria = m.criteria;
+    node.revision = m.revision ?? 0;
+    node.acceptanceId = undefined;
+    node.state = "planned";
+    node.updatedAt = this.now();
+    this.store.putGoal(node);
+  }
+  planGoals(definitions: GoalDefinition[]) {
+    return this.store.transaction(() => {
+      const created = this.goals.plan(definitions);
+      // Planning may coexist with a held mission; it never releases that hold.
+      if (
+        !this.store.mission() &&
+        !this.userHold &&
+        !this.store.get("relocationHold")
+      ) {
+        const root = created.find((node) => !node.parentId);
+        if (root) this.activateGoal(root.id);
+      }
+      this.turnActed = true;
+      this.changed();
+      return created;
+    });
+  }
+  activateGoal(id: string) {
+    const root = this.goals.node(id);
+    if (root.parentId)
+      throw new Error(
+        "Activate a main goal, then use goal_focus for its leaves",
+      );
+    const current = this.store.mission();
+    if (current?.id === id) return current;
+    if (
+      this.userHold ||
+      this.store.get("relocationHold") ||
+      current?.humanPaused ||
+      (current && !["active", "complete"].includes(current.status)) ||
+      this.recovery.current()
+    )
+      throw new Error(
+        "Resolve current user, workspace, decision, budget or recovery holds before switching main goals",
+      );
+    if (
+      this.store.tasks(true).length ||
+      this.live.size ||
+      this.store.unknownProcesses().total
+    )
+      throw new Error(
+        "Settle running work and unknown processes before switching main goals",
+      );
+    if (
+      current &&
+      this.store
+        .deliveries("lead")
+        .some(
+          (d) =>
+            d.missionId === current.id &&
+            ["result", "failure", "decision", "recovery"].includes(d.kind) &&
+            ["pending", "leased", "admitted", "quarantined"].includes(d.state),
+        )
+    )
+      throw new Error("Observe retained results before switching main goals");
+    if (["accepted", "cancelled", "skipped"].includes(root.state))
+      throw new Error("Reopen the main goal before activation");
+    const target = this.store.savedMission(id) ?? this.goals.newMission(root);
+    if (target.status === "stopped")
+      throw new Error(
+        "Stopped goals retain their stop; create a new main goal",
+      );
+    this.syncActivity(true);
+    this.store.transaction(() => {
+      if (current) this.store.putMission(current);
+      for (const d of this.store.deliveries("lead"))
+        if (
+          d.missionId === current?.id &&
+          ["continue", "progress"].includes(d.kind) &&
+          d.state !== "observed"
+        ) {
+          d.state = "superseded";
+          d.reason = "Main goal deactivated; progress retained in goal ledger";
+          this.store.putDelivery(d);
+        }
+      this.generation++;
+      this.reservation = undefined;
+      // No budget timestamps, usage or hold flags are reset by selection.
+      this.store.set("mission", target);
+      this.store.event("goal.activated", id, { previousRootId: current?.id });
+    });
     this.turnActed = true;
     this.changed();
-    return m;
+    return target;
+  }
+  editGoal(
+    id: string,
+    patch: Parameters<GoalLedger["edit"]>[1],
+    revision?: number,
+    allowExclusion = false,
+  ): Mission | GoalNode {
+    return this.store.transaction(() => {
+      const node = this.goals.node(id);
+      if (
+        !node.parentId &&
+        (patch.objective !== undefined || patch.criteria !== undefined) &&
+        id === this.store.mission()?.id &&
+        !["complete", "stopped"].includes(this.store.mission()!.status)
+      ) {
+        if (patch.dependsOn !== undefined || patch.state !== undefined)
+          throw new Error("Update root definition separately from its state");
+        if (revision !== undefined && revision !== node.revision)
+          throw new Error("Goal revision changed");
+        const updated = this.updateGoal(
+          patch.objective ?? node.objective,
+          patch.criteria ?? node.criteria,
+          id,
+        );
+        const { objective, criteria, ...metadata } = patch;
+        if (Object.keys(metadata).length)
+          this.goals.edit(id, metadata, this.goals.node(id).revision);
+        return updated;
+      }
+      const result = this.goals.edit(id, patch, revision, allowExclusion);
+      const root = this.goals.node(result.rootId),
+        saved = this.store.savedMission(root.id);
+      if (saved) {
+        saved.objective = root.objective;
+        saved.criteria = root.criteria;
+        saved.revision = root.revision;
+        if (root.state !== "accepted" && saved.status === "complete") {
+          saved.status = "active";
+          saved.evidence = undefined;
+          saved.archivedAt = undefined;
+          saved.archiveReason = undefined;
+        }
+        if (this.store.mission()?.id === root.id)
+          this.store.set("mission", saved);
+        else this.store.putMission(saved);
+      }
+      this.turnActed = true;
+      this.changed();
+      return result;
+    });
+  }
+  focusGoal(id: string, revision?: number) {
+    const mission = this.store.mission();
+    if (
+      !mission ||
+      mission.status !== "active" ||
+      mission.humanPaused ||
+      this.userHold ||
+      this.store.get("relocationHold")
+    )
+      throw new Error("Resolve mission holds before focusing work");
+    const node = this.goals.focus(id, revision);
+    this.turnActed = true;
+    this.changed();
+    return node;
+  }
+  acceptGoal(id: string, evidence: GoalEvidence[], revision: number) {
+    const node = this.goals.node(id);
+    if (node.revision !== revision) throw new Error("Goal revision changed");
+    if (node.state === "accepted" && node.acceptanceId)
+      return this.store.acceptance(node.acceptanceId)!;
+    if (!node.parentId)
+      return this.complete(
+        evidence.map((e) => ({ criterion: e.criterion, evidence: e.summary })),
+        evidence,
+        revision,
+      );
+    if (this.userHold || this.store.get("relocationHold"))
+      throw new Error("Resolve user or workspace holds before acceptance");
+    const record = this.goals.accept(id, evidence, revision);
+    this.turnActed = true;
+    this.changed();
+    return record;
   }
   async stopGoal(goalId?: string, reason = "Stopped by the lead") {
     const m = this.store.mission();
@@ -539,6 +749,12 @@ export class MissionKernel {
     m.status = "stopped";
     m.humanPaused = true;
     m.reason = cleanText(reason, 2000);
+    const goal = this.store.goal(m.id);
+    if (goal) {
+      goal.state = "cancelled";
+      goal.reason = m.reason;
+      this.store.putGoal(goal);
+    }
     this.generation++;
     this.userHold = true;
     this.reservation = undefined;
@@ -555,10 +771,20 @@ export class MissionKernel {
     this.turnActed = true;
     return archived;
   }
-  complete(evidence: Array<{ criterion: number; evidence: string }>) {
+  complete(
+    evidence: Array<{ criterion: number; evidence: string }>,
+    structured?: GoalEvidence[],
+    revision?: number,
+  ) {
     const m = this.store.mission();
     if (!m || m.status !== "active")
       throw new Error("No active mission to complete");
+    if (this.userHold || m.humanPaused || this.store.get("relocationHold"))
+      throw new Error("Resolve user or workspace holds before completion");
+    if (this.goals.children(m.id).length && revision === undefined)
+      throw new Error(
+        "Use goal_accept or supply the exact main-goal revision when completing a planned goal tree",
+      );
     if (this.store.tasks(true).length || this.live.size)
       throw new Error(
         "Work is still running, queued, waiting or being stopped. Collect results before completion.",
@@ -595,16 +821,29 @@ export class MissionKernel {
       throw new Error(
         "Verified evidence is required for every acceptance criterion.",
       );
-    m.status = "complete";
-    m.evidence = evidence.map((e) => ({
-      criterion: e.criterion,
-      evidence: cleanText(e.evidence, 2000),
-    }));
-    m.updatedAt = this.now();
-    this.store.event("mission.completed", m.id);
-    const archived = this.archiveMission(m, "completed", true);
-    this.turnActed = true;
-    return archived;
+    return this.store.transaction(() => {
+      const root = this.goals.node(m.id);
+      this.goals.accept(
+        m.id,
+        structured ??
+          evidence.map((e) => ({
+            criterion: e.criterion,
+            source: "statement",
+            summary: e.evidence,
+          })),
+        revision ?? root.revision,
+      );
+      m.status = "complete";
+      m.evidence = evidence.map((e) => ({
+        criterion: e.criterion,
+        evidence: cleanText(e.evidence, 2000),
+      }));
+      m.updatedAt = this.now();
+      this.store.event("mission.completed", m.id);
+      const archived = this.archiveMission(m, "completed", true);
+      this.turnActed = true;
+      return archived;
+    });
   }
   addMember(input: Omit<Member, "id" | "sessionId" | "createdAt">) {
     if (this.store.members().length >= 100)
@@ -703,6 +942,7 @@ export class MissionKernel {
       attemptOf?: string;
       dependsOn?: string;
       timeoutMs?: number;
+      goalId?: string;
     } = {},
   ): Task {
     if (this.relocating)
@@ -733,12 +973,29 @@ export class MissionKernel {
         throw new Error(
           "Task cycle denied. Send a note to an ancestor instead of assigning it work.",
         );
+    const assignedGoalId = options.goalId ?? parent?.goalId;
+    if (assignedGoalId) {
+      const node = this.goals.node(assignedGoalId),
+        selected = this.store.mission();
+      if (
+        !selected ||
+        node.rootId !== selected.id ||
+        ["complete", "stopped"].includes(selected.status)
+      )
+        throw new Error(
+          "Activate the assigned main goal and reopen closed work before creating a task",
+        );
+    }
     const mission = this.ensureMission(message);
     this.checkBudget(mission);
     if (mission.humanPaused || mission.status !== "active")
       throw new Error(
         `Mission ${mission.status}: ${mission.reason ?? "resume through /mission resume"}`,
       );
+    const goal = this.goals.assignment(
+      mission.id,
+      options.goalId ?? parent?.goalId,
+    );
     const timeout = options.timeoutMs ?? this.settings.taskTimeoutMs;
     if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 3_600_000)
       throw new Error("timeoutMs must be between 1000 and 3600000");
@@ -747,6 +1004,8 @@ export class MissionKernel {
     const t: Task = {
       id,
       missionId: mission.id,
+      goalId: goal.id,
+      goalRevision: goal.revision,
       memberId: member.id,
       member: member.name,
       parentId: parent?.id,
@@ -787,7 +1046,7 @@ export class MissionKernel {
     return this.dispatch(
       old.member,
       this.store.readArtifact(old.inputPath, 200_000),
-      { attemptOf: old.id, timeoutMs: old.timeoutMs },
+      { attemptOf: old.id, timeoutMs: old.timeoutMs, goalId: old.goalId },
     );
   }
   async cancelTask(id: string, reason = "Cancelled by coordinator") {
@@ -1136,6 +1395,15 @@ export class MissionKernel {
     }
     this.store.set("mission", m);
     this.store.event(`user.${action}`, m.id);
+    const goal = this.store.goal(m.id);
+    if (
+      goal &&
+      (action === "stop" || (action === "resume" && goal.state === "cancelled"))
+    ) {
+      goal.state = action === "stop" ? "cancelled" : "planned";
+      goal.reason = m.reason;
+      this.store.putGoal(goal);
+    }
     if (action === "stop")
       await Promise.all(
         this.store
@@ -1744,6 +2012,7 @@ export class MissionKernel {
       recoveryPlan: this.recoveryPlan(),
       decisionPolicy: this.decisionPolicyValue,
       mission: m,
+      goals: this.goals.summary(m?.id),
       recovery: this.recovery.current(),
       activity: this.activityClock.snapshot(m),
       budgets: {
@@ -1774,8 +2043,12 @@ export class MissionKernel {
       `Current Mission Control recovery plan: ${JSON.stringify(this.recoveryPlan(5))}. Follow this current plan before repeating old recovery advice. Tools named here are callable by the lead model; do not claim that recovery failed unless an actual recovery tool returned an error.`,
       `Autonomy policy: ${this.decisionPolicyValue}. Choose implementation, retry, command, file, member and formatting details yourself inside the approved scope. Use mission_decision only for a concrete business boundary such as scope, acceptance, permission, budget, deadline, release or irreversible risk.`,
       "Decision answers do not require A/B/C tokens. A new direct human answer may delegate an in-scope choice to the lead. Quote that actual answer when resolving the exact decisionId and explain the selected next step; do not request another confirmation merely to obtain a letter. A policy change alone does not answer an existing decision or expand workspace or action authorization.",
-      `Mission ${m.id}: ${m.status}. ${m.objective}`,
-      `Acceptance: ${m.criteria.map((x, i) => `${i + 1}. ${x}`).join(" | ")}`,
+      `Mission ${m.id}: ${m.status}. ${cleanText(m.objective, 1200)}`,
+      `Acceptance (${m.criteria.length} items; goal_tree has details): ${m.criteria
+        .slice(0, 6)
+        .map((x, i) => `${i + 1}. ${cleanText(x, 200)}`)
+        .join(" | ")}`,
+      `Goal ledger progress: ${JSON.stringify(s.goals)}. goal_tree reads the durable plan and evidence. For complex work, register stages and leaf deliverables with goal_plan before implementation; use dependencies to preserve batch order. Focus a ready leaf with goal_focus before commands or delegation. goal_accept records evidence once for each goal; completed member turns never accept goals. Use goal_edit to record blockers, next steps or explicit reopening. Tool receipts and task results can be referenced; statements are labelled model claims. Reuse accepted evidence unless requirements or relevant artifacts change. Multiple main goals coexist; goal_activate selects only one and never clears holds or renews budgets.`,
       `Tasks: ${
         s.tasks
           .filter((t) => !terminal(t))
@@ -1935,6 +2208,8 @@ export class MissionKernel {
         for (const task of this.store
           .tasks(true)
           .filter((t) => t.state === "queued")) {
+          if (task.missionId !== mission?.id) continue;
+          if (task.goalId && this.goals.blockers(task.goalId).length) continue;
           if (task.blockedReason) continue;
           if (task.phase === "work" && now - task.createdAt >= task.timeoutMs) {
             this.finishWithoutWorker(
@@ -2183,6 +2458,9 @@ export class MissionKernel {
     const prompt = [
       `Assigned task ${task.id}; phase ${task.phase}. Follow the existing user authorization.`,
       original,
+      task.goalId
+        ? `Goal ${task.goalId}: ${this.store.goal(task.goalId)?.objective}\nStay within this goal. Deliver concrete artifacts and verification results; the lead records acceptance separately.`
+        : "",
       this.store.get("pathMappings")
         ? `Workspace rename mappings: ${JSON.stringify(this.store.get("pathMappings"))}. Resolve old references against the current assigned root before executing commands; do not rewrite evidence.`
         : "",

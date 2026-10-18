@@ -39,6 +39,11 @@ export class MissionActivityClock {
     }
     let changed = false;
     if (this.value?.missionId !== m.id) {
+      if (this.value)
+        this.store.set(`goalActivityClock:${this.value.missionId}`, this.value);
+      const retained = this.store.get<ActivityClock>(
+        `goalActivityClock:${m.id}`,
+      );
       // For an explicitly configured pre-upgrade cap, retain its conservative old charge.
       // Without such a cap, old wall time is not invented as measured activity.
       const legacyEstimate =
@@ -53,6 +58,7 @@ export class MissionActivityClock {
         cycleActiveMs: estimate,
         coverageStartedAt: at,
         legacyEstimate,
+        ...retained,
         state,
         reason,
         updatedAt: at,
@@ -79,6 +85,7 @@ export class MissionActivityClock {
     this.lastAt = at;
     if (changed || force || at - this.savedAt >= 15000) {
       this.store.set("missionActivityClock", this.value);
+      this.store.set(`goalActivityClock:${m.id}`, this.value);
       this.savedAt = at;
     }
   }

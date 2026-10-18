@@ -1,3 +1,11 @@
+# 2.1.0 — hierarchical goals and persistent acceptance ledger (2026-10-18)
+
+- Add transactional SQLite goal trees, multiple main goals with one selected, explicit stage dependencies and a default maximum depth of three. Extra depth requires a user command and remains discouraged.
+- Bind native lead execution receipts and delegated tasks to ready leaf goals and their revisions. Accept each goal against its criteria, retain immutable acceptance history, reference child acceptances and reopen affected parent/dependent acceptances when work changes.
+- Show compact second/third-level acceptance counts in the existing widget; add `/mission goals` and an interactive goal tab with evidence, blockers, remaining effort, selection and reopening. Export the ledger only on demand.
+- Directly expose seven new model tools through the existing host registry. Preserve old flat-goal tools, execution holds and per-main-goal usage/activity through in-place `/reload` migrations.
+- Fix public-export duplicate-destination handling exposed by Linux testing: acquire the exclusive file descriptor before producers start streaming.
+
 # 2.0.20 — autonomous execution policy; Web kept experimental (2026-10-18)
 
 - Default to business-only escalation: routine execution stays with the lead within approved scope. Expose idempotent mission_policy status/apply and the equivalent user command without clearing decisions, holds or budgets.

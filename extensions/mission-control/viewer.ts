@@ -23,6 +23,7 @@ import {
 } from "../../runtime/transcript.ts";
 import { stateNames, missionState } from "./ui.ts";
 import { panelLine } from "./presentation.ts";
+import { GoalPanel } from "./goals-ui.ts";
 import {
   messageTime,
   readDuration,
@@ -290,6 +291,7 @@ export class MissionPanel {
   private copyMessage?: (text: string) => Promise<void>;
   private leadSessionFile?: () => string | undefined;
   private leadPreviews?: () => PublicActivity[];
+  private goalsPanel: GoalPanel;
 
   constructor(
     private kernel: MissionKernel,
@@ -303,6 +305,15 @@ export class MissionPanel {
     this.leadSessionFile = options.leadSessionFile;
     this.leadPreviews = options.leadPreviews;
     this.getHeight = options.height ?? (() => process.stdout.rows ?? 24);
+    this.goalsPanel = new GoalPanel(
+      kernel,
+      redraw,
+      () => {
+        this.tab = 0;
+        this.redraw();
+      },
+      { theme: options.theme, height: () => Math.max(6, this.getHeight() - 5) },
+    );
     if (options.pollMs !== 0) {
       this.timer = setInterval(
         () => this.perform(() => this.refresh()),
@@ -313,6 +324,7 @@ export class MissionPanel {
   }
   private getHeight: () => number;
   dispose() {
+    this.goalsPanel.dispose();
     this.disposed = true;
     this.revision++;
     if (this.timer) clearInterval(this.timer);
@@ -522,6 +534,8 @@ export class MissionPanel {
 
   private renderContent(width: number) {
     const s = this.kernel.snapshot();
+    if (this.view === "team" && this.tab === 1)
+      return this.goalsPanel.render(width);
     this.height = Math.max(3, this.getHeight() - 5);
     let lines: string[];
     if (this.view === "team") {
@@ -818,6 +832,10 @@ export class MissionPanel {
   }
   private routeInput(data: string) {
     if (this.disposed) return;
+    if (this.view === "team" && this.tab === 1 && !matchesKey(data, "tab")) {
+      this.goalsPanel.handleInput(data);
+      return;
+    }
     if (
       data === "q" ||
       (data === "m" && this.view === "conversation" && this.scope === "lead")
@@ -838,6 +856,21 @@ export class MissionPanel {
         this.perform(() => this.openLead());
       } else if (matchesKey(data, "tab")) {
         this.tab = (this.tab + 1) % 3;
+        if (this.tab === 1) {
+          this.goalsPanel.dispose();
+          this.goalsPanel = new GoalPanel(
+            this.kernel,
+            this.redraw,
+            () => {
+              this.tab = 0;
+              this.redraw();
+            },
+            {
+              theme: this.theme,
+              height: () => Math.max(6, this.getHeight() - 5),
+            },
+          );
+        }
         this.pageScroll = 0;
       } else if (this.tab !== 0) {
         if (matchesKey(data, "down")) this.pageScroll++;

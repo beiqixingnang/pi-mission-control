@@ -89,13 +89,7 @@ export function board(
             : "",
     };
   });
-  const goalDetail = s.recovery
-    ? `恢复 ${s.recovery.nextAt ? due(s.recovery.nextAt) : "等待条件变化"}`
-    : m?.externalWait
-      ? `截止 ${due(m.externalWait.deadline)}`
-      : kernel.settings.maxMissionMs > 0
-        ? `本轮 ${duration(s.activity?.cycleActiveMs ?? 0)} / ${duration(kernel.settings.maxMissionMs)}`
-        : `活动 ${duration(s.activity?.activeMs ?? 0)} · 无时间上限`;
+  const goalDetail = `二级${s.goals.level2.completed}/${s.goals.level2.total} 三级${s.goals.level3.completed}/${s.goals.level3.total}`;
   const goal = {
     category: "目标",
     name: m?.objective ?? "首次派工自动建立",
@@ -140,7 +134,7 @@ export function board(
   const footer = [
     hiddenMembers ? `另有 ${hiddenMembers}名成员` : "",
     hiddenReminders ? `另有 ${hiddenReminders}项提醒` : "",
-    "/mission 查看 · /agents 成员对话",
+    "/mission goals 目标详情 · /agents 成员对话",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -175,13 +169,14 @@ export function board(
       waiting = memberRows.filter((r) => r.status === "等待下游").length;
     const memberLine = (r: typeof goal) =>
       `${cell(r.name, Math.max(1, width - 13))} ${r.status}`;
-    const compactShown = memberRows.slice(0, Math.max(0, limit - 4));
+    const compactShown = memberRows.slice(0, Math.max(0, limit - 5));
     lines = [
       `目标 · ${goal.status} · ${goal.name}`,
+      `${goalDetail} 已验收`,
       `定时 · ${reminderCount}项${reminderCount ? " · " + reminderRows[0].detail + " " + reminderRows[0].name : " · 无"}`,
       `成员 · ${memberRows.length}名 · 执行 ${running} · 等待 ${waiting}`,
       ...compactShown.map(memberLine),
-      `${memberRows.length > compactShown.length ? `另有 ${memberRows.length - compactShown.length}名成员 · ` : ""}/mission 查看 · /agents 对话`,
+      `${memberRows.length > compactShown.length ? `另有 ${memberRows.length - compactShown.length}名成员 · ` : ""}/mission goals 详情 · /agents 对话`,
     ];
   }
   if (expanded) {
@@ -192,6 +187,7 @@ export function board(
       );
     if (m)
       lines.push(
+        `活动耗时 ${duration(s.activity?.activeMs ?? 0)} · 时间预算 ${kernel.settings.maxMissionMs ? duration(kernel.settings.maxMissionMs) : "无时间上限"}`,
         `自动接续 ${m.turns}/${kernel.settings.maxAutonomousTurns || "不限"} · 主输出 ${m.outputTokens}/${kernel.settings.maxOutputTokens || "不限"}`,
       );
     lines.push("Esc 返回 · /mission pause|resume|stop 控制任务");

@@ -23,6 +23,9 @@ const { board } = await jiti.import(
 const { MissionPanel, teamRows } = await jiti.import(
   path.resolve("extensions/mission-control/viewer.ts"),
 );
+const { GoalPanel } = await jiti.import(
+  path.resolve("extensions/mission-control/goals-ui.ts"),
+);
 const { visibleWidth } = await import(
   pathToFileURL(
     path.join(hostDir, "node_modules/@earendil-works/pi-tui/dist/index.js"),
@@ -75,6 +78,108 @@ async function withRoster(run) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+test("compact goal counts and the detailed keyboard board share the acceptance ledger", () =>
+  withRoster(async ({ kernel }) => {
+    const nodes = kernel.planGoals([
+        {
+          key: "root",
+          objective: "Processor main goal",
+          criteria: ["All stages accepted"],
+        },
+        {
+          key: "stage",
+          parentId: "root",
+          objective: "Implementation stage",
+          criteria: ["Every module accepted"],
+        },
+        {
+          key: "a",
+          parentId: "stage",
+          objective: "Hidden module A title",
+          criteria: ["Actual source artifact exists"],
+        },
+        {
+          key: "b",
+          parentId: "stage",
+          objective: "Hidden module B title",
+          criteria: ["Actual source artifact exists"],
+        },
+        {
+          key: "other",
+          objective: "Other inactive main goal",
+          criteria: ["Separate progress"],
+        },
+      ]),
+      p = Object.fromEntries(nodes.map((n) => [n.key, n]));
+    kernel.acceptGoal(
+      p.a.id,
+      [
+        {
+          criterion: 1,
+          source: "statement",
+          summary: "Concrete module A result recorded in the fixture",
+        },
+      ],
+      0,
+    );
+    const compact = board(kernel, 120, false, undefined, 40).join("\n");
+    assert.match(compact, /二级0\/1 三级1\/2/);
+    assert.doesNotMatch(compact, /Hidden module/);
+    let closed = 0;
+    const goalPanel = new GoalPanel(
+      kernel,
+      () => {},
+      () => closed++,
+      { height: () => 20 },
+    );
+    try {
+      const tree = goalPanel.render(120).join("\n");
+      assert.match(tree, /Hidden module A title/);
+      assert.match(tree, /Other inactive main goal/);
+      goalPanel.selectedId = p.a.id;
+      goalPanel.handleInput("\r");
+      const detail = goalPanel.render(120).join("\n");
+      assert.match(detail, /Actual source artifact exists/);
+      assert.match(detail, /模型陈述/);
+      assert.match(detail, /Concrete module A result/);
+      goalPanel.handleInput("r");
+      assert.equal(kernel.goals.node(p.a.id).state, "planned");
+      assert.match(goalPanel.render(120).join("\n"), /历史验收/);
+      assert.equal(kernel.goals.summary().level3.completed, 0);
+      goalPanel.handleInput("\x1b");
+      goalPanel.selectedId = p.b.id;
+      goalPanel.handleInput("f");
+      assert.equal(kernel.goals.summary().focus.id, p.b.id);
+      for (const width of [1, 5, 20, 40, 80, 120, 180]) {
+        const lines = goalPanel.render(width);
+        assert.ok(lines.every((line) => visibleWidth(line) <= width));
+        assert.ok(lines.length <= 20);
+      }
+      goalPanel.handleInput("\x1b");
+      assert.equal(closed, 1);
+    } finally {
+      goalPanel.dispose();
+    }
+    // Returning from the embedded tab must not leave its next instance disposed.
+    const panel = new MissionPanel(
+      kernel,
+      () => {},
+      () => {},
+      { pollMs: 0, height: () => 30 },
+    );
+    try {
+      panel.handleInput("\t");
+      assert.match(panel.render(120).join("\n"), /目标 \/ GOALS/);
+      panel.handleInput("\x1b");
+      assert.equal(panel.tab, 0);
+      panel.handleInput("\t");
+      panel.handleInput("\r");
+      assert.match(panel.render(120).join("\n"), /ID /);
+    } finally {
+      panel.dispose();
+    }
+  }));
 
 test("missing or concurrently removed members return a visible panel message instead of rejecting Enter", () =>
   withRoster(async ({ kernel, panel, members }) => {
@@ -309,7 +414,10 @@ test("member viewer supports selection, expansion, paging, follow pause, history
     panel.handleInput("\x1b");
     assert.equal(panel.view, "team");
     panel.handleInput("\t");
+    assert.match(panel.render(120).join("\n"), /目标 \/ GOALS/);
+    panel.handleInput("\r");
     assert.match(panel.render(120).join("\n"), /可以返回/);
+    panel.handleInput("\x1b");
     panel.handleInput("\x1b");
     panel.handleInput("\x1b");
     assert.equal(closed, 1);

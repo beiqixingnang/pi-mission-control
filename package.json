@@ -1,6 +1,6 @@
 {
   "name": "pi-mission-control",
-  "version": "2.0.20",
+  "version": "2.1.0",
   "private": true,
   "description": "Pi task runtime with automatic completion wakeups, persistent teams, runtime-owned maintenance, bounded compaction and native UI integration.",
   "type": "module",
@@ -30,6 +30,7 @@
     "scripts/check.mjs",
     "scripts/host.mjs",
     "scripts/test-v2.mjs",
+    "scripts/test-goals-tui.py",
     "scripts/typecheck-v2.mjs",
     "scripts/preview-mission-panel.mjs",
     "scripts/render-terminal-preview.py",
