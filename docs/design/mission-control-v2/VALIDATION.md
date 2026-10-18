@@ -1,14 +1,14 @@
 # v2 验证记录
 
-日期：2026-10-17，Asia/Shanghai。环境：Windows、Node24.16.0、已安装Pi1.3.0。不是跨平台或真实provider兼容性认证。
+更新日期：2026-10-18，Asia/Shanghai。环境：Windows、Node24.16.0、已安装Pi1.3.0。有限网关实测不代表完整provider兼容性认证。
 
 ## 已执行检查
 
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；30个lead工具、5个Mission Control命令和1个独立压缩命令；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.13通过Compiler API严格检查25个直接源码文件及其依赖，包括workspace policy/Podman后端；Windows与Debian通过 |
-| `npm test` | 2.0.13本机完整101用例：97通过、0失败、4个需显式镜像的容器用例跳过；耗时约54.3秒 |
+| `npm run typecheck` | 2.0.14在Windows严格检查25个直接源码文件及依赖通过；本次没有另跑Debian |
+| `npm test` | 2.0.14本机完整106用例：102通过、0失败、4个需显式镜像的容器用例跳过；耗时约43.2秒 |
 | GitHub Actions | 2.0.10代码提交56360dc，运行39041177202成功；Ubuntu与Windows / Node24均通过，工具目录刷新改动与25文件严格类型检查已在CI验证 |
 | 网络MCP framing回归 | 已纳入上述完整99用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
@@ -20,6 +20,8 @@
 普通测试全部由scripts/test-v2.mjs建立临时Pi agent目录；不读取用户auth/models/settings正文，不调用真实模型。真实Pi生命周期使用确定性离线provider，并非仅用mock替代Pi事件系统。
 
 ## 真实Pi流程
+
+2026-10-18新增压缩失败实测：使用用户已配置摘要网关，真实待总结首块在4096 token下截断，16384 token下完成；修复后的16384 token/8192字符正文目标同样完成。只保存请求大小、结束状态和用量元数据，不向原会话写入检查点；完整记录见[压缩失败排查](COMPACTION-FAILURE-2026-10-18.md)。该有限实测不代表完整长会话已经恢复。
 
 tests/v2/pi-integration.test.mjs共19用例通过：
 

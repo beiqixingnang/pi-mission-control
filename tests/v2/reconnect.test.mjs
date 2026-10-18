@@ -150,6 +150,23 @@ test("context overflow and tool failures are not mistaken for a network reconnec
   harness(async (h) => {
     assert.equal(await h.fail("context window exceeded"), undefined);
     assert.equal(
+      await h.fail(
+        "Your input exceeds the context window of this model. Please adjust your input and try again.",
+      ),
+      undefined,
+    );
+    assert.equal(
+      await h.fail(
+        "Requested token count exceeds the model's maximum context length of 131072 tokens",
+      ),
+      undefined,
+    );
+    assert.equal(await h.fail("context_length_exceeded"), undefined);
+    assert.equal(
+      contextLimitError("Rate limit: too many tokens per minute"),
+      false,
+    );
+    assert.equal(
       await h.emit("agent_before_settle", {
         entries: [],
         continue: false,

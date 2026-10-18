@@ -78,9 +78,23 @@ export default function (pi: ExtensionAPI) {
               "Summarize this coding-session excerpt",
             )
           ) {
-            if (process.env.MC_FIXTURE_SUMMARY !== "success")
+            const summaryMode = process.env.MC_FIXTURE_SUMMARY;
+            if (summaryMode !== "success" && summaryMode !== "subdivide")
               throw new Error("Intentional summary-provider failure");
             summaryCalls++;
+            if (
+              summaryMode === "subdivide" &&
+              textOf(context.messages[0]).length > 2600
+            ) {
+              message.stopReason = "error";
+              message.rawStopReason = "incomplete.length";
+              message.errorMessage = "Response incomplete: length";
+              answer("INCOMPLETE_SUMMARY_MUST_NOT_BE_SAVED");
+              stream.push({ type: "start", partial: message });
+              stream.push({ type: "error", reason: "error", error: message });
+              stream.end();
+              return;
+            }
             answer(
               "Summary retained: user objective, file paths, verified evidence and remaining tasks.",
             );

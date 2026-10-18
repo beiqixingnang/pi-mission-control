@@ -1,3 +1,11 @@
+# 2.0.14 — reasoning summary budgets and overflow recovery (2026-10-18)
+
+- Reproduce the failed summary through the configured gateway: a 4096-token cap is consumed by reasoning and visible output, while the same excerpt completes with a 16384-token cap.
+- Default reasoning summaries to 16384 tokens, constrain the requested summary length to leave reasoning room, and preserve explicit output limits.
+- Subdivide truncated chunks with a bounded depth, including gateways reporting `incomplete.length`; cache only complete summaries and retain the original transcript on failure.
+- Recognize `input exceeds the context window` before supplemental reconnect so the same oversized request is not repeatedly sent as a network retry. Record metadata-only summary diagnostics.
+- Add five regressions; local suite: 102 passed, four opt-in container skips, zero failures.
+
 # 2.0.13 — tolerate placeholder reminder parameters (2026-10-17)
 
 - Ignore empty `at`/`id` placeholders emitted by models when creating reminders.

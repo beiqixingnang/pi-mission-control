@@ -1,0 +1,39 @@
+# 2026-10-18 压缩失败排查
+
+结论：本次摘要失败可以在同一个模型网关上复现，直接原因是4096 token总输出上限不足以同时容纳思考和摘要正文。主模型上下文超限、摘要截断和插件错误重连是三个不同环节。
+
+## 现场和对照
+
+主会话与成员默认配置均选择`command-code/deepseek/deepseek-v4.1-flash`，未填写输出或分块预算，因而旧版使用4096 token和24000字符。实际请求没有工具，`max_output_tokens=4096`。运行时模型声明`thinkingLevelMap.off=null`，请求没有发送强制关闭思考的参数；服务返回的用量明确包含reasoning token。
+
+采用原会话待总结区间的第一块公开内容，走与插件相同的Pi ModelRuntime和已配置网关。内容经过Pi的`serializeConversation`，不包含思考正文、签名或系统提示正文。只读取原会话并调用摘要模型，不附着Mission Control、不执行成员工具、不追加原会话压缩记录。
+
+| 对照 | 请求字符 | 输出上限token | 摘要正文目标字符 | 实际总输出token | 其中思考token | 正文字符 | 结果 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 原版预算 | 23818 | 4096 | 11744 | 4096 | 1951 | 7777 | incomplete.length |
+| 仅提高上限，同一提示 | 23818 | 16384 | 11744 | 13551 | 10407 | 11391 | completed |
+| 修复后的预算与正文目标 | 23817 | 16384 | 8192 | 5830 | 4065 | 6208 | completed |
+
+以上三次输入用量均为9852 token。网关在第一次返回`response.incomplete`、`incomplete_details.reason="length"`，Pi将其呈现为`stopReason="error"`和`Response incomplete: length`。原实现拒绝把该响应当成有效摘要，因此保留历史是正确行为。后两次成功说明不能把这次故障归结为模型不可用，但单块对照不等于整段会话已恢复，也不保证每次生成的思考长度相同。
+
+另有两次合成文本健康检查：短请求成功，约23818字符的重复合成记录在4096 token上限下也成功；真实内容才复现了预算不足。离线provider固定返回短摘要的既有测试没有覆盖这种输出预算耗尽。
+
+## 主对话超限和错误重连
+
+原主日志按LF读取。在本轮检查时记录了44条`Your input exceeds the context window of this model`错误，且没有成功的`compaction`条目。首次错误之前一次成功响应的输入与缓存输入合计919883 token；本轮最近一次成功响应输入917203 token。
+
+这类错误来自主模型`gptcodex/gpt-6.1-sol`。本机模型窗口声明和TUI百分比不能独立证明网关的实际可接受窗口；本轮没有用巨型请求探测网关上限。
+
+`runtime/reconnect.ts`原正则只匹配context在exceed前面的部分表达式，漏掉了exceeds在context前面的现场错误。于是插件在原生恢复失败后仍把它当连接失败，重复发送没有成功压缩的上下文。这个重连缺陷与摘要模型无关。
+
+## 2.0.14修复与验证
+
+- 推理摘要模型默认输出预算16384 token，普通模型仍为4096；显式maxTokens继续作为上限，不强行扩大。
+- 摘要正文字符目标同时受输出预算限制，为思考输出留出空间。此限制不是精确tokenizer，也不是服务端思考预算承诺。
+- 截断时按Unicode边界继续细分当前块，再摘要并合并，最多细分4层。识别Pi的length和网关的incomplete.length；不缓存截断正文，不把普通错误或内容过滤当截断重试。
+- 上下文超限不进入网络重连；429/速率限制仍保留原恢复流程。
+- 可选debug记录输入字符数、输出上限、结束原因和用量数字，不记录提示词或摘要正文。
+
+本机完整106项测试：102通过、4项容器用例跳过、0失败；25文件严格类型检查通过。新增真实Pi离线provider回归覆盖截图错误不触发重连，以及incomplete.length经细分后保存完整压缩检查点。
+
+本地原始实测仅保存元数据于忽略目录`.reference/artifacts/v2/compaction-first-chunk-probe.json`、`compaction-fixed-first-chunk-probe.json`和`compaction-gateway-probe.json`，没有保存认证信息或模型正文。

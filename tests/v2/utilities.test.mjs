@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { streamPublicSession } from "../../runtime/public.ts";
-import { summarizeChunks } from "../../runtime/summarize.ts";
+import { summarizeChunks, summaryBudgets } from "../../runtime/summarize.ts";
 import { privateAddress, searchWeb, fetchPage } from "../../runtime/web.ts";
 import { workerEnvironment } from "../../runtime/rpc-worker.ts";
 
@@ -140,6 +140,128 @@ test("length-truncated or empty summaries cannot replace history", async () => {
       /truncated/,
     );
     assert.equal(fs.readdirSync(directory).length, 0);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("summary budgets leave reasoning room and respect an explicit output cap", () => {
+  const model = { contextWindow: 1000000, maxTokens: 384000, reasoning: true };
+  assert.deepEqual(summaryBudgets(model, {}), {
+    maxTokens: 16384,
+    maxInputChars: 24000,
+    maxOutputChars: 8192,
+  });
+  assert.equal(
+    summaryBudgets({ ...model, reasoning: false }, {}).maxTokens,
+    4096,
+  );
+  assert.equal(summaryBudgets(model, { maxTokens: 1024 }).maxTokens, 1024);
+  assert.equal(summaryBudgets(model, { maxTokens: 1024 }).maxOutputChars, 512);
+});
+
+test("truncated chunks are subdivided and merged without persisting incomplete output", async () => {
+  for (const stop of [
+    { stopReason: "length" },
+    {
+      stopReason: "error",
+      rawStopReason: "incomplete.length",
+      errorMessage: "Response incomplete: length",
+    },
+  ]) {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "mc-summary-split-"),
+    );
+    let calls = 0,
+      truncated = 0;
+    try {
+      const options = {
+        directory,
+        model: "reasoning/model",
+        maxInputChars: 2000,
+        maxOutputChars: 300,
+        complete: async (prompt) => {
+          calls++;
+          assert.ok(prompt.length <= 2000);
+          const excerpt = prompt.slice(prompt.indexOf("\n\n") + 2);
+          if (excerpt.length > 1024) {
+            truncated++;
+            return {
+              ...stop,
+              content: [{ type: "text", text: "DO_NOT_PERSIST_INCOMPLETE" }],
+            };
+          }
+          return {
+            stopReason: "stop",
+            content: [{ type: "text", text: "Recovered summary" }],
+          };
+        },
+      };
+      assert.equal(
+        await summarizeChunks(["a".repeat(2500)], options),
+        "Recovered summary",
+      );
+      assert.ok(truncated > 0);
+      assert.ok(calls < 20);
+      for (const name of fs.readdirSync(directory))
+        assert.doesNotMatch(
+          fs.readFileSync(path.join(directory, name), "utf8"),
+          /DO_NOT_PERSIST/,
+        );
+      const before = calls;
+      await summarizeChunks(["a".repeat(2500)], options);
+      assert.equal(
+        calls,
+        before,
+        "subdivision also caches the completed parent checkpoint",
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("permanent truncation is bounded and other provider errors do not trigger subdivision", async () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "mc-summary-terminal-"),
+  );
+  let calls = 0;
+  try {
+    const options = {
+      directory,
+      model: "m",
+      maxInputChars: 24000,
+      maxOutputChars: 1000,
+      complete: async () => {
+        calls++;
+        return {
+          stopReason: "length",
+          content: [{ type: "text", text: "partial" }],
+        };
+      },
+    };
+    await assert.rejects(
+      summarizeChunks(["a".repeat(23488)], options),
+      /bounded subdivision/,
+    );
+    assert.equal(calls, 5);
+    assert.equal(fs.readdirSync(directory).length, 0);
+    calls = 0;
+    await assert.rejects(
+      summarizeChunks(["a".repeat(23488)], {
+        ...options,
+        complete: async () => {
+          calls++;
+          return {
+            stopReason: "error",
+            errorMessage: "Response incomplete: content_filter",
+            content: [],
+          };
+        },
+      }),
+      /content_filter/,
+    );
+    assert.equal(calls, 1);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

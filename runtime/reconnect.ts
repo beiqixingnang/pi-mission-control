@@ -29,7 +29,8 @@ export function reconnectPolicy(
   return { enabled: raw.enabled ?? nativeEnabled, maxRetries, delayMs };
 }
 export function contextLimitError(text: string) {
-  return /context.{0,30}(?:exceed|overflow|too (?:long|large))|maximum context|too many tokens/i.test(
+  if (/rate limit|too many requests/i.test(text)) return false;
+  return /context.{0,30}(?:exceed|overflow|too (?:long|large))|exceed[^\n]{0,80}context|maximum context|too many tokens|context[_ ]length[_ ]exceeded|prompt (?:is )?too long|token limit exceeded/i.test(
     text,
   );
 }

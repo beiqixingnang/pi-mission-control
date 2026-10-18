@@ -219,6 +219,36 @@ test(
     }),
 );
 
+test("real Pi never reconnects an unchanged request rejected for the screenshot's context overflow", () =>
+  harness(async (h) => {
+    await h.session.prompt("/reconnect on");
+    await h.session.prompt("/reconnect delay 0");
+    await h.session.prompt(
+      "V2_TEST:" +
+        JSON.stringify({
+          op: "flaky",
+          key: crypto.randomUUID(),
+          failures: 100,
+          error:
+            "Your input exceeds the context window of this model. Please adjust your input and try again.",
+        }),
+    );
+    assert.equal(
+      h.events.filter(
+        (e) => e.type === "message_end" && e.message?.role === "assistant",
+      ).length,
+      1,
+    );
+    assert.ok(
+      !h.session.sessionManager
+        .getBranch()
+        .some(
+          (e) =>
+            e.type === "custom_message" && e.customType === "mission-reconnect",
+        ),
+    );
+  }));
+
 test(
   "aborting a real Pi provider backoff prevents another request",
   { timeout: 15000 },
@@ -803,6 +833,75 @@ test(
       }
     }),
 );
+
+test("real Pi recovers gateway incomplete.length by subdividing the summary request", () =>
+  harness(async (h) => {
+    const directory = path.join(
+      process.env.PI_CODING_AGENT_DIR,
+      "mission-control",
+      "v2",
+      h.session.sessionManager.getSessionId(),
+    );
+    const config = path.join(directory, "compaction-summary.json");
+    const previous = process.env.MC_FIXTURE_SUMMARY,
+      previousDebug = process.env.PI_COMPACTION_DEBUG;
+    process.env.MC_FIXTURE_SUMMARY = "subdivide";
+    process.env.PI_COMPACTION_DEBUG = "1";
+    await fs.writeFile(
+      config,
+      JSON.stringify({
+        model: "mission-fixture/model",
+        maxTokens: 1024,
+        maxInputChars: 4000,
+      }),
+    );
+    try {
+      h.settings.applyOverrides({
+        compaction: {
+          enabled: true,
+          reserveTokens: 2048,
+          keepRecentTokens: 512,
+        },
+      });
+      for (let i = 0; i < 3; i++)
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "answer",
+              text: "verified fixture " + "x".repeat(3000),
+            }),
+        );
+      const result = await h.session.compact();
+      assert.match(result.summary, /Summary retained/);
+      assert.doesNotMatch(result.summary, /INCOMPLETE_SUMMARY/);
+      const trace = (
+        await fs.readFile(
+          path.join(directory, "compaction-summary.log"),
+          "utf8",
+        )
+      )
+        .trim()
+        .split("\n")
+        .map(JSON.parse);
+      assert.ok(
+        trace.some(
+          (row) =>
+            row.stage === "summary:response" &&
+            row.rawStopReason === "incomplete.length",
+        ),
+      );
+      assert.ok(trace.some((row) => row.stage === "compact:success"));
+      const requests = trace.filter((row) => row.stage === "summary:request");
+      assert.ok(requests.some((row) => row.inputChars > 2600));
+      assert.ok(requests.some((row) => row.inputChars < 2600));
+    } finally {
+      await fs.rm(config, { force: true });
+      if (previous === undefined) delete process.env.MC_FIXTURE_SUMMARY;
+      else process.env.MC_FIXTURE_SUMMARY = previous;
+      if (previousDebug === undefined) delete process.env.PI_COMPACTION_DEBUG;
+      else process.env.PI_COMPACTION_DEBUG = previousDebug;
+    }
+  }));
 
 test(
   "subagent chain enforces dependency order and uses distinct persistent sessions",

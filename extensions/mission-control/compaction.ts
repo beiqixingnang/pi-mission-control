@@ -8,7 +8,7 @@ import {
   prepareBranchEntries,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { summarizeChunks } from "../../runtime/summarize.ts";
+import { summarizeChunks, summaryBudgets } from "../../runtime/summarize.ts";
 
 interface Config {
   model?: string;
@@ -121,7 +121,12 @@ export default function (pi: ExtensionAPI) {
       resolved.config.model?.trim()
     );
   };
-  const debug = (ctx: any, stage: string, model?: string) => {
+  const debug = (
+    ctx: any,
+    stage: string,
+    model?: string,
+    metadata?: Record<string, string | number | undefined>,
+  ) => {
     if (!process.env.PI_COMPACTION_DEBUG) return;
     try {
       const directory = path.dirname(
@@ -130,7 +135,12 @@ export default function (pi: ExtensionAPI) {
       fs.mkdirSync(directory, { recursive: true });
       fs.appendFileSync(
         path.join(directory, "compaction-summary.log"),
-        JSON.stringify({ at: new Date().toISOString(), stage, model }) + "\n",
+        JSON.stringify({
+          at: new Date().toISOString(),
+          stage,
+          model,
+          ...metadata,
+        }) + "\n",
         { mode: 0o600 },
       );
     } catch {
@@ -156,16 +166,9 @@ export default function (pi: ExtensionAPI) {
     );
     if (!model)
       throw new Error(`Configured summary model unavailable: ${spec}`);
-    const maxTokens = Math.min(
-      config.maxTokens ?? 4096,
-      model.maxTokens,
-      Math.floor(model.contextWindow / 4),
-    );
-    if (!Number.isSafeInteger(maxTokens) || maxTokens < 256)
-      throw new Error("Invalid summary maxTokens");
-    const maxInputChars = Math.min(
-      config.maxInputChars ?? 24000,
-      Math.floor((model.contextWindow - maxTokens - 1024) / 4),
+    const { maxTokens, maxInputChars, maxOutputChars } = summaryBudgets(
+      model,
+      config,
     );
     const parts = function* () {
       if (instructions) yield `USER SUMMARY FOCUS:\n${instructions}\n\n`;
@@ -182,10 +185,15 @@ export default function (pi: ExtensionAPI) {
         "summary-cache",
       ),
       maxInputChars,
-      maxOutputChars: Math.min(12000, Math.floor((maxInputChars - 512) / 2)),
+      maxOutputChars,
       signal,
-      complete: (prompt) =>
-        ctx.modelRegistry.complete(
+      complete: async (prompt) => {
+        debug(ctx, "summary:request", spec, {
+          inputChars: prompt.length,
+          maxTokens,
+          maxOutputChars,
+        });
+        const response = await ctx.modelRegistry.complete(
           model,
           {
             messages: [
@@ -205,7 +213,17 @@ export default function (pi: ExtensionAPI) {
               .digest("hex")
               .slice(0, 32),
           },
-        ),
+        );
+        debug(ctx, "summary:response", spec, {
+          stopReason: response.stopReason,
+          rawStopReason: response.rawStopReason,
+          inputChars: prompt.length,
+          maxTokens,
+          outputTokens: response.usage?.output,
+          reasoningTokens: response.usage?.reasoning,
+        });
+        return response;
+      },
     });
   }
   pi.registerCommand("compaction-model", {
@@ -233,11 +251,23 @@ export default function (pi: ExtensionAPI) {
         if (!value || value === "status") {
           const report = (scope: Target) => {
             const r = resolveConfig(ctx, scope);
+            const spec = specOf(ctx, scope);
+            const slash = spec?.indexOf("/") ?? -1;
+            const model =
+              spec && slash > 0
+                ? ctx.modelRegistry.find(
+                    spec.slice(0, slash),
+                    spec.slice(slash + 1),
+                  )
+                : undefined;
+            const budgets = model ? summaryBudgets(model, r.config) : undefined;
             return {
               target: scope,
-              model: specOf(ctx, scope) ?? "Pi default",
-              maxTokens: r.config.maxTokens ?? 4096,
-              maxInputChars: r.config.maxInputChars ?? 24000,
+              model: spec ?? "Pi default",
+              maxTokens: budgets?.maxTokens ?? r.config.maxTokens ?? 4096,
+              maxInputChars:
+                budgets?.maxInputChars ?? r.config.maxInputChars ?? 24000,
+              maxOutputChars: budgets?.maxOutputChars,
               file: r.file,
               source: r.config.disabled
                 ? "disabled"
