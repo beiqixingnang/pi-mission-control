@@ -316,8 +316,14 @@ try {
     { component: new Text("› 尚未发送的主对话草稿", 0, 0) },
   ]);
   tui.start();
-  frame("01-main-wide", "输入框上方横向看板 · Pi渲染器隔离预览", main, 120, 30);
-  frame("02-main-narrow", "窄屏横向看板 · Pi渲染器隔离预览", main, 70, 24);
+  frame(
+    "01-main-wide",
+    "目标 / 定时任务 / 子智能体状态表 · Pi隔离预览",
+    main,
+    120,
+    30,
+  );
+  frame("02-main-narrow", "窄屏按类别堆叠 · Pi渲染器隔离预览", main, 70, 24);
   frame("03-team", "团队工作台 · Pi渲染器隔离预览", panel, 120, 32);
   await panel.openMember(member.id);
   frame("04-member", "成员对话与动作底色 · Pi渲染器隔离预览", panel, 120, 44);

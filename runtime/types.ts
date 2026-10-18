@@ -12,6 +12,8 @@ export type DeliveryState =
   | "leased"
   | "admitted"
   | "observed"
+  | "superseded"
+  | "quarantined"
   | "cancelled";
 export interface Workspace {
   root: string;
@@ -122,6 +124,55 @@ export interface Mission {
   revision?: number;
   archivedAt?: number;
   archiveReason?: string;
+  blocker?: { kind: "budget" | "no_progress" | "unknown"; reason: string };
+  decision?: {
+    id: string;
+    question: string;
+    taskIds: string[];
+    revision: number;
+    humanVersion: number;
+    createdAt: number;
+  };
+  externalWait?: {
+    id: string;
+    token: string;
+    reason: string;
+    deadline: number;
+    revision: number;
+  };
+}
+export interface Recovery {
+  id: string;
+  missionId?: string;
+  revision: number;
+  kind: "context" | "provider" | "delivery";
+  phase: "waiting_compaction" | "cooldown" | "ready" | "probing" | "exhausted";
+  reason: string;
+  requests: number;
+  probes: number;
+  openedAt: number;
+  updatedAt: number;
+  nextAt?: number;
+  compactionAttempted?: boolean;
+  compactionId?: string;
+}
+export interface ActivityClock {
+  missionId: string;
+  budgetStartedAt: number;
+  activeMs: number;
+  cycleActiveMs: number;
+  coverageStartedAt: number;
+  legacyEstimate: boolean;
+  state:
+    | "running"
+    | "idle"
+    | "waiting"
+    | "stalled"
+    | "paused"
+    | "offline"
+    | "ended";
+  reason: string;
+  updatedAt: number;
 }
 export interface Schedule {
   id: string;
@@ -148,6 +199,8 @@ export interface Settings {
   maxOutputTokens: number;
   maxWakeAttempts: number;
   retryBaseMs: number;
+  recoveryMaxRequests: number;
+  recoveryCooldownMs: number;
   defaultExecution: Execution;
   workerExtensions: string[];
   inheritEnv: string[];
@@ -158,11 +211,13 @@ export const DEFAULT_SETTINGS: Settings = {
   maxParallel: 4,
   taskTimeoutMs: 600_000,
   progressIntervalMs: 3_600_000,
-  maxMissionMs: 43_200_000,
-  maxAutonomousTurns: 200,
-  maxOutputTokens: 2_000_000,
+  maxMissionMs: 0,
+  maxAutonomousTurns: 0,
+  maxOutputTokens: 0,
   maxWakeAttempts: 3,
   retryBaseMs: 2000,
+  recoveryMaxRequests: 11,
+  recoveryCooldownMs: 60_000,
   defaultExecution: "host",
   workerExtensions: [],
   inheritEnv: [],
@@ -179,7 +234,14 @@ export function resolveSettings(raw: Partial<Settings> = {}): Settings {
     ["maxOutputTokens", 100, 100_000_000],
     ["maxWakeAttempts", 1, 10],
     ["retryBaseMs", 100, 300_000],
+    ["recoveryMaxRequests", 1, 200],
+    ["recoveryCooldownMs", 1000, 3_600_000],
   ] as const) {
+    if (
+      ["maxMissionMs", "maxAutonomousTurns", "maxOutputTokens"].includes(key) &&
+      s[key] === 0
+    )
+      continue;
     if (!Number.isSafeInteger(s[key]) || s[key] < min || s[key] > max)
       throw new Error(`Invalid Mission Control setting: ${key}`);
   }

@@ -28,6 +28,121 @@ const { visibleWidth } = await import(
     path.join(hostDir, "node_modules/@earendil-works/pi-tui/dist/index.js"),
   )
 );
+
+async function withRoster(run) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mc-roster-crash-"));
+  const kernel = new MissionKernel({
+    directory: dir,
+    cwd: dir,
+    sessionId: "roster",
+    isLeadIdle: () => false,
+    wake: () => {},
+    workerFactory: async () => {
+      throw new Error("No worker expected");
+    },
+  });
+  const add = (name) =>
+    kernel.addMember({
+      name,
+      role: name,
+      workspace: {
+        root: dir,
+        access: "read-only",
+        execution: "files",
+        extraReadRoots: [],
+      },
+      allow: [],
+      thinkingLevel: "off",
+      temporary: false,
+    });
+  const members = [
+    "cpu-executor",
+    "cpu-supervisor",
+    "gpu-executor",
+    "gpu-supervisor",
+  ].map(add);
+  const panel = new MissionPanel(
+    kernel,
+    () => {},
+    () => {},
+    { pollMs: 0, height: () => 30 },
+  );
+  try {
+    await run({ kernel, panel, members, add, dir });
+  } finally {
+    panel.dispose();
+    await kernel.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("missing or concurrently removed members return a visible panel message instead of rejecting Enter", () =>
+  withRoster(async ({ kernel, panel, members }) => {
+    await panel.openMember("missing-member");
+    assert.equal(panel.view, "team");
+    assert.match(panel.render(120).join("\n"), /已移除/);
+    panel.render(120);
+    kernel.store.removeMember(members[0].id);
+    panel.handleInput("\r");
+    await new Promise(setImmediate);
+    assert.equal(panel.view, "team");
+    assert.match(panel.error, /列表已更新/);
+    assert.equal(kernel.store.members().length, 3);
+  }));
+
+test("asynchronous member lookup failures are contained by the real keyboard route", () =>
+  withRoster(async ({ kernel, panel }) => {
+    panel.render(120);
+    const original = kernel.store.member.bind(kernel.store);
+    kernel.store.member = () => {
+      throw new Error("member lookup failed during view transition");
+    };
+    panel.handleInput("\r");
+    await new Promise(setImmediate);
+    await new Promise(setImmediate);
+    kernel.store.member = original;
+    assert.match(panel.error, /lookup failed/);
+    assert.equal(kernel.store.members().length, 4);
+    assert.equal(panel.view, "team");
+    panel.handleInput("\r");
+    await new Promise(setImmediate);
+    assert.equal(panel.view, "conversation");
+  }));
+
+test("archived member history remains readable without adding retired identities to the four-member roster", () =>
+  withRoster(async ({ kernel, panel, members, add }) => {
+    const retired = add("retired-reader");
+    kernel.store.archive("member", retired, Date.now(), "fixture");
+    kernel.store.removeMember(retired.id);
+    kernel.store.putTask({
+      id: "old-task",
+      missionId: "old",
+      memberId: retired.id,
+      member: retired.name,
+      rootId: "old-task",
+      state: "completed",
+      epoch: 1,
+      phase: "work",
+      inputPath: "unused",
+      createdAt: 1,
+      updatedAt: 1,
+      timeoutMs: 1000,
+      processState: "stopped",
+      reviewDeliveryIds: [],
+    });
+    assert.equal(teamRows(kernel.snapshot()).length, 4);
+    assert.deepEqual(
+      teamRows(kernel.snapshot()).map((r) => r.memberId),
+      members.map((m) => m.id),
+    );
+    await panel.openMember(retired.id);
+    assert.equal(panel.view, "conversation");
+    assert.match(panel.render(120).join("\n"), /retired-reader/);
+    panel.handleInput("m");
+    await new Promise(setImmediate);
+    assert.match(panel.error, /只读/);
+    assert.equal(kernel.store.tasks(true).length, 0);
+  }));
 test("public widget layout remains bounded at narrow/wide CJK widths and has stable member order", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mc-v2-ui-"));
   const kernel = new MissionKernel({
@@ -332,7 +447,7 @@ test("command and edit previews retain full logical arguments when copied", asyn
   }
 });
 
-test("team tree expands descendants and retains idle members in stable order", async () => {
+test("member roster has one stable row per active member despite old tasks and removed identities", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mc-v2-tree-view-"));
   const kernel = new MissionKernel({
     directory: dir,
@@ -379,16 +494,26 @@ test("team tree expands descendants and retains idle members in stable order", a
     });
     kernel.store.putTask(task("parent", members[0]));
     kernel.store.putTask(task("child", members[1], "parent"));
+    for (let i = 0; i < 20; i++)
+      kernel.store.putTask({
+        ...task(`old-${i}`, members[1]),
+        state: "completed",
+        createdAt: i + 2,
+      });
+    kernel.store.putTask(
+      task("retired-task", { id: "retired-member", name: "retired-worker" }),
+    );
     const rows = teamRows(kernel.snapshot());
     assert.deepEqual(
       rows.map((r) => r.id),
-      ["parent", "child", members[2].id],
+      kernel.store.members().map((m) => m.id),
     );
-    assert.ok(
-      teamRows(kernel.snapshot(), new Set(["parent"])).every(
-        (r) => r.id !== "child",
-      ),
+    assert.equal(rows.length, 3);
+    assert.equal(
+      rows.find((r) => r.memberId === members[1].id).task.id,
+      "child",
     );
+    assert.ok(!rows.some((r) => r.memberId === "retired-member"));
     const panel = new MissionPanel(
       kernel,
       () => {},
@@ -398,16 +523,16 @@ test("team tree expands descendants and retains idle members in stable order", a
     try {
       panel.render(120);
       panel.handleInput("\x1b[D");
-      assert.doesNotMatch(panel.render(120).join("\n"), /· worker ·/);
+      assert.match(panel.render(120).join("\n"), /worker ·/);
       panel.handleInput("\x1b[C");
-      assert.match(panel.render(120).join("\n"), /· worker ·/);
-      panel.handleInput("\x1b[B");
+      const workerIndex = rows.findIndex((r) => r.memberId === members[1].id);
+      for (let i = 0; i < workerIndex; i++) panel.handleInput("\x1b[B");
       panel.render(120);
       panel.handleInput("\r");
       assert.equal(panel.memberId, members[1].id);
       panel.handleInput("\x1b");
       panel.handleInput("\x1b[A");
-      assert.equal(panel.selected, 0);
+      assert.equal(panel.selected, workerIndex - 1);
       panel.handleInput("\t");
       panel.handleInput("\t");
       assert.match(panel.render(120).join("\n"), /暂无定时提醒/);

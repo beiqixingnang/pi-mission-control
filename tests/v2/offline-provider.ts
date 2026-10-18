@@ -123,10 +123,39 @@ export default function (pi: ExtensionAPI) {
               .filter((m: any) => m.role === "user")
               .at(-1),
             userText = textOf(latestUser);
+          if (command.op === "tools") {
+            const declared = new Map<string, any>();
+            for (const message of context.messages) {
+              if (message.role !== "system") continue;
+              for (const tool of message.toolsRemoved ?? [])
+                declared.delete(tool.name);
+              for (const tool of message.toolsAdded ?? [])
+                declared.set(tool.name, tool);
+            }
+            const tools = [...declared.values()];
+            answer({
+              names: tools.map((t: any) => t.name),
+              schema: tools.find((t: any) => t.name === command.schemaFor)
+                ?.parameters,
+            });
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: "stop", message });
+            stream.end();
+            return;
+          }
           if (command.op === "flaky") {
             const key = command.key ?? "default";
             const attempt = (requestAttempts.get(key) ?? 0) + 1;
             requestAttempts.set(key, attempt);
+            if (attempt <= command.failures && command.transportAbort) {
+              message.stopReason = "aborted";
+              message.errorMessage =
+                "Fixture provider transport aborted without a user cancellation";
+              stream.push({ type: "start", partial: message });
+              stream.push({ type: "error", reason: "aborted", error: message });
+              stream.end();
+              return;
+            }
             if (attempt <= command.failures)
               throw new Error(
                 command.error ??

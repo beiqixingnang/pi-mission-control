@@ -193,6 +193,7 @@ test(
   { timeout: 35000 },
   () =>
     harness(async (h) => {
+      assert.equal((await h.tool("project_recover")).isError, true);
       const file = path.join(h.source, "marker.txt");
       fs.writeFileSync(file, "CHILD_PERSISTENT_MEMORY");
       await h.tool("team_spawn", {
@@ -244,6 +245,15 @@ test(
       await h.restart();
       assert.equal((await h.state()).members[0].id, before.members[0].id);
       assert.equal((await h.state()).mission.status, "paused");
+      await h.command(
+        'V2_TEST:{"op":"tool","name":"project_recover","args":{}}',
+      );
+      assert.equal(
+        JSON.parse(h.runtime.session.getLastAssistantText()).isError,
+        false,
+      );
+      assert.equal((await h.state()).mission.status, "paused");
+      assert.equal((await h.state()).held, true);
       const resolved = JSON.parse(
         (await h.tool("project_resolve", { path: file })).content[0].text,
       );

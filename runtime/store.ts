@@ -287,7 +287,7 @@ export class Store {
       args = to ? [to] : [];
     const pending = this.db
       .prepare(
-        `SELECT data FROM deliveries WHERE ${condition}state NOT IN ('observed','cancelled') ORDER BY created LIMIT 2000`,
+        `SELECT data FROM deliveries WHERE ${condition}state NOT IN ('observed','cancelled','superseded') ORDER BY created LIMIT 2000`,
       )
       .all(...args) as { data: string }[];
     const recent = this.db

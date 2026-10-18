@@ -1,3 +1,28 @@
+# 2.0.18 — unified lead tool registry and model-accessible recovery (2026-10-18)
+
+- Collect Mission Control tools from Pi's host registry across both package entrypoints and refresh active names and schemas at session start and before model runs. Expose all 43 lead tools directly, with an optional `mission_capabilities` catalog.
+- Add atomic, epoch-fenced `mission_reconcile` with caller-attested stopped-process evidence, plus `mission_control` for inspected no-progress recovery. Preserve task history, existing budget use and user/workspace/decision holds; create new attempts explicitly.
+- Expose member messages, report intervals, queued idle compaction, public history/export, scoped summary models, reconnect settings and recovery of an existing relocation journal through model tools sharing command implementations.
+- Preserve unknown process state when cancellation has no live termination receipt. Keep exports streaming, sanitized and exclusive-create; keep compaction after model settlement.
+- Add four kernel and four real Pi regressions. Local full suite: 155 passed, four opt-in container skips, zero failures. Verify the four screenshot interruptions against an isolated database backup without modifying the original session or starting workers.
+
+# 2.0.17 — optional budgets, member roster and safe conversation views (2026-10-18)
+
+- Disable hidden goal time/turn/output deadlines by default; retain explicit positive limits and independent bounded failure recovery. Record active execution time separately from cooldown, waits, pauses and offline intervals.
+- Migrate expired legacy default-budget holds without clearing existing usage. Keep explicit exhausted limits and user/workspace holds, and preserve lifetime activity when the user renews a budget cycle.
+- Show one current row per member instead of a task history tree. Exclude retired identities, retain stable selection and keep per-member conversation history.
+- Handle missing/archived members and asynchronous navigation failures inside the workbench instead of terminating Pi. Separate goal, schedules and member states into a bounded table, with a stacked layout on narrow terminals.
+- Add activity-clock, stale-identity and real Pi regression coverage; verify all four actual conversation projections using a read-only state backup and refresh the terminal previews.
+
+# 2.0.16 — runtime recovery without clearing user holds (2026-10-18)
+
+- Separate durable context/provider/delivery recovery from user pauses, business decisions, no-progress review and mission budget exhaustion. Recover the known legacy wake-failure state without renewing the goal budget.
+- Automatically request one bounded compaction after overflow, wait for a saved checkpoint and an idle host, then admit a single recovery batch. Preserve failed summaries and unread result identities.
+- Share a persistent request allowance across native retries, supplemental retries and outbox probes; preserve cooldown and usage across reload. Supersede stale progress and recurring reminder occurrences; retain unconsumed critical notifications.
+- Keep goal editing from clearing user/Escape/workspace holds or renewing budgets. Count only successful continuation turns without actual progress toward the no-progress guard.
+- Add exact, scoped business decisions with authenticated fresh human replies, external event waits with deadlines and tokens, visible recovery reasons and audited state transitions.
+- Add 21 kernel regressions and five real Pi lifecycle regressions for legacy migration, automatic compaction, native retry admission, decision authority and provider-side cancellation.
+
 # 2.0.15 — recover complete overlong and reasoning-only summaries (2026-10-18)
 
 - Condense a complete summary that exceeds its character limit instead of immediately cancelling compaction. Use a shorter prompt target while preserving the original acceptance limit and the full ending.

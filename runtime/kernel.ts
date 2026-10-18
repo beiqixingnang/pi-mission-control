@@ -3,6 +3,9 @@ import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { Store } from "./store.ts";
 import { cleanText } from "./public.ts";
+import { LeadRecovery } from "./recovery.ts";
+import { contextLimitError } from "./reconnect.ts";
+import { MissionActivityClock } from "./activity-clock.ts";
 import {
   resolveSettings,
   terminal,
@@ -39,6 +42,7 @@ export interface KernelOptions {
   wake: (wake: Wake) => void;
   onChange?: () => void;
   notify?: (message: string) => void;
+  compact?: () => void;
   now?: () => number;
 }
 /** Owns work independently of model-controlled Goal and reminder tools. */
@@ -60,6 +64,13 @@ export class MissionKernel {
   private wakeIncluded = false;
   private turnActed = false;
   private leadFailed = false;
+  private leadResponded = false;
+  private automaticTurn = false;
+  private runtimeAborted = false;
+  private recovery: LeadRecovery;
+  private activityClock: MissionActivityClock;
+  private leadRunning = false;
+  private compactionQueued = false;
   private collected = new Set<string>();
   private previews = new Map<string, Map<string, PublicActivity>>();
   private relocating = false;
@@ -78,7 +89,15 @@ export class MissionKernel {
           : {}),
       });
       this.lastHuman = this.store.get<string>("lastHuman") ?? "";
-      this.userHold = Boolean(this.store.get("relocationHold"));
+      this.userHold = Boolean(
+        this.store.get("relocationHold") || this.store.get("escapeHold"),
+      );
+      this.recovery = new LeadRecovery(
+        this.store,
+        () => this.settings,
+        this.now,
+      );
+      this.activityClock = new MissionActivityClock(this.store, this.now);
     } catch (error) {
       this.store.close();
       throw error;
@@ -127,16 +146,110 @@ export class MissionKernel {
           d.leaseUntil = undefined;
           this.store.putDelivery(d);
         }
+      this.migrateRecovery();
+      this.recovery.restart();
+      this.restoreBudgetHold();
     });
     if (background) this.loop();
     this.changed();
   }
   private changed() {
+    this.syncActivity();
     try {
       this.options.onChange?.();
     } catch (error) {
       this.options.notify?.(`Mission UI error: ${String(error)}`);
     }
+  }
+  private syncActivity(force = false) {
+    const m = this.store.mission();
+    const fault = this.recovery.current();
+    let state: import("./types.ts").ActivityClock["state"] = "idle",
+      reason = "No work is currently executing";
+    if (this.closing) {
+      state = "offline";
+      reason = "Runtime stopped";
+    } else if (m && ["complete", "stopped"].includes(m.status)) {
+      state = "ended";
+      reason = "Goal closed";
+    } else if (
+      this.userHold ||
+      m?.humanPaused ||
+      this.store.get("relocationHold")
+    ) {
+      state = "paused";
+      reason = "User or workspace hold";
+    } else if (m?.status === "attention") {
+      state = "stalled";
+      reason = m.reason ?? "Goal needs attention";
+    } else if (m?.status === "waiting_user") {
+      state = "waiting";
+      reason = "Waiting for a business decision";
+    } else if (
+      this.leadRunning ||
+      this.store.tasks(true).some((t) => t.state === "running")
+    ) {
+      state = "running";
+      reason = "Lead or teammate is executing";
+    } else if (fault) {
+      state = "stalled";
+      reason = `Runtime recovery: ${fault.phase}`;
+    } else if (
+      m?.externalWait ||
+      this.store
+        .tasks(true)
+        .some((t) => t.state === "waiting" || t.blockedReason)
+    ) {
+      state = "waiting";
+      reason =
+        m?.externalWait?.reason ?? "Waiting for a dependency or decision";
+    }
+    this.activityClock.observe(
+      m,
+      state,
+      reason,
+      this.settings.maxMissionMs,
+      force,
+    );
+  }
+  private budgetReasons(m: Mission): string[] {
+    const activity = this.activityClock.snapshot(m);
+    return [
+      ...(this.settings.maxMissionMs > 0 &&
+      (activity?.cycleActiveMs ?? 0) >= this.settings.maxMissionMs
+        ? ["time"]
+        : []),
+      ...(this.settings.maxAutonomousTurns > 0 &&
+      m.turns >= this.settings.maxAutonomousTurns
+        ? ["turns"]
+        : []),
+      ...(this.settings.maxOutputTokens > 0 &&
+      m.outputTokens >= this.settings.maxOutputTokens
+        ? ["output"]
+        : []),
+    ];
+  }
+  private restoreBudgetHold() {
+    const m = this.store.mission();
+    this.syncActivity();
+    if (
+      !m ||
+      m.status !== "attention" ||
+      m.blocker?.kind !== "budget" ||
+      m.humanPaused ||
+      this.userHold ||
+      this.store.get("relocationHold") ||
+      this.budgetReasons(m).length
+    )
+      return;
+    m.status = "active";
+    m.reason = undefined;
+    m.blocker = undefined;
+    m.nextContinueAt = this.now() + 1000;
+    this.store.set("mission", m);
+    this.store.event("budget.hold-cleared", m.id, {
+      reason: "No configured limit is exhausted; usage was retained",
+    });
   }
   private loop() {
     if (this.closing) return;
@@ -153,15 +266,99 @@ export class MissionKernel {
     this.lastHuman = cleanText(text, 16000);
     this.store.set("lastHuman", this.lastHuman);
     const mission = this.store.mission();
-    if (!mission?.humanPaused && !this.store.get("relocationHold"))
+    this.store.set(
+      "humanVersion",
+      (this.store.get<number>("humanVersion") ?? 0) + 1,
+    );
+    if (!mission?.humanPaused && !this.store.get("relocationHold")) {
       this.userHold = false;
-    if (mission?.status === "waiting_user" && !mission.humanPaused) {
-      mission.status = "active";
-      mission.reason = undefined;
-      mission.emptyTurns = 0;
-      mission.updatedAt = this.now();
-      this.store.set("mission", mission);
-      this.store.event("decision.human-input", mission.id);
+      this.store.unset("escapeHold");
+    }
+    if (mission?.decision)
+      this.store.event("decision.human-input", mission.decision.id);
+    if (this.reservation) {
+      this.generation++;
+      for (const d of this.store.deliveries("lead")) {
+        if (
+          d.batchId !== this.reservation.batchId ||
+          !["leased", "admitted"].includes(d.state)
+        )
+          continue;
+        d.state = "pending";
+        d.batchId = undefined;
+        this.store.putDelivery(d);
+      }
+      this.reservation = undefined;
+    }
+  }
+  private checkBudget(m: Mission): boolean {
+    if (["complete", "stopped", "paused"].includes(m.status) || m.humanPaused)
+      return false;
+    this.syncActivity();
+    const limits = this.budgetReasons(m);
+    if (!limits.length) return false;
+    if (m.blocker?.kind !== "budget") {
+      m.status = "attention";
+      m.reason = `Configured mission budget reached (${limits.join(", ")}). Work/results are retained; /mission resume explicitly renews this budget cycle.`;
+      m.blocker = { kind: "budget", reason: m.reason };
+      this.store.set("mission", m);
+      this.store.event("mission.blocked", m.id, { kind: "budget", limits });
+      this.options.notify?.(m.reason);
+    }
+    return true;
+  }
+  private migrateRecovery() {
+    const m = this.store.mission();
+    if (!m || m.humanPaused || this.store.get("relocationHold") || m.blocker)
+      return;
+    if (
+      m.status === "attention" &&
+      m.reason?.startsWith("Automatic wake attempts failed.")
+    ) {
+      m.status = "active";
+      m.reason = undefined;
+      m.updatedAt = this.now();
+      this.store.set("mission", m);
+      this.store.event("recovery.legacy-migrated", m.id, {
+        previous: "attention",
+        cause: "delivery",
+      });
+      for (const d of this.store.deliveries("lead")) {
+        if (
+          d.missionId !== m.id ||
+          d.state !== "pending" ||
+          d.attempts < this.settings.maxWakeAttempts
+        )
+          continue;
+        d.state =
+          d.kind === "progress" || d.kind === "continue"
+            ? "superseded"
+            : "quarantined";
+        d.reason =
+          "Legacy failed delivery retained for inspection; delivery failure does not pause the mission.";
+        this.store.putDelivery(d);
+        this.store.event(`delivery.${d.state}`, d.id, {
+          cause: "legacy-recovery",
+        });
+      }
+      this.delivery({
+        key: `legacy-recovery:${m.id}`,
+        from: "maintenance",
+        to: "lead",
+        kind: "recovery",
+        summary:
+          "Delivery recovery restored the existing mission within its original budget. Inspect retained results and quarantined notifications before continuing approved work; do not repeat completed commands.",
+      });
+    } else if (m.status === "attention") {
+      m.blocker = {
+        kind: m.reason?.startsWith("Mission continuation budget reached.")
+          ? "budget"
+          : m.reason?.startsWith("Three autonomous turns")
+            ? "no_progress"
+            : "unknown",
+        reason: m.reason ?? "Unclassified legacy hold",
+      };
+      this.store.set("mission", m);
     }
   }
   private ensureMission(input: string): Mission {
@@ -221,6 +418,7 @@ export class MissionKernel {
     if (retainClosed) this.store.set("mission", archived);
     this.cleanTemporaryMembers(reason);
     this.userHold = false;
+    this.store.unset("escapeHold");
     this.changed();
     return archived;
   }
@@ -252,20 +450,46 @@ export class MissionKernel {
       .slice(0, 30)
       .map((x) => cleanText(x, 2000));
     m.revision = (m.revision ?? 0) + 1;
-    m.status = "active";
-    m.humanPaused = false;
-    m.reason = "Goal definition updated; prior evidence was cleared.";
+    if (m.decision) {
+      const old = m.decision.id;
+      m.decision = {
+        ...m.decision,
+        id: randomUUID(),
+        revision: m.revision,
+        humanVersion: this.store.get<number>("humanVersion") ?? 0,
+      };
+      for (const id of m.decision.taskIds) {
+        const task = this.store.task(id);
+        if (task?.blockedReason === `decision:${old}`) {
+          task.blockedReason = `decision:${m.decision.id}`;
+          this.store.putTask(task);
+        }
+      }
+      this.store.event("decision.revised", old, {
+        decisionId: m.decision.id,
+        revision: m.revision,
+      });
+    }
+    if (m.externalWait) {
+      const old = m.externalWait.id;
+      m.externalWait = {
+        ...m.externalWait,
+        id: randomUUID(),
+        token: randomUUID(),
+        revision: m.revision,
+      };
+      this.store.event("wait.revised", old, {
+        waitId: m.externalWait.id,
+        revision: m.revision,
+      });
+    }
     m.evidence = undefined;
-    m.budgetStartedAt = this.now();
-    m.turns = 0;
-    m.outputTokens = 0;
-    m.emptyTurns = 0;
     m.nextContinueAt = this.now() + 1000;
     m.updatedAt = this.now();
-    this.userHold = false;
-    this.store.set("relocationHold", false);
+    // Editing an objective neither grants execution authority nor renews a budget.
     this.store.set("mission", m);
     this.store.event("mission.updated", m.id, { revision: m.revision });
+    this.recovery.revise(m.revision);
     this.turnActed = true;
     this.changed();
     return m;
@@ -317,7 +541,7 @@ export class MissionKernel {
           (d) =>
             d.missionId === m.id &&
             ["result", "failure", "recovery", "decision"].includes(d.kind) &&
-            ["pending", "leased"].includes(d.state),
+            ["pending", "leased", "quarantined"].includes(d.state),
         )
     )
       throw new Error(
@@ -450,7 +674,7 @@ export class MissionKernel {
     if (!member) throw new Error(`Unknown member: ${name}`);
     if (this.store.hasUnknownProcess(member.id))
       throw new Error(
-        "A previous execution has unknown process state. Inspect and stop any remaining processes, then use /mission reconcile <taskId> before a new attempt.",
+        "A previous execution has unknown process state. Inspect artifacts and host processes, then call mission_reconcile with exact task epochs and stopped-process evidence (or /mission reconcile <taskId>) before a new attempt.",
       );
     if (this.store.tasks(true).length >= 512)
       throw new Error(
@@ -473,6 +697,7 @@ export class MissionKernel {
           "Task cycle denied. Send a note to an ancestor instead of assigning it work.",
         );
     const mission = this.ensureMission(message);
+    this.checkBudget(mission);
     if (mission.humanPaused || mission.status !== "active")
       throw new Error(
         `Mission ${mission.status}: ${mission.reason ?? "resume through /mission resume"}`,
@@ -565,7 +790,11 @@ export class MissionKernel {
           await live.done;
         }
         const t = this.store.task(taskId);
-        if (t && t.state === "cancelled") {
+        if (
+          t &&
+          t.state === "cancelled" &&
+          (live || t.processState !== "unknown")
+        ) {
           t.processState = live?.processState ?? (live ? "unknown" : "stopped");
           this.store.putTask(t);
         }
@@ -633,6 +862,29 @@ export class MissionKernel {
       if (old) {
         old.summary = cleanText(input.summary, 2000);
         return this.store.putDelivery(old);
+      }
+    }
+    if (
+      input.to === "lead" &&
+      ((input.kind === "progress" && input.from === "maintenance") ||
+        (input.kind === "reminder" && input.scheduleId))
+    ) {
+      for (const old of this.store.deliveries("lead")) {
+        if (
+          old.key === input.key ||
+          old.state !== "pending" ||
+          old.kind !== input.kind ||
+          old.from !== input.from ||
+          (input.kind === "reminder" && old.scheduleId !== input.scheduleId) ||
+          (input.kind === "progress" &&
+            old.missionId !== this.store.mission()?.id)
+        )
+          continue;
+        old.state = "superseded";
+        old.reason =
+          "Replaced by a newer occurrence; no model consumption is claimed.";
+        this.store.putDelivery(old);
+        this.store.event("delivery.superseded", old.id);
       }
     }
     return this.store.putDelivery({
@@ -749,7 +1001,10 @@ export class MissionKernel {
     s.updatedAt = this.now();
     this.store.putSchedule(s);
     for (const delivery of this.store.deliveries("lead"))
-      if (delivery.scheduleId === id && delivery.state === "pending") {
+      if (
+        delivery.scheduleId === id &&
+        ["pending", "quarantined"].includes(delivery.state)
+      ) {
         delivery.state = "cancelled";
         this.store.putDelivery(delivery);
       }
@@ -811,11 +1066,26 @@ export class MissionKernel {
     if (action === "resume") {
       this.store.set("relocationHold", false);
       this.relocating = false;
+      this.store.unset("escapeHold");
+      this.recovery.succeeded();
+      m.blocker = undefined;
+      if (m.decision) {
+        for (const id of m.decision.taskIds) {
+          const task = this.store.task(id);
+          if (task?.blockedReason === `decision:${m.decision.id}`) {
+            task.blockedReason = undefined;
+            this.store.putTask(task);
+          }
+        }
+        this.store.event("decision.user-resumed", m.decision.id);
+        m.decision = undefined;
+      }
       for (const delivery of this.store.deliveries("lead")) {
         if (
-          delivery.state === "pending" &&
+          ["pending", "quarantined"].includes(delivery.state) &&
           (!delivery.missionId || delivery.missionId === m.id)
         ) {
+          delivery.state = "pending";
           delivery.attempts = 0;
           delivery.nextAttemptAt = this.now();
           this.store.putDelivery(delivery);
@@ -839,20 +1109,262 @@ export class MissionKernel {
     this.changed();
     if (action === "resume") await this.tick();
   }
-  requireDecision(reason: string) {
+  requireDecision(reason: string, taskIds: string[] = []) {
     const m = this.store.mission();
     if (!m) throw new Error("No mission");
-    m.status = "waiting_user";
+    if (
+      m.humanPaused ||
+      m.status !== "active" ||
+      this.store.get("relocationHold")
+    )
+      throw new Error(
+        "Mission control is held; a business decision cannot replace the existing hold.",
+      );
+    if (this.recovery.current())
+      throw new Error(
+        "RUNTIME_RECOVERY_REQUIRED: runtime faults are handled by automatic recovery and mission_recover, not mission_decision. Inspect mission_status.recovery.",
+      );
+    if (!reason.trim()) throw new Error("A concrete user question is required");
+    if (m.decision)
+      throw new Error(`Decision ${m.decision.id} is still pending`);
+    for (const id of taskIds) {
+      const task = this.store.task(id);
+      if (!task || terminal(task) || task.missionId !== m.id)
+        throw new Error(
+          "Decision task must be unfinished and belong to the current mission",
+        );
+      if (task.blockedReason)
+        throw new Error("This task already has an unresolved blocker");
+    }
+    m.decision = {
+      id: randomUUID(),
+      question: cleanText(reason, 2000),
+      taskIds: [...new Set(taskIds)],
+      revision: m.revision ?? 0,
+      humanVersion: this.store.get<number>("humanVersion") ?? 0,
+      createdAt: this.now(),
+    };
+    if (!taskIds.length) m.status = "waiting_user";
+    for (const id of taskIds) {
+      const task = this.store.task(id)!;
+      task.blockedReason = `decision:${m.decision.id}`;
+      this.store.putTask(task);
+    }
     m.reason = cleanText(reason, 2000);
     m.updatedAt = this.now();
     this.store.set("mission", m);
+    this.store.event("decision.opened", m.decision.id, {
+      missionId: m.id,
+      taskIds,
+    });
     this.options.notify?.(`需要用户裁决：${m.reason}`);
     this.turnActed = true;
     this.changed();
     return m;
   }
+  resolveDecision(id: string, answer: string) {
+    const m = this.store.mission(),
+      decision = m?.decision;
+    if (
+      !m ||
+      !decision ||
+      decision.id !== id ||
+      decision.revision !== (m.revision ?? 0)
+    )
+      throw new Error("Decision identity or goal revision changed");
+    if (
+      m.humanPaused ||
+      this.userHold ||
+      this.store.get("relocationHold") ||
+      this.checkBudget(m) ||
+      !["active", "waiting_user"].includes(m.status)
+    )
+      throw new Error(
+        "User or runtime hold cannot be cleared by answering a decision",
+      );
+    if (
+      (this.store.get<number>("humanVersion") ?? 0) <= decision.humanVersion ||
+      !answer.trim() ||
+      !this.lastHuman.includes(answer.trim())
+    )
+      throw new Error(
+        "A new direct human reply quoting this decision's answer is required; status questions do not automatically resolve decisions.",
+      );
+    for (const taskId of decision.taskIds) {
+      const task = this.store.task(taskId);
+      if (task?.blockedReason === `decision:${id}`) {
+        task.blockedReason = undefined;
+        this.store.putTask(task);
+      }
+    }
+    m.decision = undefined;
+    m.status = "active";
+    m.reason = undefined;
+    m.emptyTurns = 0;
+    m.updatedAt = this.now();
+    this.store.set("mission", m);
+    this.store.event("decision.resolved", id, {
+      humanVersion: this.store.get("humanVersion"),
+    });
+    this.turnActed = true;
+    this.changed();
+    return m;
+  }
+  waitExternal(reason: string, deadline: number) {
+    const m = this.store.mission();
+    if (
+      !m ||
+      m.status !== "active" ||
+      m.humanPaused ||
+      this.userHold ||
+      this.store.get("relocationHold") ||
+      this.checkBudget(m)
+    )
+      throw new Error("An active authorized mission is required");
+    if (
+      !reason.trim() ||
+      !Number.isSafeInteger(deadline) ||
+      deadline <= this.now() ||
+      deadline - this.now() > 604_800_000
+    )
+      throw new Error(
+        "External wait needs a reason and a deadline within seven days",
+      );
+    if (m.externalWait) throw new Error("An external wait is already pending");
+    m.externalWait = {
+      id: randomUUID(),
+      token: randomUUID(),
+      reason: cleanText(reason, 2000),
+      deadline,
+      revision: m.revision ?? 0,
+    };
+    this.store.set("mission", m);
+    this.store.event("wait.opened", m.externalWait.id, { deadline });
+    this.turnActed = true;
+    this.changed();
+    return m.externalWait;
+  }
+  signalExternal(id: string, token: string) {
+    const m = this.store.mission(),
+      wait = m?.externalWait;
+    if (
+      !m ||
+      !wait ||
+      wait.id !== id ||
+      wait.token !== token ||
+      wait.revision !== (m.revision ?? 0)
+    )
+      throw new Error("External wait identity, token or revision changed");
+    m.externalWait = undefined;
+    m.nextContinueAt = this.now();
+    this.store.set("mission", m);
+    this.store.event("wait.signalled", id);
+    this.delivery({
+      key: `wait:${id}`,
+      from: "external-wait",
+      to: "lead",
+      kind: "reminder",
+      summary: `External wait signalled: ${wait.reason}. Inspect the actual result before continuing.`,
+    });
+    this.changed();
+    return { signalled: true };
+  }
+  requestRecovery(faultId: string, revision: number) {
+    const fault = this.recovery.current(),
+      m = this.store.mission();
+    if (
+      !fault ||
+      fault.id !== faultId ||
+      (m?.revision ?? 0) !== revision ||
+      fault.revision !== revision
+    )
+      throw new Error("Fault identity or goal revision changed");
+    if (
+      this.userHold ||
+      m?.humanPaused ||
+      this.store.get("relocationHold") ||
+      (m && (m.status !== "active" || this.checkBudget(m)))
+    )
+      throw new Error(
+        "Recovery cannot override a user hold, decision, goal state or budget",
+      );
+    return {
+      eligible: this.recovery.ready(),
+      recovery: this.recovery.current(),
+      note: "Recovery preserves goal budgets. Context errors require successful compaction; exhausted transport recovery requires a successful human request or explicit user resume.",
+    };
+  }
+  claimRecoveryCompaction() {
+    const m = this.store.mission();
+    if (
+      this.closing ||
+      this.userHold ||
+      m?.humanPaused ||
+      this.store.get("relocationHold") ||
+      !this.options.isLeadIdle() ||
+      (m && (m.status !== "active" || this.checkBudget(m)))
+    )
+      return false;
+    return this.recovery.claimCompaction();
+  }
+  compactionSettled(id?: string, error = "Compaction failed or was cancelled") {
+    if (id) {
+      if (this.recovery.compacted(id)) {
+        for (const d of this.store.deliveries("lead")) {
+          if (
+            d.state !== "pending" ||
+            (d.missionId && d.missionId !== this.store.mission()?.id)
+          )
+            continue;
+          d.nextAttemptAt = this.now();
+          this.store.putDelivery(d);
+        }
+      }
+    } else this.recovery.compactionFailed(error);
+    this.changed();
+  }
+  admitLeadRequest() {
+    if (this.recovery.admit(this.automaticTurn)) {
+      this.leadRunning = true;
+      this.syncActivity();
+      return true;
+    }
+    this.leadRunning = false;
+    this.runtimeAborted = true;
+    this.changed();
+    return false;
+  }
+  rejectStaleWake() {
+    this.runtimeAborted = true;
+  }
+  canRetryLeadRequest() {
+    const value = this.recovery.current();
+    return (
+      !value ||
+      (value.kind !== "context" &&
+        value.requests < this.settings.recoveryMaxRequests)
+    );
+  }
   leadStarted(wake?: Wake) {
+    this.leadRunning = true;
+    if (!wake && this.reservation) {
+      this.generation++;
+      for (const d of this.store.deliveries("lead")) {
+        if (
+          d.batchId !== this.reservation.batchId ||
+          !["leased", "admitted"].includes(d.state)
+        )
+          continue;
+        d.state = "pending";
+        d.batchId = undefined;
+        this.store.putDelivery(d);
+      }
+      this.reservation = undefined;
+    }
     this.leadFailed = false;
+    this.leadResponded = false;
+    this.runtimeAborted = false;
+    this.automaticTurn = Boolean(wake);
     this.turnActed = false;
     this.wakeIncluded = false;
     this.collected.clear();
@@ -867,6 +1379,7 @@ export class MissionKernel {
           this.store.putDelivery(d);
         }
     }
+    this.syncActivity();
   }
   includeWake(batchId: string) {
     if (this.reservation?.batchId === batchId) this.wakeIncluded = true;
@@ -876,6 +1389,7 @@ export class MissionKernel {
       if (
         ids.includes(d.id) &&
         d.state !== "cancelled" &&
+        d.state !== "superseded" &&
         d.state !== "observed"
       ) {
         d.state = "admitted";
@@ -884,28 +1398,74 @@ export class MissionKernel {
         this.collected.add(d.id);
       }
   }
-  leadMessage(error: boolean, outputTokens = 0) {
+  leadMessage(
+    error: boolean,
+    outputTokens = 0,
+    errorText = "Provider request failed",
+  ) {
+    // A provider may report the locally aborted request as an error. It was not admitted.
+    if (this.runtimeAborted) {
+      this.leadFailed = true;
+      this.leadRunning = false;
+      this.syncActivity();
+      return;
+    }
     this.leadFailed = error;
+    this.leadResponded = true;
+    this.leadRunning = !error;
+    if (error)
+      this.recovery.fail(
+        contextLimitError(errorText) ? "context" : "provider",
+        errorText,
+      );
     const m = this.store.mission();
-    if (m && m.status === "active") {
+    if (m && !["complete", "stopped"].includes(m.status)) {
       m.outputTokens += outputTokens;
       this.store.set("mission", m);
     }
+    this.syncActivity();
   }
   leadActed() {
     this.turnActed = true;
   }
   leadSettled(aborted = false) {
+    this.leadRunning = false;
     const reserved = this.reservation;
     this.reservation = undefined;
-    if (aborted) this.userHold = true;
+    if (aborted && !this.runtimeAborted) {
+      this.userHold = true;
+      this.store.set("escapeHold", true);
+    }
+    const expectsProgress =
+      reserved?.deliveryIds.some((id) =>
+        this.store
+          .deliveries("lead")
+          .some((d) => d.id === id && d.kind === "continue"),
+      ) ?? false;
+    if (
+      reserved &&
+      !aborted &&
+      !this.leadFailed &&
+      (!this.leadResponded || !this.wakeIncluded)
+    ) {
+      this.leadFailed = true;
+      this.recovery.fail(
+        "delivery",
+        "Wake was not admitted into a successful model request; results remain durable.",
+      );
+    }
     if (reserved) {
       for (const d of this.store.deliveries("lead"))
         if (
           d.batchId === reserved.batchId &&
           ["leased", "admitted"].includes(d.state)
         ) {
-          if (!aborted && !this.leadFailed && this.wakeIncluded) {
+          if (
+            !aborted &&
+            !this.leadFailed &&
+            this.leadResponded &&
+            this.wakeIncluded
+          ) {
             d.state = "observed";
             d.reason =
               "Successful lead response observed; not a claim of exactly-once business consumption";
@@ -921,40 +1481,76 @@ export class MissionKernel {
     }
     for (const d of this.store.deliveries("lead"))
       if (this.collected.has(d.id) && d.state === "admitted") {
-        d.state = !aborted && !this.leadFailed ? "observed" : "pending";
+        d.state =
+          !aborted && !this.leadFailed && this.leadResponded
+            ? "observed"
+            : "pending";
         d.batchId = undefined;
         d.nextAttemptAt = this.now() + this.settings.retryBaseMs;
         this.store.putDelivery(d);
       }
     this.collected.clear();
+    if (!aborted && !this.leadFailed && this.leadResponded) {
+      this.recovery.succeeded();
+      for (const delivery of this.store.deliveries("lead")) {
+        if (
+          delivery.state !== "quarantined" ||
+          (delivery.missionId &&
+            delivery.missionId !== this.store.mission()?.id)
+        )
+          continue;
+        delivery.state = "pending";
+        delivery.nextAttemptAt = this.now();
+        this.store.putDelivery(delivery);
+        this.store.event("delivery.retry-ready", delivery.id);
+      }
+    } else if (this.leadFailed || this.runtimeAborted)
+      this.recovery.settledFailure();
     const m = this.store.mission();
     if (m && m.status === "active") {
       if (reserved) m.turns++;
-      m.emptyTurns =
-        reserved && !this.turnActed && !this.store.tasks(true).length
-          ? m.emptyTurns + 1
-          : 0;
+      if (this.turnActed) m.emptyTurns = 0;
+      else if (
+        expectsProgress &&
+        !aborted &&
+        !this.leadFailed &&
+        this.leadResponded &&
+        !this.store.tasks(true).length &&
+        !m.externalWait
+      )
+        m.emptyTurns++;
       m.nextContinueAt = this.now() + 1500;
       m.updatedAt = this.now();
       if (m.emptyTurns >= 3) {
         m.status = "attention";
         m.reason =
-          "Three autonomous turns made no task or goal progress. Review /mission status and resume explicitly.";
+          "Three autonomous turns made no task or goal progress. Inspect saved results and actual blockers, then use mission_control(action=resume) with the current goal identity to continue approved work.";
+        m.blocker = { kind: "no_progress", reason: m.reason };
+        this.store.event("mission.blocked", m.id, { kind: "no_progress" });
         this.options.notify?.(m.reason);
       }
       this.store.set("mission", m);
     }
+    this.runtimeAborted = false;
     this.changed();
   }
   snapshot() {
     const m = this.store.mission();
     return {
       mission: m,
+      recovery: this.recovery.current(),
+      activity: this.activityClock.snapshot(m),
+      budgets: {
+        timeMs: this.settings.maxMissionMs || null,
+        turns: this.settings.maxAutonomousTurns || null,
+        outputTokens: this.settings.maxOutputTokens || null,
+      },
+      compactionQueued: this.compactionQueued,
       members: this.store.members(),
       tasks: this.store.tasks(),
       deliveries: this.store
         .deliveries("lead")
-        .filter((d) => d.state !== "cancelled"),
+        .filter((d) => !["cancelled", "superseded"].includes(d.state)),
       schedules: this.store.schedules(),
       lifecycle: this.store.archiveCounts(),
       maintenance: !this.closing,
@@ -981,6 +1577,19 @@ export class MissionKernel {
           .join("; ") || "none"
       }`,
       "Task completion and maintenance are automatic, independent of Goal/reminder tools. Delegate approved work, let teammates review each other, then call mission_wait alone. Only the user can pause or stop the mission. Use mission_complete with evidence after verification; use mission_decision only for a concrete user decision. Inspect saved result paths rather than repeat completed commands.",
+      "Mission Control tools are declared directly from the host registry. mission_capabilities lists their active visibility and exact schemas. Inspect unknown executions and host processes before mission_reconcile; it records your stopped-process evidence and never replays work.",
+      s.recovery
+        ? `Runtime recovery: ${JSON.stringify(s.recovery)}. Recovery preserves the approved goal and budget. Never turn a runtime fault into a user decision or edit the goal to bypass a hold; inspect mission_recover.`
+        : "",
+      m.blocker
+        ? `Execution hold: ${JSON.stringify(m.blocker)}. ${m.blocker.kind === "no_progress" ? "Inspect saved results and the blocker, then use mission_control with this exact goal identity/revision and the next approved step; usage is preserved." : "This hold cannot be removed by editing the objective or runtime recovery."}`
+        : "",
+      m.decision
+        ? `Pending business decision: ${JSON.stringify(m.decision)}. A status question does not answer it. Resolve only this decision after a new direct human answer.`
+        : "",
+      m.externalWait
+        ? `Waiting for external event ${m.externalWait.id} until ${new Date(m.externalWait.deadline).toISOString()}: ${m.externalWait.reason}. No repeated polling or unchanged reports.`
+        : "",
       this.store.get("pathMappings")
         ? `Explicit workspace rename history: ${JSON.stringify(this.store.get("pathMappings"))}. Historical paths are unchanged; use project_resolve and current authorized roots before execution.`
         : "",
@@ -1021,20 +1630,26 @@ export class MissionKernel {
           }
       });
       let mission = this.store.mission();
-      if (mission?.status === "active") {
-        if (
-          now - mission.budgetStartedAt >= this.settings.maxMissionMs ||
-          mission.turns >= this.settings.maxAutonomousTurns ||
-          mission.outputTokens >= this.settings.maxOutputTokens
-        ) {
-          mission.status = "attention";
-          mission.reason =
-            "Mission continuation budget reached. Work/results are retained; /mission resume grants a new budget.";
-          this.store.set("mission", mission);
-          this.options.notify?.(mission.reason);
-        }
+      if (mission?.status === "active") this.checkBudget(mission);
+      if (mission?.externalWait && mission.externalWait.deadline <= now) {
+        const wait = mission.externalWait;
+        mission.externalWait = undefined;
+        this.store.set("mission", mission);
+        this.store.event("wait.expired", wait.id);
+        this.delivery({
+          key: `wait:${wait.id}`,
+          from: "external-wait",
+          to: "lead",
+          kind: "reminder",
+          summary: `External wait deadline reached: ${wait.reason}. Inspect the producer's current state before retrying any work.`,
+        });
       }
-      if (mission?.status === "active" && !mission.humanPaused) {
+      if (
+        mission?.status === "active" &&
+        !mission.humanPaused &&
+        !this.userHold &&
+        !this.store.get("relocationHold")
+      ) {
         for (const task of this.store.tasks(true))
           if (
             task.state === "waiting" &&
@@ -1111,6 +1726,7 @@ export class MissionKernel {
         for (const task of this.store
           .tasks(true)
           .filter((t) => t.state === "queued")) {
+          if (task.blockedReason) continue;
           if (task.phase === "work" && now - task.createdAt >= task.timeoutMs) {
             this.finishWithoutWorker(
               task,
@@ -1138,7 +1754,10 @@ export class MissionKernel {
           }
           this.launch(task);
         }
-        if (now - mission.lastReportAt >= this.settings.progressIntervalMs) {
+        if (
+          !mission.externalWait &&
+          now - mission.lastReportAt >= this.settings.progressIntervalMs
+        ) {
           this.delivery({
             key: `report:${mission.id}:${mission.lastReportAt}`,
             from: "maintenance",
@@ -1152,6 +1771,7 @@ export class MissionKernel {
         }
         if (
           !this.store.tasks(true).length &&
+          !mission.externalWait &&
           now >= mission.nextContinueAt &&
           !this.reservation
         ) {
@@ -1185,22 +1805,44 @@ export class MissionKernel {
         )
           this.leadSettled(false);
       }
+      for (const d of this.store.deliveries("lead")) {
+        if (
+          d.state !== "pending" ||
+          (d.missionId && d.missionId !== mission?.id) ||
+          d.attempts < this.settings.maxWakeAttempts
+        )
+          continue;
+        if (d.kind === "progress" || d.kind === "continue") {
+          d.state = "superseded";
+          d.reason =
+            "Automatic notification attempts exhausted; original work and results remain intact.";
+        } else if (this.recovery.current()?.phase === "exhausted") {
+          d.state = "quarantined";
+          d.reason =
+            "Recovery request allowance exhausted; notification remains unread and can be explicitly collected.";
+        } else continue;
+        this.store.putDelivery(d);
+        this.store.event(`delivery.${d.state}`, d.id);
+      }
+      const requestedCompaction =
+        this.compactionQueued &&
+        !this.userHold &&
+        !this.store.mission()?.humanPaused &&
+        !this.store.get("relocationHold") &&
+        this.options.isLeadIdle();
       if (
-        mission?.status === "active" &&
-        this.store
-          .deliveries("lead")
-          .some(
-            (d) =>
-              d.state === "pending" &&
-              (!d.missionId || d.missionId === mission!.id) &&
-              d.attempts >= this.settings.maxWakeAttempts,
-          )
+        this.options.compact &&
+        (requestedCompaction || this.claimRecoveryCompaction())
       ) {
-        mission.status = "attention";
-        mission.reason =
-          "Automatic wake attempts failed. Results remain on disk; review /mission status and resume explicitly.";
-        this.store.set("mission", mission);
-        this.options.notify?.(mission.reason);
+        if (requestedCompaction) {
+          this.compactionQueued = false;
+          this.recovery.claimCompaction();
+        }
+        try {
+          this.options.compact();
+        } catch (error) {
+          this.compactionSettled(undefined, String(error));
+        }
       }
       this.pump();
     } finally {
@@ -1214,11 +1856,33 @@ export class MissionKernel {
       this.closing ||
       this.userHold ||
       m?.humanPaused ||
-      m?.status === "attention" ||
+      this.store.get("relocationHold") ||
       this.reservation ||
-      !this.options.isLeadIdle()
+      !this.options.isLeadIdle() ||
+      !this.recovery.ready()
     )
       return;
+    const fault = this.recovery.current();
+    if (
+      fault?.phase === "ready" &&
+      m?.status === "active" &&
+      !m.externalWait &&
+      !this.store
+        .deliveries("lead")
+        .some(
+          (d) =>
+            d.state === "pending" && (!d.missionId || d.missionId === m.id),
+        )
+    ) {
+      this.delivery({
+        key: `probe:${fault.id}:${fault.probes}`,
+        from: "maintenance",
+        to: "lead",
+        kind: "recovery",
+        summary:
+          "Runtime recovery probe. Inspect retained results and continue only the existing approved objective; do not repeat completed commands.",
+      });
+    }
     const pending = this.store
       .deliveries("lead")
       .filter(
@@ -1226,7 +1890,8 @@ export class MissionKernel {
           d.state === "pending" &&
           (!d.missionId || d.missionId === m?.id) &&
           d.nextAttemptAt <= this.now() &&
-          d.attempts < this.settings.maxWakeAttempts &&
+          (m?.status !== "attention" ||
+            (d.kind === "reminder" && !d.missionId)) &&
           (m?.status === "active" ||
             ["failure", "decision", "recovery", "reminder", "result"].includes(
               d.kind,
@@ -1265,11 +1930,16 @@ export class MissionKernel {
       deliveryIds: eligible.map((d) => d.id),
       content,
     };
+    this.recovery.probe();
     this.wakeIncluded = false;
     try {
       this.options.wake(this.reservation);
     } catch (error) {
       this.leadFailed = true;
+      this.recovery.fail(
+        "delivery",
+        `Wake submission failed: ${String(error)}`,
+      );
       this.leadSettled(false);
       this.options.notify?.(
         `Wake submission failed; retained for retry: ${String(error)}`,
@@ -1650,14 +2320,129 @@ export class MissionKernel {
   }
   acknowledgeProcess(taskId: string) {
     const task = this.store.task(taskId);
-    if (!task || task.processState !== "unknown" || !terminal(task))
+    if (!task) throw new Error("Unknown task");
+    return this.reconcileProcesses(
+      [{ taskId, expectedEpoch: task.epoch }],
+      "Explicit user confirmation through /mission reconcile",
+      "user",
+    );
+  }
+  reconcileProcesses(
+    requests: Array<{ taskId: string; expectedEpoch: number }>,
+    evidence: string,
+    actor: "lead" | "user" = "lead",
+  ) {
+    if (
+      !requests.length ||
+      requests.length > 100 ||
+      new Set(requests.map((r) => r.taskId)).size !== requests.length
+    )
+      throw new Error("Provide 1..100 distinct task identities");
+    const receipt = cleanText(evidence, 2000).trim();
+    if (receipt.length < 8)
       throw new Error(
-        "Only a terminal task with unknown process state can be reconciled",
+        "Record concrete stopped-process evidence after inspecting host processes and saved artifacts",
       );
-    task.processState = "stopped";
-    this.store.putTask(task);
-    this.store.event("user.process-reconciled", task.id);
+    const result = this.store.transaction(() => {
+      const tasks = requests.map((request) => {
+        const task = this.store.task(request.taskId);
+        if (!task || task.epoch !== request.expectedEpoch)
+          throw new Error(`Task identity or epoch changed: ${request.taskId}`);
+        if (!terminal(task) || this.live.has(task.id))
+          throw new Error(`Execution is still active or stopping: ${task.id}`);
+        if (!["unknown", "stopped", "not-started"].includes(task.processState))
+          throw new Error(`Process state is not reconcilable: ${task.id}`);
+        return task;
+      });
+      return tasks.map((task) => {
+        const alreadyStopped = task.processState !== "unknown";
+        if (!alreadyStopped) {
+          task.processState = "stopped";
+          task.updatedAt = this.now();
+          this.store.putTask(task);
+          this.store.event(`${actor}.process-reconciled`, task.id, {
+            epoch: task.epoch,
+            evidence: receipt,
+            verification: "caller-attested",
+          });
+        }
+        return {
+          taskId: task.id,
+          epoch: task.epoch,
+          processState: task.processState,
+          alreadyStopped,
+        };
+      });
+    });
+    this.turnActed = true;
     this.changed();
+    return {
+      reconciled: result,
+      note: "Process reconciliation records the caller's inspection evidence. It neither kills processes nor replays commands; explicitly create a new attempt when appropriate.",
+    };
+  }
+  resumeProgress(goalId: string, expectedRevision: number, reason: string) {
+    const m = this.store.mission();
+    if (!m || m.id !== goalId || (m.revision ?? 0) !== expectedRevision)
+      throw new Error("Goal identity or revision changed");
+    if (
+      m.humanPaused ||
+      this.userHold ||
+      this.store.get("relocationHold") ||
+      m.decision ||
+      m.blocker?.kind === "budget" ||
+      this.checkBudget(m)
+    )
+      throw new Error(
+        "User pause, workspace hold, business decision or budget renewal requires its own authorized control",
+      );
+    if (m.status === "active") return m;
+    if (m.status !== "attention" || m.blocker?.kind !== "no_progress")
+      throw new Error(
+        "Only runtime no-progress attention can be resumed by this model tool",
+      );
+    if (reason.trim().length < 8)
+      throw new Error(
+        "Explain the inspected blocker and the next approved step",
+      );
+    m.status = "active";
+    m.blocker = undefined;
+    m.reason = undefined;
+    m.emptyTurns = 0;
+    m.nextContinueAt = this.now() + 1000;
+    m.updatedAt = this.now();
+    this.store.set("mission", m);
+    this.store.event("lead.progress-resumed", m.id, {
+      revision: expectedRevision,
+      reason: cleanText(reason, 2000),
+    });
+    this.turnActed = true;
+    this.changed();
+    return m;
+  }
+  queueCompaction() {
+    const m = this.store.mission();
+    if (
+      !this.options.compact ||
+      this.closing ||
+      this.userHold ||
+      m?.humanPaused ||
+      this.store.get("relocationHold")
+    )
+      throw new Error(
+        "Compaction cannot be queued under a user/workspace hold or without an attached host",
+      );
+    if (!this.compactionQueued)
+      this.store.event(
+        "lead.compaction-requested",
+        m?.id ?? this.options.sessionId,
+      );
+    this.compactionQueued = true;
+    this.changed();
+    return {
+      queued: true,
+      note: "This lead run ends; the host compacts after settlement and idle. Original history is retained if compaction fails.",
+    };
   }
   async pauseForRelocation() {
     this.relocating = true;
@@ -1690,6 +2475,7 @@ export class MissionKernel {
   async close() {
     if (this.closing) return;
     this.closing = true;
+    this.syncActivity(true);
     this.generation++;
     if (this.timer) clearTimeout(this.timer);
     this.reservation = undefined;

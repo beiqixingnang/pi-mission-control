@@ -7,6 +7,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostDir } from "../../scripts/host.mjs";
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -1336,3 +1338,804 @@ test(
     assert.equal(globalThis[nativeKey], previousRenderer);
   },
 );
+
+test(
+  "real Pi reload migrates the screenshot's exhausted progress and can accept new approved work",
+  { timeout: 25000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"LEGACY_RECOVERY_CONNECTION_OK"}',
+      );
+      await h.tool("goal_start", {
+        objective: "Continue the existing approved fixture",
+        criteria: ["Read saved evidence"],
+      });
+      const directory = path.join(
+        process.env.PI_CODING_AGENT_DIR,
+        "mission-control/v2",
+        h.session.sessionManager.getSessionId(),
+      );
+      const db = new DatabaseSync(path.join(directory, "state.sqlite"));
+      const mission = JSON.parse(
+        db.prepare("SELECT data FROM meta WHERE key='mission'").get().data,
+      );
+      mission.status = "attention";
+      mission.reason =
+        "Automatic wake attempts failed. Results remain on disk; review /mission status and resume explicitly.";
+      mission.turns = 6;
+      mission.outputTokens = 321;
+      const d = {
+        id: crypto.randomUUID(),
+        key: crypto.randomUUID(),
+        from: "maintenance",
+        to: "lead",
+        kind: "progress",
+        summary: "Old hourly report",
+        state: "pending",
+        createdAt: Date.now() - 60000,
+        nextAttemptAt: 0,
+        attempts: 3,
+        missionId: mission.id,
+      };
+      db.prepare("UPDATE meta SET data=? WHERE key='mission'").run(
+        JSON.stringify(mission),
+      );
+      db.prepare("INSERT INTO deliveries VALUES(?,?,?,?,?,?)").run(
+        d.id,
+        d.key,
+        d.to,
+        d.state,
+        d.createdAt,
+        JSON.stringify(d),
+      );
+      db.close();
+      await h.session.reload();
+      await until(async () =>
+        (await h.snapshot()).deliveries.some(
+          (x) => x.kind === "recovery" && x.state === "observed",
+        ),
+      );
+      const restored = await h.snapshot();
+      assert.equal(restored.mission.status, "active");
+      assert.equal(restored.mission.budgetStartedAt, mission.budgetStartedAt);
+      assert.ok(restored.mission.turns >= 6);
+      assert.ok(restored.mission.outputTokens >= 321);
+      await h.tool("team_spawn", {
+        name: "recovered-worker",
+        role: "read approved fixture",
+        workspace: { root: h.cwd, access: "read-only", execution: "files" },
+      });
+      const file = path.join(h.cwd, "recovered.txt");
+      await fs.writeFile(file, "RECOVERED_WORKER_EVIDENCE");
+      const sent = await h.tool("team_send", {
+        to: "recovered-worker",
+        message: "V2_TEST:" + JSON.stringify({ op: "read", file }),
+      });
+      assert.ok(!sent.isError, sent.content[0].text);
+      const task = JSON.parse(sent.content[0].text);
+      await until(async () =>
+        (await h.snapshot()).tasks.some(
+          (t) => t.id === task.taskId && t.state === "completed",
+        ),
+      );
+    }),
+);
+
+test(
+  "real Pi automatically compacts overflow and schedules one idle recovery without renewing the goal budget",
+  { timeout: 25000 },
+  () =>
+    harness(async (h) => {
+      const previous = process.env.MC_FIXTURE_SUMMARY;
+      process.env.MC_FIXTURE_SUMMARY = "success";
+      const directory = path.join(
+        process.env.PI_CODING_AGENT_DIR,
+        "mission-control/v2",
+        h.session.sessionManager.getSessionId(),
+      );
+      try {
+        await h.session.prompt("/compaction-model lead mission-fixture/model");
+        h.settings.applyOverrides({
+          compaction: {
+            enabled: false,
+            reserveTokens: 2048,
+            keepRecentTokens: 4096,
+          },
+        });
+        for (let i = 0; i < 3; i++)
+          await h.session.prompt(
+            "V2_TEST:" +
+              JSON.stringify({
+                op: "answer",
+                text:
+                  "History " +
+                  i +
+                  " retained objective and evidence ".repeat(250),
+              }),
+          );
+        await h.tool("goal_start", {
+          objective: "Recover approved work",
+          criteria: ["Preserve exact budget"],
+        });
+        const before = (await h.snapshot()).mission;
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "flaky",
+              key: crypto.randomUUID(),
+              failures: 1,
+              error:
+                "Your input exceeds the context window of this model. Please adjust your input and try again.",
+            }),
+        );
+        await until(
+          async () =>
+            h.events.some((e) => e.type === "compaction_end" && e.result) &&
+            !(await h.snapshot()).recovery &&
+            h.session.isIdle,
+        );
+        const after = await h.snapshot();
+        assert.equal(after.mission.budgetStartedAt, before.budgetStartedAt);
+        assert.equal(after.mission.humanPaused, false);
+        assert.equal(after.held, false);
+        assert.equal(after.mission.status, "active");
+        assert.ok(
+          h.session.getLastAssistantText().includes("RECOVERED_REQUEST_"),
+        );
+        assert.equal(
+          h.events.filter((e) => e.type === "compaction_start").length,
+          1,
+        );
+        assert.equal(
+          h.session.sessionManager
+            .getEntries()
+            .filter(
+              (e) =>
+                e.type === "custom_message" &&
+                e.customType === "mission-control-wake",
+            ).length,
+          1,
+        );
+        assert.equal(
+          h.session.sessionManager
+            .getEntries()
+            .filter(
+              (e) =>
+                e.type === "custom_message" &&
+                e.customType === "mission-reconnect",
+            ).length,
+          0,
+        );
+      } finally {
+        if (previous === undefined) delete process.env.MC_FIXTURE_SUMMARY;
+        else process.env.MC_FIXTURE_SUMMARY = previous;
+        await fs.rm(path.join(directory, "compaction-summary.json"), {
+          force: true,
+        });
+      }
+    }),
+);
+
+test(
+  "real Pi native retries cannot exceed the shared automatic recovery request cap",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      await fs.writeFile(
+        path.join(process.env.PI_CODING_AGENT_DIR, "mission-control.json"),
+        JSON.stringify({
+          workerExtensions: [fixture],
+          recoveryMaxRequests: 3,
+          recoveryCooldownMs: 1000,
+        }),
+      );
+      await h.session.reload();
+      h.settings.applyOverrides({
+        retry: {
+          enabled: true,
+          maxRetries: 20,
+          baseDelayMs: 0,
+          maxAgentDelayMs: 0,
+        },
+      });
+      await h.session.prompt("/reconnect on");
+      await h.session.prompt("/reconnect delay 0");
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"READY_FOR_AUTOMATIC_REQUEST"}',
+      );
+      await h.tool("goal_start", {
+        objective: "Bound the outage",
+        criteria: ["No retry amplification"],
+      });
+      await h.tool("schedule", {
+        action: "create",
+        title: "outage",
+        prompt:
+          "V2_TEST:" +
+          JSON.stringify({
+            op: "flaky",
+            key: crypto.randomUUID(),
+            failures: 100,
+            error: "502 Bad Gateway",
+          }),
+        afterSeconds: 1,
+      });
+      await until(
+        async () =>
+          (await h.snapshot()).recovery?.phase === "exhausted" &&
+          h.session.isIdle,
+      );
+      const failures = () =>
+        h.events.filter(
+          (e) =>
+            e.type === "message_end" &&
+            e.message?.stopReason === "error" &&
+            /502 Bad Gateway/.test(e.message.errorMessage ?? ""),
+        ).length;
+      assert.equal(failures(), 3);
+      assert.equal((await h.snapshot()).recovery.requests, 3);
+      assert.equal((await h.snapshot()).held, false);
+      await new Promise((r) => setTimeout(r, 1200));
+      assert.equal(failures(), 3);
+    }),
+);
+
+test("a real provider-side abort remains a recoverable failure and never becomes a user Escape hold", () =>
+  harness(async (h) => {
+    await h.tool("goal_start", {
+      objective: "Recover a provider abort",
+      criteria: ["Preserve user control"],
+    });
+    await h.session.prompt(
+      "V2_TEST:" +
+        JSON.stringify({
+          op: "flaky",
+          key: crypto.randomUUID(),
+          failures: 100,
+          transportAbort: true,
+        }),
+    );
+    const snapshot = await h.snapshot();
+    assert.equal(snapshot.held, false);
+    assert.equal(snapshot.recovery.kind, "provider");
+    assert.equal(snapshot.mission.status, "active");
+  }));
+
+test(
+  "real Pi upgrades an already expired default wall-time hold without erasing prior usage",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"BUDGET_UPGRADE_OK"}',
+      );
+      await h.tool("goal_start", {
+        objective: "Continue long-running approved work",
+        criteria: ["Preserve usage"],
+      });
+      const directory = path.join(
+        process.env.PI_CODING_AGENT_DIR,
+        "mission-control/v2",
+        h.session.sessionManager.getSessionId(),
+      );
+      let prior;
+      await h.session.reload({
+        beforeSessionStart: () => {
+          const db = new DatabaseSync(path.join(directory, "state.sqlite"));
+          const m = JSON.parse(
+            db.prepare("SELECT data FROM meta WHERE key='mission'").get().data,
+          );
+          m.budgetStartedAt = Date.now() - 13 * 3600000;
+          m.turns = 250;
+          m.outputTokens = 2100000;
+          m.status = "attention";
+          m.reason =
+            "Mission continuation budget reached. Work/results are retained; /mission resume grants a new budget.";
+          m.blocker = { kind: "budget", reason: m.reason };
+          prior = m;
+          db.prepare("UPDATE meta SET data=? WHERE key='mission'").run(
+            JSON.stringify(m),
+          );
+          db.prepare("DELETE FROM meta WHERE key='missionActivityClock'").run();
+          db.close();
+        },
+      });
+      const state = await h.snapshot();
+      assert.equal(state.mission.status, "active");
+      assert.equal(state.mission.turns, 250);
+      assert.equal(state.mission.outputTokens, 2100000);
+      assert.equal(state.mission.budgetStartedAt, prior.budgetStartedAt);
+      assert.deepEqual(state.budgets, {
+        timeMs: null,
+        turns: null,
+        outputTokens: null,
+      });
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"STILL_USABLE_AFTER_UPGRADE"}',
+      );
+      assert.equal(
+        h.session.getLastAssistantText(),
+        "STILL_USABLE_AFTER_UPGRADE",
+      );
+    }),
+);
+
+test(
+  "real Pi native member selection stays alive with four current members and many retired task identities",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      for (const name of [
+        "cpu-executor",
+        "cpu-supervisor",
+        "gpu-executor",
+        "gpu-supervisor",
+      ])
+        await h.tool("team_spawn", {
+          name,
+          role: name,
+          workspace: { root: h.cwd, access: "read-only", execution: "files" },
+        });
+      const directory = path.join(
+        process.env.PI_CODING_AGENT_DIR,
+        "mission-control/v2",
+        h.session.sessionManager.getSessionId(),
+      );
+      const db = new DatabaseSync(path.join(directory, "state.sqlite"));
+      for (let i = 0; i < 25; i++) {
+        const task = {
+          id: `old-task-${i}`,
+          memberId: `retired-member-${i}`,
+          member: `retired-reader-${i}`,
+          missionId: "old",
+          rootId: `old-task-${i}`,
+          state: "completed",
+          epoch: 1,
+          phase: "work",
+          inputPath: "unused",
+          createdAt: i,
+          updatedAt: i,
+          timeoutMs: 1000,
+          processState: "stopped",
+          reviewDeliveryIds: [],
+        };
+        db.prepare("INSERT INTO tasks VALUES(?,?,?,?,?,?)").run(
+          task.id,
+          task.memberId,
+          null,
+          task.state,
+          i,
+          JSON.stringify(task),
+        );
+      }
+      db.close();
+      let component, dispose;
+      const runner = h.session.extensionRunner;
+      initTheme("dark", false);
+      runner.setUIContext(
+        {
+          ...runner.getUIContext(),
+          custom: async (factory) =>
+            new Promise((resolve) => {
+              component = factory({ requestRender() {} }, piTheme, {}, resolve);
+              dispose = () => component.dispose?.();
+            }),
+        },
+        "tui",
+      );
+      const lead = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      const showing = h.session.prompt("/mission");
+      try {
+        await until(() => Boolean(component));
+        const text = component.render(120).join("\n");
+        for (const name of [
+          "cpu-executor",
+          "cpu-supervisor",
+          "gpu-executor",
+          "gpu-supervisor",
+        ])
+          assert.equal(text.split(name).length - 1, 1);
+        assert.doesNotMatch(text, /retired-reader/);
+        const member = (await h.snapshot()).members[0];
+        const edit = new DatabaseSync(path.join(directory, "state.sqlite"));
+        edit.prepare("DELETE FROM members WHERE id=?").run(member.id);
+        edit.close();
+        component.handleInput("\r");
+        await new Promise(setImmediate);
+        assert.match(component.render(120).join("\n"), /成员列表已更新/);
+        assert.equal(h.session.isStreaming, true);
+        component.handleInput("\r");
+        await new Promise(setImmediate);
+        component.render(120);
+        assert.equal(h.session.isStreaming, true);
+        component.handleInput("\x1b");
+        component.handleInput("\x1b");
+        await showing;
+      } finally {
+        dispose?.();
+        await h.session.abort();
+        await lead;
+      }
+    }),
+);
+
+test(
+  "real Pi provider cooldown does not keep charging the goal activity clock",
+  { timeout: 10000 },
+  () =>
+    harness(async (h) => {
+      await h.tool("goal_start", {
+        objective: "Measure actual activity",
+        criteria: ["No idle charge"],
+      });
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "flaky",
+            key: crypto.randomUUID(),
+            failures: 100,
+          }),
+      );
+      const before = await h.snapshot();
+      assert.equal(before.activity.state, "stalled");
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const after = await h.snapshot();
+      assert.equal(after.activity.activeMs, before.activity.activeMs);
+      assert.equal(after.mission.outputTokens, before.mission.outputTokens);
+    }),
+);
+
+test(
+  "one host registry directly exposes every plugin module and refreshes schemas after an old-tool reload",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      h.session.setActiveToolsByName(["read"]);
+      await h.session.prompt(
+        'V2_TEST:{"op":"tools","schemaFor":"mission_reconcile"}',
+      );
+      const declared = JSON.parse(h.session.getLastAssistantText());
+      for (const name of [
+        "mission_reconcile",
+        "mission_control",
+        "mission_report",
+        "mission_export",
+        "mission_history",
+        "team_message",
+        "mission_compact",
+        "reconnect_config",
+        "compaction_model",
+        "project_apply",
+        "project_recover",
+      ])
+        assert.ok(declared.names.includes(name), `not declared: ${name}`);
+      assert.equal(
+        declared.schema.properties.tasks.items.properties.expectedEpoch.type,
+        "integer",
+      );
+      const catalog = JSON.parse(
+        (await h.tool("mission_capabilities")).content[0].text,
+      );
+      assert.equal(catalog.tools.length, 43);
+      assert.ok(catalog.tools.every((t) => t.active));
+      h.session.setActiveToolsByName(["read"]);
+      await h.session.reload();
+      await h.session.prompt(
+        'V2_TEST:{"op":"tools","schemaFor":"compaction_model"}',
+      );
+      const restored = JSON.parse(h.session.getLastAssistantText());
+      assert.ok(restored.names.includes("project_apply"));
+      assert.ok(restored.names.includes("compaction_model"));
+      assert.ok(restored.schema.properties.target);
+    }),
+);
+
+test(
+  "real model tools reconcile the four stale executions then resume no-progress without a user slash command",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"RECOVERY_FIXTURE"}',
+      );
+      await h.tool("goal_start", {
+        objective: "Continue the approved fixture",
+        criteria: ["Read evidence"],
+      });
+      const file = path.join(h.cwd, "evidence.txt");
+      await fs.writeFile(file, "RECONCILED_ATTEMPT_EVIDENCE");
+      const members = [];
+      for (const name of [
+        "cpu-executor",
+        "cpu-supervisor",
+        "gpu-executor",
+        "gpu-supervisor",
+      ])
+        members.push(
+          JSON.parse(
+            (
+              await h.tool("team_spawn", {
+                name,
+                role: name,
+                workspace: {
+                  root: h.cwd,
+                  access: "read-only",
+                  execution: "files",
+                },
+              })
+            ).content[0].text,
+          ),
+        );
+      const directory = path.join(
+        process.env.PI_CODING_AGENT_DIR,
+        "mission-control/v2",
+        h.session.sessionManager.getSessionId(),
+      );
+      const db = new DatabaseSync(path.join(directory, "state.sqlite"));
+      const m = JSON.parse(
+        db.prepare("SELECT data FROM meta WHERE key='mission'").get().data,
+      );
+      m.status = "attention";
+      m.blocker = {
+        kind: "no_progress",
+        reason: "Three prior automatic requests did not progress",
+      };
+      m.turns = 22;
+      m.outputTokens = 500;
+      m.emptyTurns = 3;
+      db.prepare("UPDATE meta SET data=? WHERE key='mission'").run(
+        JSON.stringify(m),
+      );
+      const tasks = [];
+      for (let i = 0; i < 4; i++) {
+        const id = crypto.randomUUID(),
+          inputPath = path.join(directory, "artifacts", id + ".input.txt");
+        await fs.writeFile(
+          inputPath,
+          "V2_TEST:" + JSON.stringify({ op: "read", file }),
+        );
+        const task = {
+          id,
+          missionId: m.id,
+          memberId: members[i].id,
+          member: members[i].name,
+          rootId: id,
+          state: "interrupted",
+          epoch: 3,
+          phase: "work",
+          inputPath,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          timeoutMs: 600000,
+          processState: "unknown",
+          reviewDeliveryIds: [],
+        };
+        db.prepare("INSERT INTO tasks VALUES(?,?,?,?,?,?)").run(
+          task.id,
+          task.memberId,
+          null,
+          task.state,
+          task.createdAt,
+          JSON.stringify(task),
+        );
+        tasks.push({ taskId: id, expectedEpoch: 3 });
+      }
+      db.close();
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "mission_reconcile",
+            args: {
+              tasks,
+              evidence:
+                "Inspected saved execution receipts and host inventory; these old fixture executions have no remaining workers",
+            },
+          }),
+      );
+      assert.equal(JSON.parse(h.session.getLastAssistantText()).isError, false);
+      assert.ok(
+        (await h.snapshot()).tasks
+          .filter((t) => tasks.some((x) => x.taskId === t.id))
+          .every((t) => t.processState === "stopped"),
+      );
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "mission_control",
+            args: {
+              action: "resume",
+              goalId: m.id,
+              expectedRevision: 0,
+              reason:
+                "Reconciled the four interrupted executions; continue the approved read fixture",
+            },
+          }),
+      );
+      const restored = await h.snapshot();
+      assert.equal(restored.mission.status, "active");
+      assert.equal(restored.mission.turns, 22);
+      assert.equal(restored.mission.budgetStartedAt, m.budgetStartedAt);
+      assert.ok(restored.mission.outputTokens >= 500);
+      const retried = await h.tool("team_resume", { taskId: tasks[0].taskId });
+      assert.ok(!retried.isError, retried.content[0].text);
+      const next = JSON.parse(retried.content[0].text);
+      assert.equal(next.attemptOf, tasks[0].taskId);
+      await until(async () =>
+        (await h.snapshot()).tasks.some(
+          (t) => t.id === next.id && t.state === "completed",
+        ),
+      );
+    }),
+);
+
+test(
+  "model-visible settings, public history and export share their session command implementations",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt(
+        'V2_TEST:{"op":"tool","name":"compaction_model","args":{"action":"set","target":"lead","model":"mission-fixture/model"}}',
+      );
+      assert.equal(JSON.parse(h.session.getLastAssistantText()).isError, false);
+      const lead = JSON.parse(
+        (await h.tool("compaction_model", { target: "lead" })).content[0].text,
+      );
+      await h.tool("compaction_model", {
+        action: "set",
+        target: "member",
+        model: "mission-fixture/model",
+      });
+      const member = JSON.parse(
+        (await h.tool("compaction_model", { target: "member" })).content[0]
+          .text,
+      );
+      assert.notEqual(lead.file, member.file);
+      const reconnect = await h.tool("reconnect_config", {
+        action: "set",
+        enabled: true,
+        maxRetries: 2,
+        delayMs: 1,
+      });
+      assert.ok(!reconnect.isError);
+      assert.equal(JSON.parse(reconnect.content[0].text).maxRetries, 2);
+      await h.tool("mission_report", { seconds: 7200 });
+      assert.equal((await h.snapshot()).nextReportAt, undefined);
+      h.session.sessionManager.appendMessage({
+        role: "assistant",
+        api: model.api,
+        provider: model.provider,
+        model: model.id,
+        stopReason: "stop",
+        timestamp: Date.now(),
+        content: [
+          {
+            type: "thinking",
+            thinking: "PRIVATE_HISTORY_REASONING",
+            signature: "PRIVATE_HISTORY_SIGNATURE",
+          },
+          { type: "text", text: "PUBLIC_HISTORY_EVIDENCE" },
+        ],
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      });
+      const history = await h.tool("mission_history", { limit: 100 });
+      assert.match(history.content[0].text, /PUBLIC_HISTORY_EVIDENCE/);
+      assert.doesNotMatch(history.content[0].text, /PRIVATE_HISTORY_/);
+      const destination = path.join(h.cwd, "public-export.jsonl");
+      const exported = await h.tool("mission_export", { destination });
+      assert.ok(!exported.isError, exported.content[0].text);
+      const text = await fs.readFile(destination, "utf8");
+      assert.match(text, /PUBLIC_HISTORY_EVIDENCE/);
+      assert.doesNotMatch(text, /PRIVATE_HISTORY_/);
+      assert.ok(
+        (await h.tool("mission_export", { destination })).isError,
+        "export cannot overwrite an existing file",
+      );
+    }),
+);
+
+test(
+  "a real model compaction request settles before compacting and preserves native cancel semantics",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const previous = process.env.MC_FIXTURE_SUMMARY;
+      process.env.MC_FIXTURE_SUMMARY = "success";
+      try {
+        await h.tool("compaction_model", {
+          action: "set",
+          target: "lead",
+          model: "mission-fixture/model",
+        });
+        h.settings.applyOverrides({
+          compaction: {
+            enabled: false,
+            reserveTokens: 2048,
+            keepRecentTokens: 512,
+          },
+        });
+        for (let i = 0; i < 3; i++)
+          await h.session.prompt(
+            "V2_TEST:" +
+              JSON.stringify({
+                op: "answer",
+                text: "History " + i + " verified evidence ".repeat(300),
+              }),
+          );
+        await h.session.prompt(
+          'V2_TEST:{"op":"tool","name":"mission_compact","args":{}}',
+        );
+        await until(
+          () =>
+            h.events.some((e) => e.type === "compaction_end" && e.result) &&
+            h.session.isIdle,
+        );
+        assert.equal((await h.snapshot()).held, false);
+        assert.equal((await h.snapshot()).compactionQueued, false);
+        assert.equal(
+          h.events.filter((e) => e.type === "compaction_start").length,
+          1,
+        );
+        await h.session.prompt(
+          'V2_TEST:{"op":"answer","text":"AFTER_REQUESTED_COMPACTION"}',
+        );
+        assert.equal(
+          h.session.getLastAssistantText(),
+          "AFTER_REQUESTED_COMPACTION",
+        );
+      } finally {
+        if (previous === undefined) delete process.env.MC_FIXTURE_SUMMARY;
+        else process.env.MC_FIXTURE_SUMMARY = previous;
+      }
+    }),
+);
+
+test("real Pi decisions reject extension-origin answers and preserve waiting across a status question", () =>
+  harness(async (h) => {
+    await h.tool("goal_start", {
+      objective: "Choose a fixture target",
+      criteria: ["Human answer"],
+    });
+    const asked = JSON.parse(
+        (
+          await h.tool("mission_decision", {
+            reason: "Which target should be used?",
+          })
+        ).content[0].text,
+      ),
+      id = asked.decision.id;
+    await h.session.prompt(
+      'V2_TEST:{"op":"answer","text":"What is the progress?"}',
+      { source: "interactive" },
+    );
+    assert.equal((await h.snapshot()).mission.status, "waiting_user");
+    await h.session.prompt('V2_TEST:{"op":"answer","text":"Use target A"}', {
+      source: "extension",
+    });
+    const rejected = await h.tool("mission_decision", {
+      action: "resolve",
+      decisionId: id,
+      answer: "Use target A",
+    });
+    assert.ok(rejected.isError);
+    await h.session.prompt('V2_TEST:{"op":"answer","text":"Use target A"}', {
+      source: "interactive",
+    });
+    const resolved = await h.tool("mission_decision", {
+      action: "resolve",
+      decisionId: id,
+      answer: "Use target A",
+    });
+    assert.ok(!resolved.isError, resolved.content[0].text);
+    assert.equal((await h.snapshot()).mission.status, "active");
+  }));

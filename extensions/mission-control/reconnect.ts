@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
 import path from "node:path";
+import { Type } from "typebox";
 import { cleanText } from "../../runtime/public.ts";
 import {
   reconnectPolicy,
@@ -17,6 +18,7 @@ import {
 interface Persistence {
   read(): ReconnectOptions | undefined;
   write(value: ReconnectOptions): void;
+  retryAllowed?(): boolean;
 }
 /** Native recovery runs first. This hook supplies bounded continuation after it settles. */
 export default function installReconnect(
@@ -101,6 +103,7 @@ export default function installReconnect(
       used >= config.maxRetries ||
       extraAttempts >= config.maxRetries ||
       contextLimitError(lastError) ||
+      persistence?.retryAllowed?.() === false ||
       ctx.hasPendingMessages()
     )
       return;
@@ -155,6 +158,57 @@ export default function installReconnect(
     nextAt = undefined;
     ctx.ui.setStatus("mission-reconnect", undefined);
   });
+  const inspect = (ctx: ExtensionContext) => ({
+    ...policy(ctx),
+    observedFailures: failures,
+    extraAttempts,
+    nextAt,
+    lastError,
+    note: "Native retry runs first; automatic lead requests share a persistent recovery allowance. off disables supplemental reconnect only.",
+  });
+  const configure = (ctx: ExtensionContext, patch: ReconnectOptions) => {
+    if (!persistence) throw new Error("No persistent lead runtime attached");
+    const raw = { ...persistence.read(), ...patch };
+    reconnectPolicy(raw);
+    reset();
+    persistence.write(raw);
+    return inspect(ctx);
+  };
+  if (!process.env.MC_V2_MEMBER && persistence)
+    pi.registerTool({
+      name: "reconnect_config",
+      label: "Provider reconnect settings",
+      executionMode: "sequential",
+      description:
+        "Inspect or set supplemental provider reconnect policy for this session. This does not disable native retry or renew the shared automatic request allowance.",
+      parameters: Type.Object({
+        action: Type.Optional(
+          Type.Union([Type.Literal("status"), Type.Literal("set")]),
+        ),
+        enabled: Type.Optional(Type.Boolean()),
+        maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })),
+        delayMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 300000 })),
+      }),
+      async execute(_id, args, _signal, _update, ctx) {
+        try {
+          const patch: ReconnectOptions = {};
+          for (const key of ["enabled", "maxRetries", "delayMs"] as const)
+            if (args[key] !== undefined) (patch as any)[key] = args[key];
+          const value =
+            args.action === "set" ? configure(ctx, patch) : inspect(ctx);
+          return {
+            content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+            details: undefined,
+          };
+        } catch (error) {
+          return {
+            content: [{ type: "text", text: String(error) }],
+            details: undefined,
+            isError: true,
+          };
+        }
+      },
+    });
   if (!process.env.MC_V2_MEMBER)
     pi.registerCommand("reconnect", {
       description:
@@ -165,7 +219,7 @@ export default function installReconnect(
             .trim()
             .split(/\s+/)
             .filter(Boolean);
-          const raw = persistence?.read() ?? {};
+          const raw: ReconnectOptions = {};
           if (action === "on" || action === "off")
             raw.enabled = action === "on";
           else if (action === "retries") raw.maxRetries = Number(value);
@@ -174,28 +228,9 @@ export default function installReconnect(
             throw new Error(
               "Use /reconnect status|on|off|retries N|delay seconds",
             );
-          reconnectPolicy(raw);
-          if (action !== "status") {
-            if (!persistence)
-              throw new Error("No persistent lead runtime attached");
-            reset();
-            persistence.write(raw);
-          }
-          ctx.ui.notify(
-            JSON.stringify(
-              {
-                ...policy(ctx),
-                observedFailures: failures,
-                extraAttempts,
-                nextAt,
-                lastError,
-                note: "插件等待固定间隔；原生重试先运行并计入连续失败预算，当前原生批次可能略超剩余预算。off仅关闭插件兜底。",
-              },
-              null,
-              2,
-            ),
-            "info",
-          );
+          const report =
+            action !== "status" ? configure(ctx, raw) : inspect(ctx);
+          ctx.ui.notify(JSON.stringify(report, null, 2), "info");
         } catch (error) {
           ctx.ui.notify(String(error), "error");
         }

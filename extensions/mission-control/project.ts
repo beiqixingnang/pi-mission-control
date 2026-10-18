@@ -364,4 +364,33 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
       }
     },
   });
+  pi.registerTool({
+    name: "project_recover",
+    label: "Recover workspace registry commit",
+    executionMode: "sequential",
+    description:
+      "Finish only an already-persisted workspace relocation whose session and destination match this exact current workspace. Does not create a new authorization, move new paths or release the user relocation hold.",
+    parameters: Type.Object({}),
+    async execute(_id, _args, _signal, _update, ctx) {
+      try {
+        const r = current().store.get<Relocation>("relocation");
+        if (
+          !r ||
+          r.sessionId !== ctx.sessionManager.getSessionId() ||
+          r.plan.target !== ctx.cwd ||
+          running ||
+          pending
+        )
+          throw new Error("No matching settled relocation journal to recover");
+        await commitRelocation(r);
+        current().store.event("lead.project-recovered", r.sessionId);
+        return result({
+          recovered: true,
+          held: current().store.get("relocationHold") ?? false,
+        });
+      } catch (error) {
+        return result(String(error), true);
+      }
+    },
+  });
 }

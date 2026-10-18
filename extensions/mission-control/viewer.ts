@@ -14,13 +14,14 @@ import {
 } from "@earendil-works/pi-tui";
 import type { MissionKernel } from "../../runtime/kernel.ts";
 import type { Task, PublicActivity } from "../../runtime/types.ts";
+import { memberTask } from "../../runtime/roster.ts";
 import { cleanText, textOf } from "../../runtime/public.ts";
 import {
   memberSessionFiles,
   transcriptPage,
   type TranscriptRecord,
 } from "../../runtime/transcript.ts";
-import { stateNames } from "./ui.ts";
+import { stateNames, missionState } from "./ui.ts";
 import { panelLine } from "./presentation.ts";
 import {
   messageTime,
@@ -119,43 +120,17 @@ function markdownTheme(theme?: ViewTheme): MarkdownTheme {
   };
 }
 
-export function teamRows(
-  s: ReturnType<MissionKernel["snapshot"]>,
-  folded = new Set<string>(),
-): Row[] {
-  const tasks = s.tasks.slice(0, 200),
-    members = new Map(s.members.map((m) => [m.id, m]));
-  const ids = new Set(tasks.map((t) => t.id)),
-    rows: Row[] = [];
-  const visit = (task: Task, depth: number) => {
-    if (depth > 30 || rows.some((r) => r.id === task.id)) return;
-    const children = tasks
-      .filter((t) => t.parentId === task.id)
-      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-    const member = members.get(task.memberId);
-    rows.push({
-      id: task.id,
-      memberId: task.memberId,
+export function teamRows(s: ReturnType<MissionKernel["snapshot"]>): Row[] {
+  return s.members.map((member) => {
+    const task = memberTask(member, s.tasks);
+    return {
+      id: member.id,
+      memberId: member.id,
       task,
-      children: Boolean(children.length),
-      text: `${"  ".repeat(depth)}${children.length ? (folded.has(task.id) ? "▸" : "▾") : "·"} ${task.member} · ${stateNames[task.state] ?? task.state}${task.phase === "review" ? " · 复核" : ""}${task.blockedReason ? " · " + cleanText(task.blockedReason, 80) : ""} [${member?.workspace.execution ?? "?"}]`,
-    });
-    if (!folded.has(task.id))
-      for (const child of children) visit(child, depth + 1);
-  };
-  for (const task of tasks
-    .filter((t) => !t.parentId || !ids.has(t.parentId))
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)))
-    visit(task, 0);
-  for (const member of s.members)
-    if (!tasks.some((t) => t.memberId === member.id))
-      rows.push({
-        id: member.id,
-        memberId: member.id,
-        children: false,
-        text: `· ${member.name} · 待命 [${member.workspace.execution}]`,
-      });
-  return rows;
+      children: false,
+      text: `${member.name} · ${task ? (stateNames[task.state] ?? task.state) : "待命"}${task?.phase === "review" ? " · 复核" : ""} [${member.workspace.execution}]${task?.blockedReason ? " · " + cleanText(task.blockedReason, 80) : ""}`,
+    };
+  });
 }
 
 export function conversationItems(
@@ -303,7 +278,6 @@ export class MissionPanel {
   private autoSession = true;
   private timer?: ReturnType<typeof setInterval>;
   private expanded = new Set<string>();
-  private folded = new Set<string>();
   private selectedRow?: string;
   private selectedItem?: string;
   private scroll = 0;
@@ -331,7 +305,7 @@ export class MissionPanel {
     this.getHeight = options.height ?? (() => process.stdout.rows ?? 24);
     if (options.pollMs !== 0) {
       this.timer = setInterval(
-        () => void this.refresh(),
+        () => this.perform(() => this.refresh()),
         options.pollMs ?? 500,
       );
       this.timer.unref?.();
@@ -345,8 +319,15 @@ export class MissionPanel {
   }
 
   async openMember(id: string, taskId?: string) {
-    const member = this.kernel.store.member(id);
-    if (!member) throw new Error(`Unknown member: ${id}`);
+    if (this.disposed) return;
+    const member = this.kernel.store.member(id, true);
+    if (!member) {
+      this.error = "该成员已移除；成员列表已刷新，请重新选择。";
+      this.view = "team";
+      this.selectedRow = undefined;
+      this.redraw();
+      return;
+    }
     this.scope = "member";
     this.memberId = member.id;
     this.taskId = taskId;
@@ -404,7 +385,8 @@ export class MissionPanel {
           ? leadFile
           : ((this.taskId
               ? this.kernel.store.task(this.taskId)?.sessionFile
-              : undefined) ?? this.kernel.store.member(memberId!)?.sessionFile);
+              : undefined) ??
+            this.kernel.store.member(memberId!, true)?.sessionFile);
       const next =
         this.autoSession &&
         (this.following || !this.file) &&
@@ -543,22 +525,24 @@ export class MissionPanel {
     this.height = Math.max(3, this.getHeight() - 5);
     let lines: string[];
     if (this.view === "team") {
+      const roster = teamRows(s);
       const counts = {
-          running: s.tasks.filter((t) => t.state === "running").length,
-          waiting: s.tasks.filter((t) => t.state === "waiting").length,
+          running: roster.filter((row) => row.task?.state === "running").length,
+          waiting: roster.filter((row) => row.task?.state === "waiting").length,
           attention: s.mission?.status === "attention" ? 1 : 0,
         },
         m = s.mission;
       const head = [
         bold(this.theme, color(this.theme, "accent", "AGENTS / TEAM STATUS")),
-        `${m ? stateNames[m.status] : "就绪"} · 成员 ${s.members.length} · 执行中 ${counts.running} · 等待 ${counts.waiting}${counts.attention ? ` · 需要处理 ${counts.attention}` : ""}`,
+        `${missionState(m, s.recovery)} · 成员 ${s.members.length} · 执行中 ${counts.running} · 等待 ${counts.waiting}${counts.attention ? ` · 需要处理 ${counts.attention}` : ""}`,
         m
           ? `目标：${cleanText(m.objective.replace(/\s+/g, " "), Math.max(20, width - 8))}`
           : "派工后自动维护；Enter 进入成员对话",
-        `${["团队 / 任务", "目标 / 验收", "定时提醒"].map((t, i) => (i === this.tab ? `[${t}]` : t)).join("  ")}`,
+        `${["子智能体", "目标 / 验收", "定时提醒"].map((t, i) => (i === this.tab ? `[${t}]` : t)).join("  ")}`,
+        ...(this.error ? [color(this.theme, "warning", this.error)] : []),
       ];
       if (this.tab === 0) {
-        const rows = teamRows(s, this.folded);
+        const rows = roster;
         if (this.selectedRow && rows.some((r) => r.id === this.selectedRow))
           this.selected = rows.findIndex((r) => r.id === this.selectedRow);
         this.selected = Math.min(this.selected, Math.max(0, rows.length - 1));
@@ -587,7 +571,7 @@ export class MissionPanel {
         if (!rows.length) lines.push("尚无成员；模型派工后会在这里显示。");
         lines.push(
           "",
-          "↑↓ 选择 · Enter 对话 · t 主对话时间线 · ←→ 折叠 · Tab 切页 · Esc 返回",
+          "↑↓ 选择成员 · Enter 对话 · t 主对话时间线 · Tab 切页 · Esc 返回",
         );
       } else {
         const details =
@@ -595,12 +579,18 @@ export class MissionPanel {
             ? m
               ? [
                   m.objective,
-                  `状态：${stateNames[m.status]}${m.reason ? " · " + m.reason : ""}`,
+                  `状态：${missionState(m, s.recovery)}${m.reason ? " · " + m.reason : ""}`,
+                  ...(s.recovery
+                    ? [
+                        `恢复原因：${s.recovery.reason}`,
+                        `恢复请求：${s.recovery.requests}/${this.kernel.settings.recoveryMaxRequests}${s.recovery.nextAt ? " · 下次检查：" + new Date(s.recovery.nextAt).toISOString() : ""}`,
+                      ]
+                    : []),
                   ...m.criteria.map(
                     (c, i) =>
                       `${i + 1}. ${c}\n   证据：${m.evidence?.find((e) => e.criterion === i + 1)?.evidence ?? "尚未提交"}`,
                   ),
-                  `自动接续 ${m.turns}/${this.kernel.settings.maxAutonomousTurns}`,
+                  `自动接续 ${m.turns}/${this.kernel.settings.maxAutonomousTurns || "不限"} · 活动耗时 ${Math.floor((s.activity?.activeMs ?? 0) / 1000)}秒`,
                 ]
               : ["尚未创建目标"]
             : s.schedules.length
@@ -626,7 +616,7 @@ export class MissionPanel {
         ];
       }
     } else {
-      const member = this.kernel.store.member(this.memberId ?? ""),
+      const member = this.kernel.store.member(this.memberId ?? "", true),
         items = this.items();
       let index = this.following
         ? items.length - 1
@@ -780,7 +770,11 @@ export class MissionPanel {
   }
   private async sendToMember() {
     const member = this.kernel.store.member(this.memberId ?? "");
-    if (!member) return;
+    if (!member) {
+      this.error = "成员已归档或移除，历史对话只读。";
+      this.redraw();
+      return;
+    }
     if (!this.editMessage) {
       this.error = "当前没有可用的成员输入编辑器";
       this.redraw();
@@ -800,7 +794,29 @@ export class MissionPanel {
     this.redraw();
   }
 
+  private perform(action: () => Promise<unknown>) {
+    void action().catch((error) => {
+      if (this.disposed) return;
+      this.error = cleanText(String(error), 250);
+      try {
+        this.redraw();
+      } catch {
+        /* The host may already be disposing this panel. */
+      }
+    });
+  }
   handleInput(data: string) {
+    try {
+      this.routeInput(data);
+    } catch (error) {
+      if (!this.disposed) {
+        this.error = cleanText(String(error), 250);
+        this.view = "team";
+        this.selectedRow = undefined;
+      }
+    }
+  }
+  private routeInput(data: string) {
     if (this.disposed) return;
     if (
       data === "q" ||
@@ -819,7 +835,7 @@ export class MissionPanel {
       }
     } else if (this.view === "team") {
       if (data === "t") {
-        void this.openLead();
+        this.perform(() => this.openLead());
       } else if (matchesKey(data, "tab")) {
         this.tab = (this.tab + 1) % 3;
         this.pageScroll = 0;
@@ -831,7 +847,18 @@ export class MissionPanel {
         if (matchesKey(data, "pageUp"))
           this.pageScroll = Math.max(0, this.pageScroll - 10);
       } else {
-        const rows = teamRows(this.kernel.snapshot(), this.folded);
+        const rows = teamRows(this.kernel.snapshot());
+        if (
+          this.selectedRow &&
+          !rows.some((row) => row.id === this.selectedRow) &&
+          matchesKey(data, "enter")
+        ) {
+          this.error = "成员列表已更新，请重新选择。";
+          this.selectedRow = rows[0]?.id;
+          this.selected = 0;
+          this.redraw();
+          return;
+        }
         let index = this.selectedRow
           ? rows.findIndex((r) => r.id === this.selectedRow)
           : this.selected;
@@ -845,10 +872,8 @@ export class MissionPanel {
         const row = rows[index];
         this.selected = Math.max(0, index);
         this.selectedRow = row?.id;
-        if (row && matchesKey(data, "left")) this.folded.add(row.id);
-        if (row && matchesKey(data, "right")) this.folded.delete(row.id);
         if (row && matchesKey(data, "enter"))
-          void this.openMember(row.memberId, row.task?.id);
+          this.perform(() => this.openMember(row.memberId, row.task?.id));
       }
     } else {
       const items = this.items();
@@ -864,7 +889,8 @@ export class MissionPanel {
         );
         this.selectedItem = items[index]?.id;
         this.scroll = this.itemStarts[index] ?? 0;
-        if (index === 0 && matchesKey(data, "up")) void this.older();
+        if (index === 0 && matchesKey(data, "up"))
+          this.perform(() => this.older());
       } else if (matchesKey(data, "enter")) {
         this.following = false;
         if (this.selectedItem) {
@@ -872,11 +898,11 @@ export class MissionPanel {
             this.expanded.delete(this.selectedItem);
           else this.expanded.add(this.selectedItem);
         }
-      } else if (data === "m") void this.sendToMember();
-      else if (data === "c") void this.copySelected();
+      } else if (data === "m") this.perform(() => this.sendToMember());
+      else if (data === "c") this.perform(() => this.copySelected());
       else if (matchesKey(data, "pageUp")) {
         this.following = false;
-        if (this.scroll <= 0) void this.older();
+        if (this.scroll <= 0) this.perform(() => this.older());
         else
           this.scroll = Math.max(0, this.scroll - Math.max(1, this.height - 5));
       } else if (matchesKey(data, "pageDown")) {
@@ -885,12 +911,12 @@ export class MissionPanel {
       } else if (matchesKey(data, "home")) {
         this.following = false;
         this.scroll = 0;
-        void this.older();
+        this.perform(() => this.older());
       } else if (matchesKey(data, "end") || data === "f") {
         this.following = data === "f" ? !this.following : true;
         if (this.following) {
           this.stamp = "";
-          void this.refresh();
+          this.perform(() => this.refresh());
         }
       } else if ((data === "[" || data === "]") && this.files.length) {
         const current = this.files.indexOf(this.file!);
@@ -905,7 +931,7 @@ export class MissionPanel {
         this.stamp = "";
         this.following = true;
         this.records = [];
-        void this.refresh();
+        this.perform(() => this.refresh());
       }
     }
     if (!this.disposed) this.redraw();

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { Type } from "typebox";
 import {
   getAgentDir,
   serializeConversation,
@@ -275,13 +276,137 @@ export default function (pi: ExtensionAPI) {
         ),
     });
   }
+  function summaryReport(ctx: any, scope: Target) {
+    const r = resolveConfig(ctx, scope),
+      spec = specOf(ctx, scope),
+      slash = spec?.indexOf("/") ?? -1;
+    const model =
+      spec && slash > 0
+        ? ctx.modelRegistry.find(spec.slice(0, slash), spec.slice(slash + 1))
+        : undefined;
+    const budgets = model ? summaryBudgets(model, r.config) : undefined;
+    return {
+      target: scope,
+      model: spec ?? "Pi default",
+      maxTokens: budgets?.maxTokens ?? r.config.maxTokens ?? 4096,
+      maxInputChars: budgets?.maxInputChars ?? r.config.maxInputChars ?? 24000,
+      maxOutputChars: budgets?.maxOutputChars,
+      recoveryMaxTokens:
+        budgets && model
+          ? r.config.maxTokens !== undefined
+            ? budgets.maxTokens
+            : Math.min(
+                32768,
+                model.maxTokens,
+                Math.floor(model.contextWindow / 4),
+              )
+          : undefined,
+      file: r.file,
+      source: r.config.disabled
+        ? "disabled"
+        : r.file === legacyFile
+          ? process.env.PI_COMPACTION_SUMMARY_MODEL?.trim()
+            ? "environment"
+            : r.config.model
+              ? "legacy config file"
+              : "Pi default"
+          : "scoped config file",
+    };
+  }
+  function manageSummary(
+    ctx: any,
+    args: {
+      action?: "status" | "set" | "off";
+      target?: Target;
+      model?: string;
+    },
+  ) {
+    const target = args.target ?? (memberRuntime() ? "member" : "lead");
+    if (memberRuntime() && target === "lead")
+      throw new Error("A member can only change its own compaction model");
+    if (!args.action || args.action === "status")
+      return !args.target && !memberRuntime()
+        ? {
+            lead: summaryReport(ctx, "lead"),
+            member: summaryReport(ctx, "member"),
+          }
+        : summaryReport(ctx, target);
+    const config = { ...resolveConfig(ctx, target).config };
+    if (args.action === "off") {
+      delete config.model;
+      config.disabled = true;
+    } else {
+      const value = args.model?.trim() ?? "",
+        slash = value.indexOf("/");
+      if (
+        slash < 1 ||
+        !ctx.modelRegistry.find(value.slice(0, slash), value.slice(slash + 1))
+      )
+        throw new Error(
+          "Summary model is not configured in Pi; use provider/model-id",
+        );
+      config.model = value;
+      delete config.disabled;
+    }
+    const file =
+      target === "member" && !memberRuntime()
+        ? memberDefaultFile(ctx)
+        : configFile(ctx, target);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + "." + randomUUID() + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + "\n", {
+      mode: 0o600,
+    });
+    fs.renameSync(tmp, file);
+    return summaryReport(ctx, target);
+  }
+  if (!memberRuntime())
+    pi.registerTool({
+      name: "compaction_model",
+      label: "Summary model settings",
+      executionMode: "sequential",
+      description:
+        "Inspect or set this lead session's summary model, or defaults for future member sessions. target=lead/member; action=status/set/off. Configured provider/model-id only; scopes remain separate. This does not compact history or alter the main inference model.",
+      parameters: Type.Object({
+        action: Type.Optional(
+          Type.Union([
+            Type.Literal("status"),
+            Type.Literal("set"),
+            Type.Literal("off"),
+          ]),
+        ),
+        target: Type.Optional(
+          Type.Union([Type.Literal("lead"), Type.Literal("member")]),
+        ),
+        model: Type.Optional(Type.String({ minLength: 1 })),
+      }),
+      async execute(_id, args, _signal, _update, ctx) {
+        try {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(manageSummary(ctx, args), null, 2),
+              },
+            ],
+            details: undefined,
+          };
+        } catch (error) {
+          return {
+            content: [{ type: "text", text: String(error) }],
+            details: undefined,
+            isError: true,
+          };
+        }
+      },
+    });
   pi.registerCommand("compaction-model", {
     description:
-      "Set the summary model for this lead/member conversation or the lead's future subagents. Use lead/member provider/model-id, off, or status.",
+      "Set the summary model for this lead/member conversation or future subagents. Use lead/member provider/model-id, off, or status.",
     handler: async (args, ctx) => {
       try {
         const tokens = args.trim().split(/\s+/).filter(Boolean);
-        let target: Target = memberRuntime() ? "member" : "lead";
+        let target: Target | undefined;
         if (["lead", "main"].includes(tokens[0]?.toLowerCase())) {
           target = "lead";
           tokens.shift();
@@ -293,95 +418,18 @@ export default function (pi: ExtensionAPI) {
           target = "member";
           tokens.shift();
         }
-        if (memberRuntime() && target === "lead")
-          throw new Error("A member can only change its own compaction model");
         const value = tokens.join(" ");
-        const resolved = resolveConfig(ctx, target);
-        if (!value || value === "status") {
-          const report = (scope: Target) => {
-            const r = resolveConfig(ctx, scope);
-            const spec = specOf(ctx, scope);
-            const slash = spec?.indexOf("/") ?? -1;
-            const model =
-              spec && slash > 0
-                ? ctx.modelRegistry.find(
-                    spec.slice(0, slash),
-                    spec.slice(slash + 1),
-                  )
-                : undefined;
-            const budgets = model ? summaryBudgets(model, r.config) : undefined;
-            return {
-              target: scope,
-              model: spec ?? "Pi default",
-              maxTokens: budgets?.maxTokens ?? r.config.maxTokens ?? 4096,
-              maxInputChars:
-                budgets?.maxInputChars ?? r.config.maxInputChars ?? 24000,
-              maxOutputChars: budgets?.maxOutputChars,
-              recoveryMaxTokens:
-                budgets && model
-                  ? r.config.maxTokens !== undefined
-                    ? budgets.maxTokens
-                    : Math.min(
-                        32768,
-                        model.maxTokens,
-                        Math.floor(model.contextWindow / 4),
-                      )
-                  : undefined,
-              file: r.file,
-              source: r.config.disabled
-                ? "disabled"
-                : r.file === legacyFile
-                  ? process.env.PI_COMPACTION_SUMMARY_MODEL?.trim()
-                    ? "environment"
-                    : r.config.model
-                      ? "legacy config file"
-                      : "Pi default"
-                  : "scoped config file",
-            };
-          };
-          ctx.ui.notify(
-            JSON.stringify(
-              memberRuntime()
-                ? report("member")
-                : { lead: report("lead"), member: report("member") },
-            ),
-            "info",
-          );
-          return;
-        }
-        const config = { ...resolved.config };
-        if (value === "off") {
-          delete config.model;
-          config.disabled = true;
-        } else {
-          const slash = value.indexOf("/");
-          if (
-            slash < 1 ||
-            !ctx.modelRegistry.find(
-              value.slice(0, slash),
-              value.slice(slash + 1),
-            )
-          )
-            throw new Error("Summary model is not configured in Pi");
-          config.model = value;
-          delete config.disabled;
-        }
-        const file =
-          target === "member" && !memberRuntime()
-            ? memberDefaultFile(ctx)
-            : configFile(ctx, target);
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        const tmp = file + "." + randomUUID() + ".tmp";
-        fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + "\n", {
-          mode: 0o600,
+        const report = manageSummary(ctx, {
+          target,
+          action:
+            !value || value === "status"
+              ? "status"
+              : value === "off"
+                ? "off"
+                : "set",
+          model: value,
         });
-        fs.renameSync(tmp, file);
-        ctx.ui.notify(
-          target === "member"
-            ? "Member compaction model updated for future subagent sessions"
-            : "Lead compaction model updated for this conversation",
-          "info",
-        );
+        ctx.ui.notify(JSON.stringify(report, null, 2), "info");
       } catch (error) {
         ctx.ui.notify(String(error), "error");
       }

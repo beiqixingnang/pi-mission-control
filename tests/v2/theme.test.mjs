@@ -212,7 +212,7 @@ test("completed missions hide expired progress checks and completed members reta
   });
 });
 
-test("horizontal status board shows objective and reminders without columns or stealing the input viewport", async () => {
+test("status table separates goal, schedules and members while retaining the input viewport", async () => {
   for (const name of ["dark", "light", "system"]) {
     initTheme(name, false);
     await withPanel(theme, async ({ kernel, member }) => {
@@ -232,13 +232,15 @@ test("horizontal status board shows objective and reminders without columns or s
           lines.length <= Math.max(4, Math.min(10, Math.floor(rows / 3))),
         );
         assert.ok(lines.every((line) => visibleWidth(line) <= width));
-        assert.doesNotMatch(text, /[│┌┐└┘]/);
+        if (width >= 76 && rows >= 24)
+          assert.match(text, /类别.*名称.*状态.*时间/);
+        else assert.doesNotMatch(text, /[│┌┐└┘]/);
       }
       const visible = board(kernel, 120, false, theme, 30)
         .map(stripTerminalSequences)
         .join("\n");
       assert.match(visible, /目标.*保留图形输出/);
-      assert.match(visible, /提醒 1项.*阶段复核/);
+      assert.match(visible, /定时任务.*阶段复核/);
       assert.match(visible, /另有 \d名成员/);
     });
   }

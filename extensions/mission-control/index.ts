@@ -28,6 +28,10 @@ import { searchWeb, fetchPage } from "../../runtime/web.ts";
 import { board } from "./ui.ts";
 import { MissionPanel } from "./viewer.ts";
 import { installLeadHistory } from "./lead-history.ts";
+import {
+  memberSessionFiles,
+  transcriptPage,
+} from "../../runtime/transcript.ts";
 import installReconnect from "./reconnect.ts";
 import { installProject } from "./project.ts";
 import {
@@ -113,10 +117,39 @@ export default function (pi: ExtensionAPI) {
     renderTimer: ReturnType<typeof setTimeout> | undefined;
   let panel: MissionPanel | undefined;
   let agentsOpen = false;
-  const missionToolNames = new Set<string>();
+  const sourceCache = new Map<string, string>();
+  const sourcePath = (value: string) => {
+    const cached = sourceCache.get(value);
+    if (cached) return cached;
+    const file = value.startsWith("file:") ? fileURLToPath(value) : value;
+    let resolved = path.resolve(file);
+    try {
+      resolved = fsSync.realpathSync.native(resolved);
+    } catch {}
+    const normalized =
+      process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    sourceCache.set(value, normalized);
+    return normalized;
+  };
+  const leadSources = new Set(
+    [import.meta.url, new URL("./compaction.ts", import.meta.url).href].map(
+      sourcePath,
+    ),
+  );
+  const missionTools = () =>
+    pi
+      .getAllTools()
+      .filter(
+        (t) =>
+          t.exposure !== "hidden" &&
+          leadSources.has(sourcePath(t.sourceInfo.path)),
+      );
   const activateMissionTools = () => {
-    const active = new Set(pi.getActiveTools());
-    for (const name of missionToolNames) active.add(name);
+    const available = new Set(pi.getAllTools().map((t) => t.name));
+    const active = new Set(
+      pi.getActiveTools().filter((name) => available.has(name)),
+    );
+    for (const tool of missionTools()) active.add(tool.name);
     pi.setActiveTools([...active]);
   };
   const current = () => {
@@ -231,6 +264,7 @@ export default function (pi: ExtensionAPI) {
           { triggerTurn: true },
         ),
       notify: (message) => ctx?.ui.notify(message, "warning"),
+      compact: () => ctx?.compact(),
     });
     try {
       bridge = await openBridge((token, request) =>
@@ -279,6 +313,7 @@ export default function (pi: ExtensionAPI) {
         ? (event.message.details as any)
         : undefined;
     if (wake && kernel && !kernel.validWake(wake.batchId, wake.generation)) {
+      kernel.rejectStaleWake();
       context.abort();
       return;
     }
@@ -296,7 +331,11 @@ export default function (pi: ExtensionAPI) {
     const reminder = kernel?.context();
     if (reminder) event.systemPromptOptions.promptGuidelines.push(reminder);
   });
-  pi.on("context", (event) => {
+  pi.on("context", (event, context) => {
+    if (kernel && !kernel.admitLeadRequest()) {
+      context.abort();
+      return;
+    }
     for (const message of event.messages as any[]) {
       if (
         message.role === "custom" &&
@@ -311,16 +350,38 @@ export default function (pi: ExtensionAPI) {
         kernel?.includeCollected(message.details.missionDeliveryIds);
     }
   });
-  pi.on("message_end", (event) => {
+  pi.on("message_end", (event, context) => {
     if (event.message.role === "assistant")
       kernel?.leadMessage(
-        event.message.stopReason === "error",
+        event.message.stopReason === "error" ||
+          Boolean(
+            event.message.errorMessage &&
+              event.message.stopReason !== "aborted",
+          ) ||
+          (event.message.stopReason === "aborted" && !context.signal?.aborted),
         event.message.usage?.output ?? 0,
+        event.message.errorMessage,
       );
   });
   pi.on("agent_settled", (event) => {
     kernel?.leadSettled(event.aborted);
     refresh();
+  });
+  pi.on("session_compact", (event, context) => {
+    if (
+      kernel?.options.sessionId === context.sessionManager.getSessionId() &&
+      context.sessionManager
+        .getBranch()
+        .some((entry) => entry.id === event.compactionEntry.id)
+    )
+      kernel.compactionSettled(event.compactionEntry.id);
+  });
+  pi.on("session_compact_failed", (event) => {
+    kernel?.compactionSettled(
+      undefined,
+      event.errorMessage ??
+        (event.aborted ? "Compaction cancelled" : "Compaction failed"),
+    );
   });
   pi.on("session_tree", async () => {
     if (
@@ -334,18 +395,8 @@ export default function (pi: ExtensionAPI) {
       );
     }
   });
-  pi.on("tool_call", (event) => {
-    if (
-      ![
-        "mission_status",
-        "team_list",
-        "team_tree",
-        "goal_status",
-        "supervisor_control",
-        "project_status",
-        "project_resolve",
-      ].includes(event.toolName)
-    )
+  pi.on("tool_result", (event) => {
+    if (!event.isError && ["write", "edit"].includes(event.toolName))
       kernel?.leadActed();
   });
 
@@ -361,7 +412,6 @@ export default function (pi: ExtensionAPI) {
     ) => unknown | Promise<unknown>,
     terminate: boolean | ((context: any) => boolean) = false,
   ) {
-    missionToolNames.add(name);
     pi.registerTool({
       name,
       label,
@@ -390,6 +440,50 @@ export default function (pi: ExtensionAPI) {
         }
       },
     });
+  }
+  async function exportPublic(
+    context: ExtensionContext,
+    destination: string,
+    signal?: AbortSignal,
+    includeArchived = false,
+  ) {
+    signal?.throwIfAborted();
+    if (!destination.trim())
+      throw new Error("A new export destination is required");
+    const target = path.resolve(context.cwd, destination);
+    const out = fsSync.createWriteStream(target, { flags: "wx", mode: 0o600 });
+    const completed = finished(out);
+    void completed.catch(() => {});
+    const abort = () =>
+      out.destroy(new Error("Public export cancelled; partial file retained"));
+    signal?.addEventListener("abort", abort, { once: true });
+    let count = 0;
+    try {
+      const files = [
+        context.sessionManager.getSessionFile(),
+        ...current()
+          .store.members(includeArchived)
+          .map((m) => m.sessionFile),
+      ].filter((x): x is string => Boolean(x));
+      for (const member of current().store.members(includeArchived))
+        files.push(
+          ...(await memberSessionFiles(current().store.directory, member.id)),
+        );
+      for (const file of [...new Set(files)]) {
+        signal?.throwIfAborted();
+        out.write(JSON.stringify({ type: "source", sessionFile: file }) + "\n");
+        count += await streamPublicSession(file, out, signal);
+      }
+      out.end();
+      await completed;
+      return { destination: target, entries: count };
+    } catch (error) {
+      out.destroy();
+      await completed.catch(() => {});
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
   }
   async function workspace(
     raw: any,
@@ -694,6 +788,16 @@ export default function (pi: ExtensionAPI) {
     (args) => current().resumeTask(args.taskId),
   );
   tool(
+    "team_message",
+    "Message a teammate",
+    "Send an approved instruction to a running member using steering; if idle, create a new tracked turn. This is separate from team_send, which always assigns a task.",
+    Type.Object({
+      to: Type.String(),
+      message: Type.String({ minLength: 1, maxLength: 16000 }),
+    }),
+    (args) => current().messageMember(args.to, args.message),
+  );
+  tool(
     "subagent",
     "Delegate isolated task",
     "Run one task, parallel tasks, or a dependency chain. All are tracked and wake the lead automatically. Default is asynchronous.",
@@ -845,7 +949,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_update",
     "Update goal",
-    "Revise the active goal definition and acceptance criteria. Prior evidence is cleared and a new revision starts with a fresh continuation budget.",
+    "Revise the goal definition and acceptance criteria. Clear prior evidence and advance its revision while preserving user holds, budgets and usage.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       objective: Type.String({ minLength: 1, maxLength: 8000 }),
@@ -884,9 +988,236 @@ export default function (pi: ExtensionAPI) {
   tool(
     "mission_decision",
     "Request user decision",
-    "Record a concrete user decision needed to continue; present the question clearly. This retains all work and maintenance and is not a way to turn monitoring off.",
-    Type.Object({ reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
-    (args) => current().requireDecision(args.reason),
+    "Request a concrete business decision, optionally blocking only taskIds. Resolve by exact decisionId after a new direct human answer, quoting the answer. Runtime recovery is automatic; never turn a runtime error into a decision.",
+    Type.Object({
+      action: Type.Optional(
+        Type.Union([Type.Literal("request"), Type.Literal("resolve")]),
+      ),
+      reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
+      taskIds: Type.Optional(Type.Array(Type.String(), { maxItems: 100 })),
+      decisionId: Type.Optional(Type.String()),
+      answer: Type.Optional(Type.String({ minLength: 1, maxLength: 16000 })),
+    }),
+    (args) =>
+      args.action === "resolve"
+        ? current().resolveDecision(args.decisionId ?? "", args.answer ?? "")
+        : current().requireDecision(args.reason ?? "", args.taskIds),
+  );
+  tool(
+    "mission_recover",
+    "Inspect runtime recovery",
+    "Check the exact fault and goal revision. Recovery runs automatically within existing budgets. This never clears user pauses, business decisions, workspace holds or budget limits.",
+    Type.Object({
+      faultId: Type.String(),
+      expectedRevision: Type.Integer({ minimum: 0 }),
+    }),
+    (args) => current().requestRecovery(args.faultId, args.expectedRevision),
+  );
+  tool(
+    "mission_reconcile",
+    "Reconcile stopped executions",
+    "After inspecting saved artifacts and host processes, attest that the listed old executions have stopped. Supply exact task epochs and concrete evidence. This records your inspection, does not perform an OS scan or kill processes, and never replays commands. After reconciling all unknown executions, use mission_control to resume no-progress attention and team_resume for an explicit new attempt.",
+    Type.Object({
+      tasks: Type.Array(
+        Type.Object({
+          taskId: Type.String(),
+          expectedEpoch: Type.Integer({ minimum: 0 }),
+        }),
+        { minItems: 1, maxItems: 100 },
+      ),
+      evidence: Type.String({ minLength: 8, maxLength: 2000 }),
+    }),
+    (args) => current().reconcileProcesses(args.tasks, args.evidence),
+  );
+  tool(
+    "mission_control",
+    "Resume inspected progress",
+    "Resume only runtime no-progress attention after inspecting the blocker and selecting the next approved step. Exact goal identity/revision required; usage is preserved. User pause, workspace authorization, real business decisions and budget renewal retain their own controls.",
+    Type.Object({
+      action: Type.Literal("resume"),
+      goalId: Type.String(),
+      expectedRevision: Type.Integer({ minimum: 0 }),
+      reason: Type.String({ minLength: 8, maxLength: 2000 }),
+    }),
+    (args) =>
+      current().resumeProgress(args.goalId, args.expectedRevision, args.reason),
+  );
+  tool(
+    "mission_report",
+    "Set progress interval",
+    "Set an approved regular progress-report interval in seconds. Completion/failure wakeups and maintenance remain automatic.",
+    Type.Object({ seconds: Type.Integer({ minimum: 1, maximum: 86400 }) }),
+    (args) => {
+      current().setReportInterval(args.seconds * 1000);
+      return { seconds: current().settings.progressIntervalMs / 1000 };
+    },
+  );
+  tool(
+    "mission_compact",
+    "Compact this conversation",
+    "End this lead run and request one compaction after settlement and idle. Original history and successful summary chunks remain on failure. Requires a persistent interactive/RPC host; use compaction_model to inspect or set the summary model.",
+    Type.Object({}),
+    (_args, _signal, context) => {
+      if (oneShot(context))
+        throw new Error("Queued compaction needs a persistent TUI/RPC host");
+      return current().queueCompaction();
+    },
+    true,
+  );
+  tool(
+    "mission_export",
+    "Export public history",
+    "Stream this session's public lead/member history to a new local file. Reasoning, signatures and repeated private state are excluded; existing files are never overwritten.",
+    Type.Object({
+      destination: Type.String({ minLength: 1 }),
+      includeArchived: Type.Optional(Type.Boolean()),
+    }),
+    (args, signal, context) =>
+      exportPublic(context, args.destination, signal, args.includeArchived),
+  );
+  tool(
+    "mission_history",
+    "Read public conversation history",
+    "Read a bounded page of this lead conversation or an active/archived member. Session index 0 is the newest; use returned before cursor for older pages. No private reasoning is exposed.",
+    Type.Object({
+      member: Type.Optional(Type.String()),
+      sessionIndex: Type.Optional(Type.Integer({ minimum: 0 })),
+      before: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    }),
+    async (args, _signal, context) => {
+      let files: string[];
+      if (args.member) {
+        const member = current().store.member(args.member, true);
+        if (!member) throw new Error("Unknown active or archived member");
+        files = await memberSessionFiles(current().store.directory, member.id);
+      } else
+        files = [context.sessionManager.getSessionFile()].filter(
+          (x): x is string => Boolean(x),
+        );
+      const file = files[args.sessionIndex ?? 0];
+      if (!file) return { records: [], sessions: files.length };
+      const page = await transcriptPage(file, args.before, args.limit ?? 20);
+      let size = 0;
+      const records: any[] = [];
+      for (const record of [...page.records].reverse()) {
+        const text = JSON.stringify(record.entry);
+        const item =
+          text.length > 16000
+            ? {
+                offset: record.offset,
+                preview: text.slice(0, 16000),
+                truncated: true,
+              }
+            : record;
+        const length = JSON.stringify(item).length;
+        if (records.length && size + length > 22000) break;
+        records.unshift(item);
+        size += length;
+      }
+      return {
+        sessionFile: file,
+        sessions: files.length,
+        records,
+        before: records[0]?.offset ?? page.before,
+        skipped: page.skipped,
+        truncated: records.length < page.records.length,
+      };
+    },
+  );
+  tool(
+    "mission_capabilities",
+    "Mission Control tool catalog",
+    "List every Mission Control tool from the host registry, its active model visibility and available command counterparts. Tools are declared directly to the lead; no discovery call is required before using them. Optionally filter by toolName and include its schema.",
+    Type.Object({
+      toolName: Type.Optional(Type.String()),
+      includeSchemas: Type.Optional(Type.Boolean()),
+    }),
+    (args) => {
+      const active = new Set(pi.getActiveTools()),
+        all = missionTools();
+      const selected = args.toolName
+        ? all.filter((t) => t.name === args.toolName)
+        : all;
+      if (args.toolName && !selected.length)
+        throw new Error("Unknown Mission Control tool");
+      const shown =
+        args.includeSchemas && !args.toolName ? selected.slice(0, 5) : selected;
+      const m = current().store.mission();
+      return {
+        visibility:
+          "Tools are directly declared from one host registry, refreshed at session start and before model requests",
+        tools: shown.map((t) => ({
+          name: t.name,
+          description: t.description,
+          active: active.has(t.name),
+          exposure: t.exposure,
+          module: path.basename(t.sourceInfo.path),
+          ...(args.includeSchemas ? { parameters: t.parameters } : {}),
+        })),
+        schemaPageLimited: shown.length < selected.length,
+        unknownExecutions: current()
+          .store.members()
+          .flatMap((member) =>
+            current()
+              .store.memberTasks(member.id)
+              .filter((t) => t.processState === "unknown")
+              .map((t) => ({
+                taskId: t.id,
+                expectedEpoch: t.epoch,
+                member: t.member,
+                state: t.state,
+              })),
+          ),
+        mission: m
+          ? {
+              goalId: m.id,
+              revision: m.revision ?? 0,
+              status: m.status,
+              blocker: m.blocker,
+            }
+          : undefined,
+        commandTools: {
+          reconcile: "mission_reconcile",
+          report: "mission_report",
+          export: "mission_export",
+          history: "mission_history",
+          compact: "mission_compact",
+          summaryModel: "compaction_model",
+          reconnect: "reconnect_config",
+          schedules: "schedule",
+          memberMessage: "team_message",
+          runtimeProgressResume: "mission_control",
+        },
+        userControls: [
+          "Explicit user pause/stop and budget renewal: /mission",
+          "Workspace authorization: /project allow; project_apply consumes the exact grant",
+          "Interactive display/editor/copy UI remains user-owned",
+        ],
+      };
+    },
+  );
+  tool(
+    "mission_wait_external",
+    "Wait for an external event",
+    "End this lead run while waiting for a concrete external producer. Supply a future ISO deadline with timezone. Save the returned id/token; matching signal or deadline wakes once. Unchanged progress reports are suppressed during the wait.",
+    Type.Object({
+      reason: Type.String({ minLength: 1, maxLength: 2000 }),
+      deadline: Type.String(),
+    }),
+    (args) => {
+      if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(args.deadline))
+        throw new Error("External wait deadline needs an explicit timezone");
+      return current().waitExternal(args.reason, Date.parse(args.deadline));
+    },
+    true,
+  );
+  tool(
+    "mission_signal",
+    "Signal an external event",
+    "Signal an actual event for an exact external wait id/token. This retains user and budget holds; inspect the real producer result before continuing.",
+    Type.Object({ waitId: Type.String(), token: Type.String() }),
+    (args) => current().signalExternal(args.waitId, args.token),
   );
   tool(
     "lifecycle_history",
@@ -900,12 +1231,12 @@ export default function (pi: ExtensionAPI) {
   tool(
     "supervisor_control",
     "Maintenance status",
-    "Maintenance is runtime-owned and automatically active. Model calls can inspect it but cannot disable it or change user report timing.",
+    "Maintenance is runtime-owned and automatically active. Inspect it here; use mission_report for an approved report interval and mission_control for inspected no-progress recovery. This cannot disable maintenance or release user holds.",
     Type.Object({ action: Type.Optional(Type.String()) }),
     (args) => {
       if (args.action && !["status", "on"].includes(args.action))
         throw new Error(
-          "Only the user may change mission control through /mission. Safety maintenance cannot be disabled by a model tool.",
+          "Only the user may pause/stop or renew mission budgets through /mission. Runtime faults recover automatically; inspect mission_status.recovery and mission_recover. Do not turn runtime faults into business decisions.",
         );
       return {
         maintenance: "automatic",
@@ -1059,8 +1390,18 @@ export default function (pi: ExtensionAPI) {
           leadPreviews: () => leadHistory.previews(),
         });
         const active = panel;
-        if (lead) void active.openLead();
-        else if (memberName) void active.openMember(memberName);
+        const opening = lead
+          ? active.openLead()
+          : memberName
+            ? active.openMember(memberName)
+            : undefined;
+        void opening?.catch((error) => {
+          try {
+            context.ui.notify(`无法打开对话：${String(error)}`, "warning");
+          } catch {
+            /* A disposed host context must not turn navigation into an unhandled rejection. */
+          }
+        });
         return {
           render: (width: number) => active.render(width),
           invalidate() {},
@@ -1156,50 +1497,14 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (command === "export") {
-          const destination = path.resolve(
-            context.cwd,
-            rest.join(" ").replace(/^"|"$/g, ""),
-          );
           if (!rest.length)
             throw new Error("Use /mission export <new-file.jsonl>");
-          const out = fsSync.createWriteStream(destination, {
-            flags: "wx",
-            mode: 0o600,
-          });
-          // Attach error observation before the first asynchronous stream operation.
-          const completed = finished(out);
-          void completed.catch(() => {});
-          let count = 0;
-          try {
-            const files = [
-              context.sessionManager.getSessionFile(),
-              ...k.store.members().map((m) => m.sessionFile),
-            ].filter((x): x is string => Boolean(x));
-            for (const member of k.store.members()) {
-              const dir = path.join(k.store.directory, "sessions", member.id);
-              try {
-                for (const name of await fs.readdir(dir))
-                  if (name.endsWith(".jsonl")) files.push(path.join(dir, name));
-              } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-                  throw error;
-              }
-            }
-            for (const file of [...new Set(files)]) {
-              out.write(
-                JSON.stringify({ type: "source", sessionFile: file }) + "\n",
-              );
-              count += await streamPublicSession(file, out);
-            }
-            out.end();
-            await completed;
-          } catch (error) {
-            out.destroy();
-            await completed.catch(() => {});
-            throw error;
-          }
+          const out = await exportPublic(
+            context,
+            rest.join(" ").replace(/^"|"$/g, ""),
+          );
           context.ui.notify(
-            `Exported ${count} public entries to ${destination}. Original Pi history was not modified.`,
+            `Exported ${out.entries} public entries to ${out.destination}. Original Pi history was not modified.`,
             "info",
           );
           return;
@@ -1244,6 +1549,7 @@ export default function (pi: ExtensionAPI) {
       >("reconnect"),
     }),
     write: (value) => current().store.set("reconnect", value),
+    retryAllowed: () => current().canRetryLeadRequest(),
   });
   installProject(pi, current);
   pi.registerCommand("stop", {

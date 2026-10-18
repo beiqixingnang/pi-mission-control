@@ -111,6 +111,139 @@ async function using(fn) {
   }
 }
 
+test("lead process reconciliation is atomic, fenced by epochs and idempotent before an explicit retry", () =>
+  using(async (h) => {
+    h.idle(false);
+    h.add("one");
+    h.add("two");
+    const one = h.kernel.dispatch("one", "original command"),
+      two = h.kernel.dispatch("two", "other command");
+    await flush();
+    for (const worker of h.workers)
+      worker.resolve({
+        ok: false,
+        text: "",
+        error: "termination unconfirmed",
+        processState: "unknown",
+      });
+    await flush();
+    const requests = [one, two].map((t) => ({
+      taskId: t.id,
+      expectedEpoch: h.kernel.store.task(t.id).epoch,
+    }));
+    assert.throws(
+      () =>
+        h.kernel.reconcileProcesses(
+          [requests[0], { ...requests[1], expectedEpoch: 999 }],
+          "Host process inventory confirms old workers are absent",
+        ),
+      /epoch/,
+    );
+    assert.equal(h.kernel.store.task(one.id).processState, "unknown");
+    assert.equal(h.kernel.store.task(two.id).processState, "unknown");
+    const receipt = h.kernel.reconcileProcesses(
+      requests,
+      "Inspected saved receipts and host process inventory; no old workers remain",
+    );
+    assert.equal(receipt.reconciled.length, 2);
+    assert.ok(
+      h.kernel
+        .reconcileProcesses(requests, "Repeated verified inspection receipt")
+        .reconciled.every((r) => r.alreadyStopped),
+    );
+    const retry = h.kernel.resumeTask(one.id);
+    assert.equal(retry.attemptOf, one.id);
+    assert.notEqual(retry.id, one.id);
+    assert.equal(h.kernel.store.task(one.id).state, "failed");
+  }));
+
+test("lead reconciliation rejects a live execution and cancellation cannot fake a stopped unknown process", () =>
+  using(async (h) => {
+    h.idle(false);
+    h.add("one");
+    const task = h.kernel.dispatch("one", "work");
+    await flush();
+    assert.throws(
+      () =>
+        h.kernel.reconcileProcesses(
+          [
+            {
+              taskId: task.id,
+              expectedEpoch: h.kernel.store.task(task.id).epoch,
+            },
+          ],
+          "Verified process stop evidence",
+        ),
+      /active/,
+    );
+    h.workers[0].resolve({ ok: false, text: "", processState: "unknown" });
+    await flush();
+    const old = h.kernel.store.task(task.id);
+    old.state = "cancelled";
+    h.kernel.store.putTask(old);
+    await h.kernel.cancelTask(old.id);
+    assert.equal(h.kernel.store.task(old.id).processState, "unknown");
+  }));
+
+test("lead no-progress recovery preserves budgets and cannot override user or decision holds", () =>
+  using(async (h) => {
+    const m = h.kernel.setGoal("Approved work");
+    m.status = "attention";
+    m.blocker = { kind: "no_progress", reason: "no progress" };
+    m.turns = 22;
+    m.outputTokens = 400;
+    m.emptyTurns = 3;
+    h.kernel.store.set("mission", m);
+    assert.throws(
+      () => h.kernel.resumeProgress("old", 0, "Saved receipts were inspected"),
+      /identity/,
+    );
+    const restored = h.kernel.resumeProgress(
+      m.id,
+      0,
+      "Reconciled interrupted work; continue the next approved step",
+    );
+    assert.equal(restored.turns, 22);
+    assert.equal(restored.outputTokens, 400);
+    assert.equal(restored.budgetStartedAt, m.budgetStartedAt);
+    assert.equal(restored.status, "active");
+    h.kernel.requireDecision("Which target?");
+    assert.throws(
+      () => h.kernel.resumeProgress(m.id, 0, "Inspected the saved results"),
+      /decision/,
+    );
+    await h.kernel.userControl("pause");
+    assert.throws(
+      () => h.kernel.resumeProgress(m.id, 0, "Continue the saved results"),
+      /User pause/,
+    );
+  }));
+
+test("model-requested compaction waits for idle and runs only once without inventing a user pause", () =>
+  using(async (h) => {
+    let compactions = 0;
+    h.kernel.options.compact = () => {
+      compactions++;
+    };
+    h.kernel.setGoal("Approved work");
+    h.idle(false);
+    h.kernel.leadStarted();
+    h.kernel.queueCompaction();
+    h.kernel.queueCompaction();
+    await h.kernel.tick();
+    assert.equal(compactions, 0);
+    h.kernel.leadMessage(false);
+    h.kernel.leadSettled();
+    h.idle();
+    await h.kernel.tick();
+    await h.kernel.tick();
+    assert.equal(compactions, 1);
+    assert.equal(h.kernel.snapshot().compactionQueued, false);
+    assert.equal(h.kernel.snapshot().held, false);
+    await h.kernel.userControl("pause");
+    assert.throws(() => h.kernel.queueCompaction(), /hold/);
+  }));
+
 test("dispatch alone enrolls the mission and completion wakes without Goal or supervisor setup", () =>
   using(async (h) => {
     h.add("worker");
@@ -360,29 +493,30 @@ test("restart records interrupted work and delivers recovery instead of replayin
     assert.match(h.wakes[0].content, /reconcile|Runtime closed/i);
   }));
 
-test("a failed/never-admitted wake remains pending and stops after bounded retries", () =>
+test("failed wakes cool down and quarantine unread results after bounded recovery without pausing the goal", () =>
   using(async (h) => {
     h.add("worker");
     h.kernel.dispatch("worker", "task");
     await flush();
     h.workers[0].resolve({ ok: true, text: "result", processState: "stopped" });
     await flush();
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       h.kernel.leadStarted(h.wakes.at(-1));
       h.kernel.leadMessage(true);
       h.kernel.leadSettled();
       h.idle();
-      h.advance(20000);
+      h.advance(600000);
       await h.kernel.tick();
     }
-    assert.equal(h.wakes.length, 3);
-    assert.equal(h.kernel.store.mission().status, "attention");
+    assert.equal(h.wakes.length, 4);
+    assert.equal(h.kernel.store.mission().status, "active");
+    assert.equal(h.kernel.snapshot().recovery.phase, "exhausted");
     assert.ok(
-      h.kernel.store.deliveries("lead").some((d) => d.state === "pending"),
+      h.kernel.store.deliveries("lead").some((d) => d.state === "quarantined"),
     );
     h.advance(20000);
     await h.kernel.tick();
-    assert.equal(h.wakes.length, 3);
+    assert.equal(h.wakes.length, 4);
   }));
 
 test("reminder occurrence and outbox commit together; missed intervals do not accumulate old reminders", () =>
@@ -501,11 +635,15 @@ test("notes to a running permitted peer are admitted through steering and confir
     assert.equal(h.kernel.store.deliveries("worker")[0].state, "observed");
   }));
 
-test("a fresh human answer reopens decision-waiting work but never overrides a user pause", () =>
+test("a decision needs an explicit resolution after a fresh human answer and never overrides a user pause", () =>
   using(async (h) => {
     h.kernel.setGoal("authorized work");
     h.kernel.requireDecision("Which approved target should be used?");
+    const id = h.kernel.store.mission().decision.id;
+    h.kernel.onHumanInput("What is the progress?");
+    assert.equal(h.kernel.store.mission().status, "waiting_user");
     h.kernel.onHumanInput("Use target A");
+    h.kernel.resolveDecision(id, "Use target A");
     assert.equal(h.kernel.store.mission().status, "active");
     await h.kernel.userControl("pause");
     h.kernel.onHumanInput("Explain the progress");
