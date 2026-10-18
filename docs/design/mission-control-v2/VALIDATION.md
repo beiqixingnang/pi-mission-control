@@ -6,13 +6,13 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm run check` | 2.0.19两个v2入口加载无错误；43个lead工具（index42、compaction1）、5个Mission Control命令和1个独立压缩命令；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.19在Windows严格检查28个直接源码文件及依赖通过；本次没有另跑Debian |
-| `npm test` | 2.0.19本机完整162用例：158通过、0失败、4个需显式镜像的容器用例跳过；完整回归约59.2秒 |
+| `npm run check` | 2.0.20两个v2入口加载无错误；44个lead工具（index43、compaction1）、5个Mission Control命令和1个独立压缩命令；没有浏览器服务引用或启动命令 |
+| `npm run typecheck` | 2.0.20在Windows严格检查28个直接源码文件及依赖通过；实验目录不参与稳定版检查 |
+| `npm test` | 2.0.20本机完整165用例：161通过、0失败、4个需显式镜像的容器用例跳过；完整回归约66.2秒 |
 | GitHub Actions | 2.0.15代码提交f53cb0d，运行39088177331成功；包含完整超长摘要浓缩、空答恢复、上下文超限不重连与Pi检查点回归 |
 | 网络MCP framing回归 | 已纳入上述完整99用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
-| npm tarball | 2.0.19 dry-run共98文件，包含工具接口记录、活动时钟、roster及回归，不含.reference或auth/models/settings；历史版本另有实际解包加载验证 |
+| npm tarball | 2.0.20实际打包98文件，解包后两个入口加载无错误、44工具；不含experiments、浏览器服务/草图/原型测试，也不含.reference或auth/models/settings |
 | Git whitespace | `git diff --check`核对；历史文档已标v1，v2仅加载新清单 |
 
 2.0.5执行了UI/主题验证，2.0.6修正类型契约与CI夹具并重新验证。加载检查为两个入口、25个lead工具、6个用户命令，errors为空。本轮未重复运行真实Podman；容器结果为同日2.0.2验证记录。测试通过不等于真实provider与长期运行验收通过，未验证范围见文末。
@@ -20,6 +20,8 @@
 普通测试全部由scripts/test-v2.mjs建立临时Pi agent目录；不读取用户auth/models/settings正文，不调用真实模型。真实Pi生命周期使用确定性离线provider，并非仅用mock替代Pi事件系统。
 
 ## 真实Pi流程
+
+2.0.20新增2项核心策略/答复回归和1项真实Pi回归：默认business-only无需启用，模型通过mission_policy实际应用仍保留waiting_user与原decisionId，reload后状态保留；新的自然语言人工委托随后可用原decisionId resolve，不要求A/B/C。核心另核对应用幂等、无新人工版本、无预算续期以及暂停保留。浏览器原型和测试已移到experiments/mission-web，不参与稳定版入口、默认测试和发布清单；包内工具数为44，严格类型检查回到28个文件。
 
 2.0.19新增3项核心回归，覆盖长目标下恢复提示优先显示、旧提示迁移保留阻塞/用量、明确控制及revision，以及超出普通历史窗口的106条unknown有界查询。原真实Pi四执行回归加入旧“只能用户恢复”回复及超过32000字符的验收数据，确认新提示实际进入系统消息、状态前部给出版本及工具可见性、返回JSON仍完整，再显式调用恢复并完成新attempt。原状态只读副本只更新提示，保持attention及四条epoch2 unknown，用量不变，没有启动worker或wake。原公开日志确实已有全部新工具声明，但最近两轮只查询状态；这些证据不能证明真实模型一定按提示选择工具。详见[工具接口记录的2.0.19部分](TOOLS-2026-10-18.md#2019工具已可见模型仍重复旧恢复结论)。
 

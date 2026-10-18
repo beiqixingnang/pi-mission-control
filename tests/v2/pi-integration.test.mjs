@@ -1818,7 +1818,7 @@ test(
       const catalog = JSON.parse(
         (await h.tool("mission_capabilities")).content[0].text,
       );
-      assert.equal(catalog.tools.length, 43);
+      assert.equal(catalog.tools.length, 44);
       assert.ok(catalog.tools.every((t) => t.active));
       h.session.setActiveToolsByName(["read"]);
       await h.session.reload();
@@ -1935,7 +1935,7 @@ test(
       const statusResult = JSON.parse(h.session.getLastAssistantText());
       assert.equal(statusResult.isError, false);
       const statusPrefix = statusResult.text.slice(0, 6000);
-      assert.match(statusPrefix, /"version": "2\.0\.19"/);
+      assert.match(statusPrefix, /"version": "2\.0\.20"/);
       assert.match(statusPrefix, /"mission_reconcile": true/);
       assert.match(statusPrefix, /"mission_control": true/);
       assert.match(statusPrefix, /process_inspection_required/);
@@ -2007,6 +2007,52 @@ test(
       );
     }),
 );
+
+test("the default policy can be applied by a real model tool without turning a pending decision into a human answer", () =>
+  harness(async (h) => {
+    assert.equal((await h.snapshot()).decisionPolicy, "business-only");
+    await h.tool("goal_start", {
+      objective: "Approved fixture",
+      criteria: ["Evidence retained"],
+    });
+    const asked = JSON.parse(
+      (
+        await h.tool("mission_decision", {
+          reason: "Which acceptance boundary should apply?",
+        })
+      ).content[0].text,
+    );
+    const id = asked.decision.id;
+    await h.session.prompt(
+      'V2_TEST:{"op":"tool","name":"mission_policy","args":{"action":"apply","policy":"business-only"}}',
+    );
+    const response = JSON.parse(h.session.getLastAssistantText());
+    assert.equal(response.isError, false);
+    const policy = JSON.parse(response.text);
+    assert.equal(policy.policy, "business-only");
+    assert.equal(policy.default, true);
+    assert.equal(policy.existingDecision, id);
+    assert.equal((await h.snapshot()).mission.status, "waiting_user");
+    await h.session.reload();
+    assert.equal((await h.snapshot()).decisionPolicy, "business-only");
+    assert.equal((await h.snapshot()).mission.decision.id, id);
+    const answer = "此项选择由你在已批准范围内决定，保留现有证据并说明依据。";
+    await h.session.prompt(
+      "V2_TEST:" + JSON.stringify({ op: "answer", text: answer }),
+      { source: "interactive" },
+    );
+    await h.session.prompt(
+      "V2_TEST:" +
+        JSON.stringify({
+          op: "tool",
+          name: "mission_decision",
+          args: { action: "resolve", decisionId: id, answer },
+        }),
+    );
+    assert.equal(JSON.parse(h.session.getLastAssistantText()).isError, false);
+    assert.equal((await h.snapshot()).mission.status, "active");
+    assert.equal((await h.snapshot()).mission.decision, undefined);
+  }));
 
 test(
   "model-visible settings, public history and export share their session command implementations",

@@ -74,6 +74,7 @@ export class MissionKernel {
   private activityClock: MissionActivityClock;
   private leadRunning = false;
   private compactionQueued = false;
+  private decisionPolicyValue: "business-only" = "business-only";
   private collected = new Set<string>();
   private previews = new Map<string, Map<string, PublicActivity>>();
   private relocating = false;
@@ -293,6 +294,23 @@ export class MissionKernel {
       }
       this.reservation = undefined;
     }
+  }
+  decisionPolicy() {
+    return this.decisionPolicyValue;
+  }
+  setDecisionPolicy(policy: "business-only") {
+    if (policy !== "business-only")
+      throw new Error("Supported autonomy policy: business-only");
+    if (this.store.get("decisionPolicy") === policy) return { policy };
+    this.decisionPolicyValue = policy;
+    this.store.set("decisionPolicy", policy);
+    this.store.event(
+      "mission.decision-policy",
+      this.store.mission()?.id ?? this.options.sessionId,
+      { policy },
+    );
+    this.changed();
+    return { policy };
   }
   private checkBudget(m: Mission): boolean {
     if (["complete", "stopped", "paused"].includes(m.status) || m.humanPaused)
@@ -1128,7 +1146,11 @@ export class MissionKernel {
     this.changed();
     if (action === "resume") await this.tick();
   }
-  requireDecision(reason: string, taskIds: string[] = []) {
+  requireDecision(
+    reason: string,
+    taskIds: string[] = [],
+    kind: "business" | "execution" = "business",
+  ) {
     const m = this.store.mission();
     if (!m) throw new Error("No mission");
     if (
@@ -1144,6 +1166,22 @@ export class MissionKernel {
         "RUNTIME_RECOVERY_REQUIRED: runtime faults are handled by automatic recovery and mission_recover, not mission_decision. Inspect mission_status.recovery.",
       );
     if (!reason.trim()) throw new Error("A concrete user question is required");
+    if (kind === "execution")
+      throw new Error(
+        "Execution choices stay within the approved scope. Choose the implementation, retry, file, command or member arrangement yourself; use mission_decision only for a concrete business boundary.",
+      );
+    if (
+      this.decisionPolicyValue === "business-only" &&
+      /implementation|implement|retry|command|file|member|assignment|script|architecture|format|refactor|实现|重试|命令|文件|成员|分工|脚本|架构|格式|重构/i.test(
+        reason,
+      ) &&
+      !/scope|acceptance|budget|permission|deadline|release|publish|delete|irreversible|target|用户|范围|验收|预算|权限|截止|发布|删除|不可逆|目标/i.test(
+        reason,
+      )
+    )
+      throw new Error(
+        "This looks like an execution choice, not a business decision. Continue within the approved scope; ask the user only for scope, acceptance, permission, budget, deadline, release or irreversible-risk choices.",
+      );
     if (m.decision)
       throw new Error(`Decision ${m.decision.id} is still pending`);
     for (const id of taskIds) {
@@ -1704,6 +1742,7 @@ export class MissionKernel {
     const m = this.store.mission();
     return {
       recoveryPlan: this.recoveryPlan(),
+      decisionPolicy: this.decisionPolicyValue,
       mission: m,
       recovery: this.recovery.current(),
       activity: this.activityClock.snapshot(m),
@@ -1733,6 +1772,8 @@ export class MissionKernel {
     if (!m) return "";
     return [
       `Current Mission Control recovery plan: ${JSON.stringify(this.recoveryPlan(5))}. Follow this current plan before repeating old recovery advice. Tools named here are callable by the lead model; do not claim that recovery failed unless an actual recovery tool returned an error.`,
+      `Autonomy policy: ${this.decisionPolicyValue}. Choose implementation, retry, command, file, member and formatting details yourself inside the approved scope. Use mission_decision only for a concrete business boundary such as scope, acceptance, permission, budget, deadline, release or irreversible risk.`,
+      "Decision answers do not require A/B/C tokens. A new direct human answer may delegate an in-scope choice to the lead. Quote that actual answer when resolving the exact decisionId and explain the selected next step; do not request another confirmation merely to obtain a letter. A policy change alone does not answer an existing decision or expand workspace or action authorization.",
       `Mission ${m.id}: ${m.status}. ${m.objective}`,
       `Acceptance: ${m.criteria.map((x, i) => `${i + 1}. ${x}`).join(" | ")}`,
       `Tasks: ${

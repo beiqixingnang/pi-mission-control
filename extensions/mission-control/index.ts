@@ -390,6 +390,9 @@ export default function (pi: ExtensionAPI) {
     event.systemPromptOptions.promptGuidelines.unshift(
       `Mission Control ${pluginVersion}: mission_reconcile and mission_control are directly callable lead tools. When the current recovery plan permits model recovery, inspect the actual blocker and use these tools; old claims that only a user slash command can reconcile or resume no_progress are obsolete. Reload itself never attests stopped processes. Explicit user/workspace/budget/decision controls remain authoritative.`,
     );
+    event.systemPromptOptions.promptGuidelines.unshift(
+      "Mission Control autonomy policy: choose implementation details, retries, commands, files, member assignments and formatting within the approved scope. Ask the user only for a concrete business boundary (scope, acceptance, permission, budget, deadline, release or irreversible risk). Do not call mission_decision for generic validation, planning, implementation or execution choices.",
+    );
     const wake =
       event.messageType === "custom" &&
       event.message.customType === "mission-control-wake"
@@ -1080,7 +1083,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "mission_decision",
     "Request user decision",
-    "Request a concrete business decision, optionally blocking only taskIds. Resolve by exact decisionId after a new direct human answer, quoting the answer. Runtime recovery is automatic; never turn a runtime error into a decision.",
+    "Request a concrete business decision, optionally blocking only taskIds. Execution choices belong to the lead inside the approved scope. Resolve by exact decisionId after a new direct human answer, quoting it verbatim. A natural-language answer delegating this choice is valid; no A/B/C letter is required. Choose and explain the approved next step without re-asking solely for a letter. Runtime faults use recovery tools.",
     Type.Object({
       action: Type.Optional(
         Type.Union([Type.Literal("request"), Type.Literal("resolve")]),
@@ -1089,11 +1092,35 @@ export default function (pi: ExtensionAPI) {
       taskIds: Type.Optional(Type.Array(Type.String(), { maxItems: 100 })),
       decisionId: Type.Optional(Type.String()),
       answer: Type.Optional(Type.String({ minLength: 1, maxLength: 16000 })),
+      kind: Type.Optional(
+        Type.Union([Type.Literal("business"), Type.Literal("execution")]),
+      ),
     }),
     (args) =>
       args.action === "resolve"
         ? current().resolveDecision(args.decisionId ?? "", args.answer ?? "")
-        : current().requireDecision(args.reason ?? "", args.taskIds),
+        : current().requireDecision(args.reason ?? "", args.taskIds, args.kind),
+  );
+  tool(
+    "mission_policy",
+    "Inspect or apply autonomy policy",
+    "Inspect the default business-only policy, or apply that same policy when asked. Execution choices within approved scope stay with the lead; material scope, permission or irreversible-risk questions still require their own authority. Applying policy does not resolve an existing decision, release a hold or authorize actions. No user slash command is required to apply this policy.",
+    Type.Object({
+      action: Type.Optional(
+        Type.Union([Type.Literal("status"), Type.Literal("apply")]),
+      ),
+      policy: Type.Optional(Type.Literal("business-only")),
+    }),
+    (args) => ({
+      ...(args.action === "apply"
+        ? current().setDecisionPolicy(args.policy ?? "business-only")
+        : { policy: current().decisionPolicy() }),
+      default: true,
+      meaning:
+        "Choose routine execution details within the approved scope; ask only for business boundaries or irreversible-risk choices.",
+      existingDecision: current().store.mission()?.decision?.id,
+      note: "Natural-language delegation can answer an exact pending decision after a new direct human reply. A/B/C is not required; applying this policy alone does not resolve it.",
+    }),
   );
   tool(
     "mission_recover",
@@ -1515,11 +1542,29 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("mission", {
     description:
-      "Mission dashboard; time|timeline | view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl>",
+      "Mission dashboard; policy status|business-only | time|timeline | view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl>",
     handler: async (args, context) => {
       try {
         const [command, ...rest] = args.trim().split(/\s+/);
         const k = current();
+        if (command === "policy") {
+          const value = rest[0] ?? "status";
+          if (value === "status") {
+            context.ui.notify(
+              JSON.stringify({ policy: k.decisionPolicy() }, null, 2),
+              "info",
+            );
+            return;
+          }
+          if (value !== "business-only")
+            throw new Error("Use /mission policy status|business-only");
+          k.setDecisionPolicy(value);
+          context.ui.notify(
+            "已应用默认自主策略：批准范围内的实现与执行细节由模型决定；真正的范围、权限及不可逆风险仍需对应授权。已有裁决和暂停状态保留。",
+            "info",
+          );
+          return;
+        }
         if (command === "start") {
           const m = k.store.mission();
           if (m && !["complete", "stopped"].includes(m.status))

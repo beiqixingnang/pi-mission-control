@@ -2,7 +2,7 @@
 
 非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **2.0.19**，主对话直接获得统一注册表中的43个插件工具。状态查询优先返回当前恢复步骤、精确任务epoch和目标revision，并显示已加载版本及恢复工具可见性；修正旧记录仍提示用户手动恢复的引导。目标默认没有小时、回合或输出硬截止，活动耗时排除等待和离线；当前成员每人一行，看板分类展示状态。工具暴露机制及截图阻塞验证见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。整夜运行和各平台实际工具链仍待验收。
+当前版本 **2.0.20**，主对话直接获得44个插件工具，默认在批准范围内自主决定执行细节，可用`mission_policy`检查或应用。TUI和任务运行核心属于当前安装；浏览器工作台单独保留为未发布实验，不安装或加载。目标默认没有小时、回合或输出硬截止，活动耗时排除等待和离线；当前成员每人一行，看板分类展示状态。恢复工具和截图阻塞验证见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
 
 需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
 
@@ -34,9 +34,28 @@ pi install C:/tools/pi-mission-control
 
 统一名单来自Pi的`getAllTools()`宿主注册表。各模块用`registerTool`注册名称、说明和参数schema；入口按本包来源收集工具，在会话启动及每次模型回合请求前更新`setActiveTools`。因此主模型直接收到完整工具定义，无需搜索或先调用发现工具；旧会话reload也会更新名称和参数。子智能体仍按成员入口及权限提供自己的工具。
 
-`mission_capabilities`是可查询目录，列出43个插件工具的名称、说明、启用状态和命令对应关系，也返回待核对任务的epoch及目标revision。查看某个完整参数时传`toolName`和`includeSchemas=true`；不指定名称时，schema响应最多展示前5项，名称目录则默认全部展示。
+`mission_capabilities`是可查询目录，列出44个插件工具的名称、说明、启用状态和命令对应关系，也返回待核对任务的epoch及目标revision。查看某个完整参数时传`toolName`和`includeSchemas=true`；不指定名称时，schema响应最多展示前5项，名称目录则默认全部展示。
 
 如果模型只反复查询状态、仍声称必须由用户输入`/mission reconcile`，先看`mission_status.runtime`确认版本及恢复工具可见性。2.0.18起已可直接调用`mission_reconcile`和`mission_control`；重启不会自动证明unknown进程已停止。2.0.19在状态和系统引导最前面给出`recoveryPlan`，修正旧no_progress提示，长状态采用结构化摘录而不切断JSON。模型应先检查宿主进程与产物，再执行计划中的工具；工具实际失败时应报告工具名和原始错误，不能把一次状态查询称作恢复失败。
+
+### 批准范围内自主执行
+
+`business-only`是默认自主策略，意思是模型在已批准的范围内自行决定实现方式、普通重试、命令、文件组织、成员分工和格式，只在范围、验收、权限、预算、截止时间、发布或不可逆风险上请求用户。这是执行工作时的分工规则，不增加文件或系统权限，也不覆盖原有任务约束。升级后默认生效，不需要手动启用。
+
+你可以直接告诉主模型：
+
+> 保持 business-only；批准范围内的实现、重试和分工由你决定。调用 mission_policy 确认并应用，只有超出范围或涉及重大风险时再问我。
+
+模型可直接调用`mission_policy({action:"apply",policy:"business-only"})`；同一调用可重复，保持已有裁决、暂停和预算。也保留用户命令：
+
+```text
+/mission policy status
+/mission policy business-only
+```
+
+待裁决不要求必须回复A/B/C。“这个选择你在已批准范围内自行决定”也可以是有效答复。模型应引用这条新的用户原话并用精确`decisionId`调用`mission_decision(action=resolve)`，说明采取哪种方案；不能仅为取得一个选项字母再次询问。应用策略本身不回答旧裁决，也不自动解除未知或越权事项。
+
+浏览器界面和HTTP原型已移至`experiments/mission-web/`，不在发布文件清单或Pi扩展入口中，当前插件不安装或加载该实验功能。
 
 | 能力 | 主对话工具 |
 | --- | --- |

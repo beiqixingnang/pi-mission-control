@@ -838,3 +838,75 @@ test("reminders can be revised, paused and deleted without stale deliveries", ()
         .every((delivery) => delivery.state === "cancelled"),
     );
   }));
+
+test("business-only autonomy policy keeps execution choices with the lead and reserves decisions for business boundaries", () =>
+  using(async (h) => {
+    assert.equal(h.kernel.decisionPolicy(), "business-only");
+    h.kernel.setGoal("Approved work", ["Evidence"]);
+    assert.throws(
+      () =>
+        h.kernel.requireDecision(
+          "Which command and file layout should I use for the implementation?",
+        ),
+      /execution choice|approved scope/i,
+    );
+    const mission = h.kernel.requireDecision(
+      "Should this release include the GPU path?",
+      [],
+      "business",
+    );
+    assert.equal(mission.status, "waiting_user");
+    const decision = mission.decision.id;
+    const humanVersion = h.kernel.store.get("humanVersion");
+    h.kernel.setDecisionPolicy("business-only");
+    h.kernel.setDecisionPolicy("business-only");
+    assert.equal(h.kernel.store.mission().decision.id, decision);
+    assert.equal(h.kernel.store.mission().status, "waiting_user");
+    assert.equal(h.kernel.store.get("humanVersion"), humanVersion);
+    assert.equal(
+      h.kernel.store.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM events WHERE kind='mission.decision-policy'",
+        )
+        .get().n,
+      1,
+    );
+    assert.throws(
+      () => h.kernel.setDecisionPolicy("unrestricted"),
+      /Supported/,
+    );
+    await h.restart();
+    assert.equal(h.kernel.decisionPolicy(), "business-only");
+    assert.equal(h.kernel.store.mission().decision.id, decision);
+    await h.kernel.userControl("pause");
+    h.kernel.setDecisionPolicy("business-only");
+    assert.equal(h.kernel.store.mission().humanPaused, true);
+  }));
+
+test("a new natural-language human delegation resolves the exact decision without an option letter", () =>
+  using(async (h) => {
+    const m = h.kernel.setGoal(
+      "Preserve evidence and finish the approved work",
+      ["Verified result"],
+    );
+    m.turns = 9;
+    m.outputTokens = 13623;
+    h.kernel.store.set("mission", m);
+    const decision = h.kernel.requireDecision(
+      "Which approved scope should the lead choose?",
+    ).decision.id;
+    const answer = "在现有批准范围内由你选择方案并说明依据，保留所有真实证据。";
+    assert.throws(
+      () => h.kernel.resolveDecision(decision, answer),
+      /direct human/,
+    );
+    h.kernel.onHumanInput(answer);
+    assert.equal(h.kernel.store.mission().status, "waiting_user");
+    const resolved = h.kernel.resolveDecision(decision, answer);
+    assert.equal(resolved.status, "active");
+    assert.equal(resolved.decision, undefined);
+    assert.equal(resolved.turns, 9);
+    assert.equal(resolved.outputTokens, 13623);
+    assert.equal(resolved.budgetStartedAt, m.budgetStartedAt);
+    assert.match(h.kernel.context(), /do not require A\/B\/C/);
+  }));

@@ -1,3 +1,9 @@
+# 2.0.20 — autonomous execution policy; Web kept experimental (2026-10-18)
+
+- Default to business-only escalation: routine execution stays with the lead within approved scope. Expose idempotent mission_policy status/apply and the equivalent user command without clearing decisions, holds or budgets.
+- Clarify that a fresh natural-language human delegation can resolve an exact pending decision; no A/B/C letter is required.
+- Keep the browser UI, HTTP prototype and prototype tests under experiments/mission-web, outside the installed extension, published files and default suite.
+
 # 2.0.19 — actionable recovery guidance on resumed conversations (2026-10-18)
 
 - Verify the reported failure against the original conversation's public tool declarations: the new recovery tools were present, but the assistant only queried status and repeated obsolete user-only recovery advice.
