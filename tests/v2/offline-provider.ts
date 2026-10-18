@@ -73,18 +73,20 @@ export default function (pi: ExtensionAPI) {
         };
         try {
           if (
-            context.messages.length === 1 &&
-            textOf(context.messages[0]).startsWith(
+            context.messages.at(-1)?.role === "user" &&
+            textOf(context.messages.at(-1)).startsWith(
               "Summarize this coding-session excerpt",
             )
           ) {
             const summaryMode = process.env.MC_FIXTURE_SUMMARY;
-            if (summaryMode !== "success" && summaryMode !== "subdivide")
+            if (
+              !["success", "subdivide", "overlong"].includes(summaryMode ?? "")
+            )
               throw new Error("Intentional summary-provider failure");
             summaryCalls++;
             if (
               summaryMode === "subdivide" &&
-              textOf(context.messages[0]).length > 2600
+              textOf(context.messages.at(-1)).length > 2600
             ) {
               message.stopReason = "error";
               message.rawStopReason = "incomplete.length";
@@ -96,7 +98,10 @@ export default function (pi: ExtensionAPI) {
               return;
             }
             answer(
-              "Summary retained: user objective, file paths, verified evidence and remaining tasks.",
+              summaryMode === "overlong" &&
+                !textOf(context.messages.at(-1)).includes("OVERLONG_CANDIDATE")
+                ? "OVERLONG_CANDIDATE ".repeat(60) + "KEEP_FINAL_EVIDENCE"
+                : "Summary retained: user objective, file paths, verified evidence and remaining tasks. KEEP_FINAL_EVIDENCE",
             );
             stream.push({ type: "start", partial: message });
             stream.push({ type: "done", reason: "stop", message });

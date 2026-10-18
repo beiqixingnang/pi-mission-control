@@ -1,3 +1,11 @@
+# 2.0.15 — recover complete overlong and reasoning-only summaries (2026-10-18)
+
+- Condense a complete summary that exceeds its character limit instead of immediately cancelling compaction. Use a shorter prompt target while preserving the original acceptance limit and the full ending.
+- Retry empty visible output with a bounded limit; when reasoning exhausts a default token cap without an answer, allow one larger request up to 32768 tokens. Preserve explicit user caps.
+- Add visible-output character counts to metadata diagnostics and distinguish terminal empty and overlong errors.
+- Add a dedicated summary system instruction and version the cache request format. Save a small per-session diagnostic record even when verbose debug logging is disabled.
+- Add four regressions, including a real Pi compaction checkpoint followed by a working next request. Local suite: 106 passed, four opt-in container skips, zero failures.
+
 # 2.0.14 — reasoning summary budgets and overflow recovery (2026-10-18)
 
 - Reproduce the failed summary through the configured gateway: a 4096-token cap is consumed by reasoning and visible output, while the same excerpt completes with a 16384-token cap.

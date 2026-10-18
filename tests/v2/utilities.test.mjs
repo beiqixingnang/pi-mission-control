@@ -5,7 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { streamPublicSession } from "../../runtime/public.ts";
-import { summarizeChunks, summaryBudgets } from "../../runtime/summarize.ts";
+import {
+  summarizeChunks,
+  summaryBudgets,
+  completeSummaryWithBudget,
+} from "../../runtime/summarize.ts";
 import { privateAddress, searchWeb, fetchPage } from "../../runtime/web.ts";
 import { workerEnvironment } from "../../runtime/rpc-worker.ts";
 
@@ -158,6 +162,155 @@ test("summary budgets leave reasoning room and respect an explicit output cap", 
   );
   assert.equal(summaryBudgets(model, { maxTokens: 1024 }).maxTokens, 1024);
   assert.equal(summaryBudgets(model, { maxTokens: 1024 }).maxOutputChars, 512);
+});
+
+test("reasoning-only truncation permits one larger default request but honors explicit caps", async () => {
+  const calls = [];
+  const incomplete = {
+    stopReason: "error",
+    rawStopReason: "incomplete.length",
+    errorMessage: "Response incomplete: length",
+    content: [],
+    usage: { output: 16384, reasoning: 16384 },
+  };
+  const result = await completeSummaryWithBudget(
+    async (tokens) => {
+      calls.push(tokens);
+      return tokens === 16384
+        ? incomplete
+        : {
+            stopReason: "stop",
+            content: [{ type: "text", text: "Full summary" }],
+          };
+    },
+    16384,
+    32768,
+  );
+  assert.deepEqual(calls, [16384, 32768]);
+  assert.equal(result.stopReason, "stop");
+  let explicitCalls = 0;
+  await completeSummaryWithBudget(
+    async (tokens) => {
+      explicitCalls++;
+      assert.equal(tokens, 16384);
+      return incomplete;
+    },
+    16384,
+    16384,
+  );
+  assert.equal(explicitCalls, 1);
+  let permanentCalls = 0;
+  await completeSummaryWithBudget(
+    async () => {
+      permanentCalls++;
+      return incomplete;
+    },
+    16384,
+    32768,
+  );
+  assert.equal(permanentCalls, 2);
+});
+
+test("a complete overlong summary is condensed rather than discarded or sliced", async () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "mc-summary-overlong-"),
+  );
+  let calls = 0;
+  const prompts = [];
+  try {
+    const options = {
+      directory,
+      model: "m",
+      maxInputChars: 2000,
+      maxOutputChars: 300,
+      complete: async (prompt) => {
+        prompts.push(prompt);
+        calls++;
+        return {
+          stopReason: "stop",
+          content: [
+            {
+              type: "text",
+              text:
+                calls === 1
+                  ? "complete fact ".repeat(40) + "KEEP_THE_END"
+                  : "Condensed fact ".repeat(15) + "KEEP_THE_END",
+            },
+          ],
+        };
+      },
+    };
+    const result = await summarizeChunks(["source facts"], options);
+    assert.match(result, /KEEP_THE_END/);
+    assert.equal(calls, 2);
+    assert.match(prompts[1], /KEEP_THE_END/);
+    assert.ok(result.length <= 300);
+    assert.ok(
+      result.length > 150,
+      "the shorter prompt target does not shrink the original acceptance limit",
+    );
+    await summarizeChunks(["source facts"], options);
+    assert.equal(calls, 2, "cache the completed parent after condensation");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a reasoning-only completion is retried for visible text with a bounded limit", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mc-summary-empty-"));
+  let calls = 0;
+  try {
+    const options = {
+      directory,
+      model: "m",
+      maxInputChars: 2000,
+      maxOutputChars: 300,
+      complete: async () => {
+        calls++;
+        return {
+          stopReason: "stop",
+          content:
+            calls === 1
+              ? [{ type: "thinking", text: "DO_NOT_USE_THINKING" }]
+              : [{ type: "text", text: "Visible checkpoint" }],
+        };
+      },
+    };
+    assert.equal(
+      await summarizeChunks(["source facts"], options),
+      "Visible checkpoint",
+    );
+    assert.equal(calls, 2);
+    let emptyCalls = 0;
+    await assert.rejects(
+      summarizeChunks(["different facts"], {
+        ...options,
+        complete: async () => {
+          emptyCalls++;
+          return { stopReason: "stop", content: [] };
+        },
+      }),
+      /no visible text/,
+    );
+    assert.equal(emptyCalls, 5);
+    let longCalls = 0;
+    await assert.rejects(
+      summarizeChunks(["permanent long facts"], {
+        ...options,
+        complete: async () => {
+          longCalls++;
+          return {
+            stopReason: "stop",
+            content: [{ type: "text", text: "x".repeat(500) }],
+          };
+        },
+      }),
+      /remained too long/,
+    );
+    assert.equal(longCalls, 5);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("truncated chunks are subdivided and merged without persisting incomplete output", async () => {

@@ -8,7 +8,12 @@ import {
   prepareBranchEntries,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { summarizeChunks, summaryBudgets } from "../../runtime/summarize.ts";
+import {
+  summarizeChunks,
+  summaryBudgets,
+  completeSummaryWithBudget,
+  SUMMARY_SYSTEM_PROMPT,
+} from "../../runtime/summarize.ts";
 
 interface Config {
   model?: string;
@@ -121,14 +126,35 @@ export default function (pi: ExtensionAPI) {
       resolved.config.model?.trim()
     );
   };
+  let diagnostic: Record<string, unknown> = {};
   const debug = (
     ctx: any,
     stage: string,
     model?: string,
     metadata?: Record<string, string | number | undefined>,
   ) => {
-    if (!process.env.PI_COMPACTION_DEBUG) return;
     try {
+      const at = new Date().toISOString();
+      if (stage === "compact:start")
+        diagnostic = { startedAt: at, model, requests: 0 };
+      Object.assign(diagnostic, { at, stage });
+      if (model) diagnostic.model = model;
+      if (stage === "summary:request") {
+        diagnostic.requests = Number(diagnostic.requests ?? 0) + 1;
+        diagnostic.lastRequest = metadata;
+      }
+      if (stage === "summary:response") diagnostic.lastResponse = metadata;
+      const statusFile = path.join(
+        path.dirname(configFile(ctx, memberRuntime() ? "member" : "lead")),
+        "compaction-diagnostics.json",
+      );
+      fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+      const statusTmp = statusFile + "." + randomUUID() + ".tmp";
+      fs.writeFileSync(statusTmp, JSON.stringify(diagnostic, null, 2) + "\n", {
+        mode: 0o600,
+      });
+      fs.renameSync(statusTmp, statusFile);
+      if (!process.env.PI_COMPACTION_DEBUG) return;
       const directory = path.dirname(
         resolveConfig(ctx, memberRuntime() ? "member" : "lead").file,
       );
@@ -136,7 +162,7 @@ export default function (pi: ExtensionAPI) {
       fs.appendFileSync(
         path.join(directory, "compaction-summary.log"),
         JSON.stringify({
-          at: new Date().toISOString(),
+          at,
           stage,
           model,
           ...metadata,
@@ -187,43 +213,66 @@ export default function (pi: ExtensionAPI) {
       maxInputChars,
       maxOutputChars,
       signal,
-      complete: async (prompt) => {
-        debug(ctx, "summary:request", spec, {
-          inputChars: prompt.length,
-          maxTokens,
-          maxOutputChars,
-        });
-        const response = await ctx.modelRegistry.complete(
-          model,
-          {
-            messages: [
+      complete: (prompt) =>
+        completeSummaryWithBudget(
+          async (requestMaxTokens) => {
+            debug(ctx, "summary:request", spec, {
+              inputChars: prompt.length,
+              maxTokens: requestMaxTokens,
+              maxOutputChars,
+            });
+            const response = await ctx.modelRegistry.complete(
+              model,
               {
-                role: "user",
-                content: [{ type: "text", text: prompt }],
-                timestamp: Date.now(),
+                messages: [
+                  {
+                    role: "system",
+                    content: SUMMARY_SYSTEM_PROMPT,
+                    timestamp: Date.now(),
+                  },
+                  {
+                    role: "user",
+                    content: [{ type: "text", text: prompt }],
+                    timestamp: Date.now(),
+                  },
+                ],
               },
-            ],
+              {
+                maxTokens: requestMaxTokens,
+                signal,
+                cacheRetention: "none",
+                sessionId: createHash("sha256")
+                  .update(prompt)
+                  .digest("hex")
+                  .slice(0, 32),
+              },
+            );
+            debug(ctx, "summary:response", spec, {
+              stopReason: response.stopReason,
+              rawStopReason: response.rawStopReason,
+              inputChars: prompt.length,
+              maxTokens: requestMaxTokens,
+              outputTokens: response.usage?.output,
+              reasoningTokens: response.usage?.reasoning,
+              textChars: response.content
+                .filter((block: any) => block.type === "text")
+                .reduce(
+                  (size: number, block: any) =>
+                    size + (block.text?.length ?? 0),
+                  0,
+                ),
+            });
+            return response;
           },
-          {
-            maxTokens,
-            signal,
-            cacheRetention: "none",
-            sessionId: createHash("sha256")
-              .update(prompt)
-              .digest("hex")
-              .slice(0, 32),
-          },
-        );
-        debug(ctx, "summary:response", spec, {
-          stopReason: response.stopReason,
-          rawStopReason: response.rawStopReason,
-          inputChars: prompt.length,
           maxTokens,
-          outputTokens: response.usage?.output,
-          reasoningTokens: response.usage?.reasoning,
-        });
-        return response;
-      },
+          config.maxTokens !== undefined
+            ? maxTokens
+            : Math.min(
+                32768,
+                model.maxTokens,
+                Math.floor(model.contextWindow / 4),
+              ),
+        ),
     });
   }
   pi.registerCommand("compaction-model", {
@@ -268,6 +317,16 @@ export default function (pi: ExtensionAPI) {
               maxInputChars:
                 budgets?.maxInputChars ?? r.config.maxInputChars ?? 24000,
               maxOutputChars: budgets?.maxOutputChars,
+              recoveryMaxTokens:
+                budgets && model
+                  ? r.config.maxTokens !== undefined
+                    ? budgets.maxTokens
+                    : Math.min(
+                        32768,
+                        model.maxTokens,
+                        Math.floor(model.contextWindow / 4),
+                      )
+                  : undefined,
               file: r.file,
               source: r.config.disabled
                 ? "disabled"

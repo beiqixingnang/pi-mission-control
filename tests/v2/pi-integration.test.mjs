@@ -722,6 +722,25 @@ test(
         const before = h.session.sessionManager.getBranch().length;
         await assert.rejects(h.session.compact(), /cancel|abort/i);
         assert.ok(h.session.sessionManager.getBranch().length >= before);
+        const diagnostic = JSON.parse(
+          await fs.readFile(
+            path.join(
+              process.env.PI_CODING_AGENT_DIR,
+              "mission-control",
+              "v2",
+              h.session.sessionManager.getSessionId(),
+              "compaction-diagnostics.json",
+            ),
+            "utf8",
+          ),
+        );
+        assert.equal(diagnostic.stage, "compact:failed");
+        assert.equal(diagnostic.lastResponse.stopReason, "error");
+        assert.equal(diagnostic.lastResponse.textChars, 0);
+        assert.doesNotMatch(
+          JSON.stringify(diagnostic),
+          /retain original turn|PRIVATE_|thinkingSignature/,
+        );
         assert.equal(
           h.session.sessionManager
             .getBranch()
@@ -894,6 +913,78 @@ test("real Pi recovers gateway incomplete.length by subdividing the summary requ
       const requests = trace.filter((row) => row.stage === "summary:request");
       assert.ok(requests.some((row) => row.inputChars > 2600));
       assert.ok(requests.some((row) => row.inputChars < 2600));
+    } finally {
+      await fs.rm(config, { force: true });
+      if (previous === undefined) delete process.env.MC_FIXTURE_SUMMARY;
+      else process.env.MC_FIXTURE_SUMMARY = previous;
+      if (previousDebug === undefined) delete process.env.PI_COMPACTION_DEBUG;
+      else process.env.PI_COMPACTION_DEBUG = previousDebug;
+    }
+  }));
+
+test("real Pi condenses a completed overlong summary and saves a usable checkpoint", () =>
+  harness(async (h) => {
+    const directory = path.join(
+      process.env.PI_CODING_AGENT_DIR,
+      "mission-control",
+      "v2",
+      h.session.sessionManager.getSessionId(),
+    );
+    const config = path.join(directory, "compaction-summary.json");
+    const previous = process.env.MC_FIXTURE_SUMMARY,
+      previousDebug = process.env.PI_COMPACTION_DEBUG;
+    process.env.MC_FIXTURE_SUMMARY = "overlong";
+    process.env.PI_COMPACTION_DEBUG = "1";
+    await fs.writeFile(
+      config,
+      JSON.stringify({
+        model: "mission-fixture/model",
+        maxTokens: 1024,
+        maxInputChars: 4000,
+      }),
+    );
+    try {
+      h.settings.applyOverrides({
+        compaction: {
+          enabled: true,
+          reserveTokens: 2048,
+          keepRecentTokens: 512,
+        },
+      });
+      for (let i = 0; i < 3; i++)
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "answer",
+              text: "source evidence " + "x".repeat(3000),
+            }),
+        );
+      const result = await h.session.compact();
+      assert.match(result.summary, /KEEP_FINAL_EVIDENCE/);
+      assert.doesNotMatch(result.summary, /OVERLONG_CANDIDATE/);
+      assert.ok(result.summary.length <= 512);
+      const trace = (
+        await fs.readFile(
+          path.join(directory, "compaction-summary.log"),
+          "utf8",
+        )
+      )
+        .trim()
+        .split("\n")
+        .map(JSON.parse);
+      assert.ok(
+        trace.some(
+          (row) =>
+            row.stage === "summary:response" &&
+            row.stopReason === "stop" &&
+            row.textChars > 512,
+        ),
+      );
+      assert.ok(trace.some((row) => row.stage === "compact:success"));
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"AFTER_OVERLONG_RECOVERY"}',
+      );
+      assert.match(h.session.getLastAssistantText(), /AFTER_OVERLONG_RECOVERY/);
     } finally {
       await fs.rm(config, { force: true });
       if (previous === undefined) delete process.env.MC_FIXTURE_SUMMARY;

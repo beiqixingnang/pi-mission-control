@@ -7,8 +7,8 @@
 | 检查 | 结果 |
 | --- | --- |
 | `npm run check` | 两个v2入口加载无错误；30个lead工具、5个Mission Control命令和1个独立压缩命令；测试provider不被默认加载 |
-| `npm run typecheck` | 2.0.14在Windows严格检查25个直接源码文件及依赖通过；本次没有另跑Debian |
-| `npm test` | 2.0.14本机完整106用例：102通过、0失败、4个需显式镜像的容器用例跳过；耗时约43.2秒 |
+| `npm run typecheck` | 2.0.15在Windows严格检查25个直接源码文件及依赖通过；本次没有另跑Debian |
+| `npm test` | 2.0.15本机完整110用例：106通过、0失败、4个需显式镜像的容器用例跳过；耗时约43.6秒 |
 | GitHub Actions | 2.0.14代码提交b3484f9，运行39086121597成功；Ubuntu与Windows / Node24均通过，包含压缩截断恢复与上下文超限重连回归 |
 | 网络MCP framing回归 | 已纳入上述完整99用例 |
 | 显式本机镜像容器测试 | 2.0.2再次运行container.test.mjs，10用例全部通过、0跳过；其中4项真实Podman用例约59秒，6项为重复静态/本地检查；测试前后`podman ps`为空 |
