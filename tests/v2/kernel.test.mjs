@@ -111,6 +111,111 @@ async function using(fn) {
   }
 }
 
+test("recovery guidance leads large status and prompt views without assuming unknown executions stopped", () =>
+  using(async (h) => {
+    h.idle(false);
+    h.add("worker");
+    const task = h.kernel.dispatch("worker", "Inspect retained fixture work");
+    await flush();
+    h.workers[0].resolve({ ok: false, text: "", processState: "unknown" });
+    await flush();
+    const m = h.kernel.store.mission();
+    m.status = "attention";
+    m.blocker = {
+      kind: "no_progress",
+      reason:
+        "Three autonomous turns made no task or goal progress. Review /mission status and resume explicitly.",
+    };
+    m.reason = m.blocker.reason;
+    m.objective = "LONG_OBJECTIVE_".repeat(550);
+    m.turns = 9;
+    m.outputTokens = 13623;
+    h.kernel.store.set("mission", m);
+    const before = h.kernel.store.task(task.id);
+    const prefix = JSON.stringify(h.kernel.snapshot(), null, 2).slice(0, 5000);
+    assert.ok(
+      prefix.indexOf("recoveryPlan") < prefix.indexOf("LONG_OBJECTIVE_"),
+    );
+    const plan = h.kernel.snapshot().recoveryPlan;
+    assert.equal(plan.state, "process_inspection_required");
+    assert.deepEqual(plan.nextCall.arguments.tasks, [
+      { taskId: task.id, expectedEpoch: before.epoch },
+    ]);
+    assert.equal(plan.afterReconcile.tool, "mission_control");
+    assert.equal(plan.afterReconcile.arguments.expectedRevision, 0);
+    assert.match(plan.nextCall.requiredArgument, /actual stopped-process/);
+    const prompt = h.kernel.context();
+    assert.ok(
+      prompt.indexOf("mission_reconcile") < prompt.indexOf("LONG_OBJECTIVE_"),
+    );
+    assert.match(prompt.slice(0, 3000), /mission_control/);
+    assert.equal(h.kernel.store.task(task.id).processState, "unknown");
+    assert.equal(h.kernel.store.mission().status, "attention");
+    await h.restart();
+    const after = h.kernel.store.mission();
+    assert.match(after.reason, /mission_control/);
+    assert.doesNotMatch(after.reason, /resume explicitly/);
+    assert.equal(after.status, "attention");
+    assert.equal(after.turns, 9);
+    assert.equal(after.outputTokens, 13623);
+    assert.equal(h.kernel.store.task(task.id).processState, "unknown");
+  }));
+
+test("current recovery instructions expose exact revisions but preserve user, budget and unknown holds", () =>
+  using(async (h) => {
+    const m = h.kernel.setGoal("Approved fixture");
+    m.revision = 7;
+    m.status = "attention";
+    m.blocker = { kind: "no_progress", reason: "review required" };
+    h.kernel.store.set("mission", m);
+    assert.deepEqual(h.kernel.recoveryPlan().nextCall.arguments, {
+      action: "resume",
+      goalId: m.id,
+      expectedRevision: 7,
+    });
+    await h.kernel.userControl("pause");
+    assert.equal(h.kernel.recoveryPlan().state, "user_control_required");
+    assert.equal(h.kernel.recoveryPlan().nextCall, undefined);
+    await h.kernel.userControl("resume");
+    const held = h.kernel.store.mission();
+    held.status = "attention";
+    held.blocker = { kind: "budget", reason: "explicit configured limit" };
+    h.kernel.store.set("mission", held);
+    assert.equal(h.kernel.recoveryPlan().state, "budget_renewal_required");
+    held.blocker = { kind: "unknown", reason: "unclassified old hold" };
+    h.kernel.store.set("mission", held);
+    assert.equal(h.kernel.recoveryPlan().state, "unclassified_hold");
+    assert.equal(h.kernel.recoveryPlan().nextCall, undefined);
+  }));
+
+test("reconciliation guidance stays bounded while reporting older unknown executions outside the ordinary task view", () =>
+  using(async (h) => {
+    h.idle(false);
+    h.add("worker");
+    const t = h.kernel.dispatch("worker", "retained command");
+    await flush();
+    h.workers[0].resolve({ ok: false, text: "", processState: "unknown" });
+    await flush();
+    const original = h.kernel.store.task(t.id);
+    h.kernel.store.transaction(() => {
+      for (let i = 0; i < 1050; i++)
+        h.kernel.store.putTask({
+          ...original,
+          id: `history-${i}`,
+          createdAt: original.createdAt + i + 1,
+          processState: i < 105 ? "unknown" : "stopped",
+        });
+    });
+    assert.ok(!h.kernel.store.tasks().some((row) => row.id === original.id));
+    const plan = h.kernel.recoveryPlan();
+    assert.equal(plan.unknownProcessCount, 106);
+    assert.equal(plan.nextCall.arguments.tasks.length, 100);
+    assert.equal(plan.remainingUnknown, 6);
+    assert.equal(plan.afterReconcile.tool, "mission_status");
+    assert.equal(plan.nextCall.arguments.tasks[0].taskId, original.id);
+    assert.equal(h.kernel.recoveryPlan(5).nextCall.arguments.tasks.length, 5);
+  }));
+
 test("lead process reconciliation is atomic, fenced by epochs and idempotent before an explicit retry", () =>
   using(async (h) => {
     h.idle(false);

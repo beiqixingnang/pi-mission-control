@@ -1838,7 +1838,7 @@ test(
   () =>
     harness(async (h) => {
       await h.session.prompt(
-        'V2_TEST:{"op":"answer","text":"RECOVERY_FIXTURE"}',
+        'V2_TEST:{"op":"answer","text":"OBSOLETE_HISTORY_FIXTURE: Only a user slash command can reconcile; these tools are unavailable."}',
       );
       await h.tool("goal_start", {
         objective: "Continue the approved fixture",
@@ -1878,10 +1878,16 @@ test(
         db.prepare("SELECT data FROM meta WHERE key='mission'").get().data,
       );
       m.status = "attention";
+      m.objective = "LONG_APPROVED_OBJECTIVE_".repeat(300);
+      m.criteria = Array.from({ length: 30 }, () =>
+        "LONG_CRITERION_".repeat(140),
+      );
       m.blocker = {
         kind: "no_progress",
-        reason: "Three prior automatic requests did not progress",
+        reason:
+          "Three autonomous turns made no task or goal progress. Review /mission status and resume explicitly.",
       };
+      m.reason = m.blocker.reason;
       m.turns = 22;
       m.outputTokens = 500;
       m.emptyTurns = 3;
@@ -1923,6 +1929,36 @@ test(
         tasks.push({ taskId: id, expectedEpoch: 3 });
       }
       db.close();
+      await h.session.prompt(
+        'V2_TEST:{"op":"tool","name":"mission_status","args":{}}',
+      );
+      const statusResult = JSON.parse(h.session.getLastAssistantText());
+      assert.equal(statusResult.isError, false);
+      const statusPrefix = statusResult.text.slice(0, 6000);
+      assert.match(statusPrefix, /"version": "2\.0\.19"/);
+      assert.match(statusPrefix, /"mission_reconcile": true/);
+      assert.match(statusPrefix, /"mission_control": true/);
+      assert.match(statusPrefix, /process_inspection_required/);
+      assert.match(statusPrefix, /"tool": "mission_reconcile"/);
+      assert.match(statusPrefix, /"tool": "mission_control"/);
+      for (const task of tasks) assert.ok(statusPrefix.includes(task.taskId));
+      assert.ok(
+        statusResult.text.indexOf('"recoveryPlan"') <
+          statusResult.text.indexOf("LONG_APPROVED_OBJECTIVE_"),
+      );
+      const system = h.session.sessionManager
+        .getBranch()
+        .filter((e) => e.type === "message" && e.message.role === "system")
+        .at(-1);
+      const instructions = JSON.stringify(system.message.sections);
+      assert.match(instructions, /old claims that only a user slash command/);
+      assert.match(instructions, /Current Mission Control recovery plan/);
+      assert.equal((await h.snapshot()).mission.status, "attention");
+      assert.equal(
+        (await h.snapshot()).tasks.filter((t) => t.processState === "unknown")
+          .length,
+        4,
+      );
       await h.session.prompt(
         "V2_TEST:" +
           JSON.stringify({

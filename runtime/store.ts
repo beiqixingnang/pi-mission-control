@@ -246,6 +246,19 @@ export class Store {
         .get(memberId),
     );
   }
+  unknownProcesses(limit = 100): { total: number; tasks: Task[] } {
+    const total = this.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM tasks WHERE json_extract(data,'$.processState')='unknown'",
+      )
+      .get() as { n: number };
+    const rows = this.db
+      .prepare(
+        "SELECT data FROM tasks WHERE json_extract(data,'$.processState')='unknown' ORDER BY created,id LIMIT ?",
+      )
+      .all(Math.max(1, Math.min(100, limit))) as { data: string }[];
+    return { total: total.n, tasks: rows.map((row) => JSON.parse(row.data)) };
+  }
   missionTasks(id: string): Task[] {
     return (
       this.db

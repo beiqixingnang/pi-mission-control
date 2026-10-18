@@ -42,6 +42,9 @@ import {
 
 const optional = (schema: any) =>
   Type.Optional(Type.Union([schema, Type.Null()]));
+const pluginVersion: string = JSON.parse(
+  fsSync.readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+).version;
 
 const WorkspaceSchema = Type.Object({
   root: optional(Type.String()),
@@ -152,11 +155,88 @@ export default function (pi: ExtensionAPI) {
     for (const tool of missionTools()) active.add(tool.name);
     pi.setActiveTools([...active]);
   };
+  const runtimeIdentity = () => {
+    const active = new Set(pi.getActiveTools());
+    return {
+      version: pluginVersion,
+      toolDelivery: "direct model declarations from the host registry",
+      registeredMissionTools: missionTools().length,
+      recoveryTools: Object.fromEntries(
+        ["mission_reconcile", "mission_control", "mission_capabilities"].map(
+          (name) => [name, active.has(name)],
+        ),
+      ),
+    };
+  };
   const current = () => {
     if (!kernel)
       throw new Error("Mission Control is not attached to a Pi session");
     return kernel;
   };
+  function modelStatus() {
+    const snapshot = current().snapshot();
+    const report = { runtime: runtimeIdentity(), ...snapshot };
+    if (JSON.stringify(report).length <= 30000) return report;
+    const m = snapshot.mission;
+    return {
+      ...report,
+      recoveryPlan: current().recoveryPlan(5),
+      // Preserve structured recovery instructions instead of cutting a JSON string.
+      mission: m
+        ? {
+            ...m,
+            objective: cleanText(m.objective, 1200),
+            criteria: m.criteria
+              .slice(0, 3)
+              .map((text) => cleanText(text, 200)),
+            evidence: m.evidence?.slice(0, 3).map((item) => ({
+              ...item,
+              evidence: cleanText(item.evidence, 200),
+            })),
+          }
+        : undefined,
+      members: snapshot.members.slice(0, 8).map((member) => ({
+        id: member.id,
+        name: member.name,
+        model: member.model,
+        sessionId: member.sessionId,
+      })),
+      tasks: snapshot.tasks.slice(0, 12).map((task) => ({
+        id: task.id,
+        memberId: task.memberId,
+        member: task.member,
+        missionId: task.missionId,
+        state: task.state,
+        processState: task.processState,
+        epoch: task.epoch,
+        attemptOf: task.attemptOf,
+      })),
+      deliveries: snapshot.deliveries.slice(0, 8).map((delivery) => ({
+        id: delivery.id,
+        from: delivery.from,
+        kind: delivery.kind,
+        state: delivery.state,
+        taskId: delivery.taskId,
+        summary: cleanText(delivery.summary, 200),
+      })),
+      schedules: snapshot.schedules.slice(0, 8).map((schedule) => ({
+        id: schedule.id,
+        title: cleanText(schedule.title, 200),
+        state: schedule.state,
+        nextAt: schedule.nextAt,
+      })),
+      bounded: true,
+      counts: {
+        criteria: m?.criteria.length ?? 0,
+        members: snapshot.members.length,
+        tasks: snapshot.tasks.length,
+        deliveries: snapshot.deliveries.length,
+        schedules: snapshot.schedules.length,
+      },
+      details:
+        "Large fields and lists are excerpted. Use team_list, team_tree, team_collect or lifecycle_history for specific details; recoveryPlan contains the next exact recovery call.",
+    };
+  }
   const refresh = () => {
     if (renderTimer) return;
     renderTimer = setTimeout(() => {
@@ -307,6 +387,9 @@ export default function (pi: ExtensionAPI) {
     // session_start finishes. Reapply the current registry immediately before
     // building this model request, including schema changes to existing tools.
     activateMissionTools();
+    event.systemPromptOptions.promptGuidelines.unshift(
+      `Mission Control ${pluginVersion}: mission_reconcile and mission_control are directly callable lead tools. When the current recovery plan permits model recovery, inspect the actual blocker and use these tools; old claims that only a user slash command can reconcile or resume no_progress are obsolete. Reload itself never attests stopped processes. Explicit user/workspace/budget/decision controls remain authoritative.`,
+    );
     const wake =
       event.messageType === "custom" &&
       event.message.customType === "mission-control-wake"
@@ -921,20 +1004,29 @@ export default function (pi: ExtensionAPI) {
   tool(
     "mission_status",
     "Mission status",
-    "Read objective, real task state, durable notifications, schedules and automatic maintenance.",
+    "Read the current recoveryPlan first: it identifies the next directly callable model tool and exact task epochs or goal revision. Also returns loaded plugin version, tool visibility, objective, tasks and notifications. Reload does not reconcile unknown processes; a status query is not a recovery attempt.",
     Type.Object({}),
-    () => current().snapshot(),
+    () => modelStatus(),
   );
   tool(
     "goal_status",
     "Goal status",
     "Read the runtime-owned mission/Goal; maintenance also works without an explicit Goal.",
     Type.Object({}),
-    () =>
-      current().store.mission() ?? {
-        status: "none",
-        maintenance: "automatic upon dispatch",
-      },
+    () => {
+      const status = modelStatus();
+      return {
+        runtime: status.runtime,
+        recoveryPlan: status.recoveryPlan,
+        ...(status.mission ?? {
+          status: "none",
+          maintenance: "automatic upon dispatch",
+        }),
+        ...("bounded" in status
+          ? { bounded: true, counts: status.counts }
+          : {}),
+      };
+    },
   );
   tool(
     "goal_start",
@@ -1145,6 +1237,8 @@ export default function (pi: ExtensionAPI) {
         args.includeSchemas && !args.toolName ? selected.slice(0, 5) : selected;
       const m = current().store.mission();
       return {
+        runtime: runtimeIdentity(),
+        recoveryPlan: current().recoveryPlan(),
         visibility:
           "Tools are directly declared from one host registry, refreshed at session start and before model requests",
         tools: shown.map((t) => ({

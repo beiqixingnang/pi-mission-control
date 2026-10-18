@@ -23,6 +23,9 @@ import {
   type PublicActivity,
 } from "./types.ts";
 
+const noProgressReason =
+  "Three autonomous turns made no task or goal progress. Inspect saved results and actual blockers, then use mission_control(action=resume) with the current goal identity to continue approved work.";
+
 interface Live {
   epoch: number;
   controller: AbortController;
@@ -309,6 +312,20 @@ export class MissionKernel {
   }
   private migrateRecovery() {
     const m = this.store.mission();
+    if (
+      m?.status === "attention" &&
+      m.blocker?.kind === "no_progress" &&
+      m.blocker.reason !== noProgressReason
+    ) {
+      const previousReason = m.blocker.reason;
+      m.reason = noProgressReason;
+      m.blocker.reason = noProgressReason;
+      this.store.set("mission", m);
+      this.store.event("recovery.guidance-updated", m.id, {
+        kind: "no_progress",
+        previousReason,
+      });
+    }
     if (!m || m.humanPaused || this.store.get("relocationHold") || m.blocker)
       return;
     if (
@@ -358,6 +375,8 @@ export class MissionKernel {
             : "unknown",
         reason: m.reason ?? "Unclassified legacy hold",
       };
+      if (m.blocker.kind === "no_progress")
+        m.reason = m.blocker.reason = noProgressReason;
       this.store.set("mission", m);
     }
   }
@@ -1523,8 +1542,7 @@ export class MissionKernel {
       m.updatedAt = this.now();
       if (m.emptyTurns >= 3) {
         m.status = "attention";
-        m.reason =
-          "Three autonomous turns made no task or goal progress. Inspect saved results and actual blockers, then use mission_control(action=resume) with the current goal identity to continue approved work.";
+        m.reason = noProgressReason;
         m.blocker = { kind: "no_progress", reason: m.reason };
         this.store.event("mission.blocked", m.id, { kind: "no_progress" });
         this.options.notify?.(m.reason);
@@ -1534,9 +1552,158 @@ export class MissionKernel {
     this.runtimeAborted = false;
     this.changed();
   }
+  recoveryPlan(limit = 100) {
+    const m = this.store.mission();
+    const unknown = this.store.unknownProcesses(limit);
+    const goal = m
+      ? { goalId: m.id, expectedRevision: m.revision ?? 0 }
+      : undefined;
+    const base = {
+      goal,
+      unknownProcessCount: unknown.total,
+      ...(m?.decision?.taskIds.length
+        ? {
+            taskDecision: {
+              id: m.decision.id,
+              taskIds: m.decision.taskIds,
+              instruction:
+                "Only the named tasks are decision-blocked; unrelated approved work may proceed.",
+            },
+          }
+        : {}),
+    };
+    if (this.userHold || m?.humanPaused || this.store.get("relocationHold"))
+      return {
+        ...base,
+        state: "user_control_required",
+        instruction:
+          "User/Escape/workspace hold remains authoritative. Inspect its exact control; recovery tools do not release it.",
+      };
+    if (m && ["complete", "stopped"].includes(m.status))
+      return {
+        ...base,
+        state: "closed",
+        instruction:
+          "This goal is closed. Inspect retained results before accepting a new authorized objective.",
+      };
+    if (m && (m.blocker?.kind === "budget" || this.budgetReasons(m).length))
+      return {
+        ...base,
+        state: "budget_renewal_required",
+        instruction:
+          "Configured budget requires explicit user renewal through /mission resume. Usage is retained.",
+      };
+    if (
+      m?.decision &&
+      (m.status === "waiting_user" ||
+        m.blocker?.kind === "no_progress" ||
+        !m.decision.taskIds.length)
+    )
+      return {
+        ...base,
+        state: "business_decision_required",
+        decisionId: m.decision.id,
+        instruction:
+          "Obtain a new direct human answer for this decision; resolve its exact identity with mission_decision. Do not replace it with runtime recovery.",
+      };
+    if (m?.status === "attention" && m.blocker?.kind !== "no_progress")
+      return {
+        ...base,
+        state: "unclassified_hold",
+        instruction:
+          "Inspect the unclassified hold; the model resume tool cannot release it.",
+      };
+    const progressResume =
+      m?.status === "attention" && m.blocker?.kind === "no_progress"
+        ? {
+            tool: "mission_control",
+            arguments: { action: "resume", ...goal },
+            requiredArgument:
+              "reason: explain the inspected blocker and next approved step; do not invent evidence",
+          }
+        : undefined;
+    if (unknown.tasks.some((t) => this.live.has(t.id)))
+      return {
+        ...base,
+        state: "executions_stopping",
+        instruction:
+          "Managed executions are still stopping. Wait for their termination receipts before reconciling; never attest a live execution as stopped.",
+      };
+    if (unknown.total)
+      return {
+        ...base,
+        state: "process_inspection_required",
+        instruction:
+          "mission_reconcile is a directly callable model tool. Reload preserves unknown executions; it does not confirm that processes stopped. Inspect saved artifacts and actual host processes, then call this tool yourself with concrete evidence. Do not delegate a slash command to the user merely because old history says it was user-only.",
+        nextCall: {
+          tool: "mission_reconcile",
+          arguments: {
+            tasks: unknown.tasks.map((t) => ({
+              taskId: t.id,
+              expectedEpoch: t.epoch,
+            })),
+          },
+          requiredArgument:
+            "evidence: actual stopped-process and artifact inspection, not this status query or an assumption",
+        },
+        executions: unknown.tasks.map((t) => ({
+          taskId: t.id,
+          member: t.member,
+          state: t.state,
+          inputPath: t.inputPath,
+          resultPath: t.resultPath,
+          live: this.live.has(t.id),
+        })),
+        remainingUnknown: unknown.total - unknown.tasks.length,
+        afterReconcile: (unknown.total <= unknown.tasks.length
+          ? progressResume
+          : undefined) ?? {
+          tool: "mission_status",
+          instruction:
+            "Read the next current step; explicitly create a new attempt only when existing results justify it.",
+        },
+      };
+    if (progressResume)
+      return {
+        ...base,
+        state: "progress_review_required",
+        instruction:
+          "Inspect saved results and the actual blocker, then invoke mission_control yourself with this exact goal identity and revision. This resumes only no_progress and preserves usage. A status query alone is not a recovery attempt.",
+        nextCall: progressResume,
+      };
+    const recovery = this.recovery.current();
+    if (recovery)
+      return {
+        ...base,
+        state: "runtime_recovery",
+        nextCall: {
+          tool: "mission_recover",
+          arguments: {
+            faultId: recovery.id,
+            expectedRevision: recovery.revision,
+          },
+        },
+        instruction:
+          "Inspect the existing automatic recovery episode; no user hold or budget is renewed.",
+      };
+    if (m?.externalWait)
+      return {
+        ...base,
+        state: "external_wait",
+        instruction:
+          "Wait for the declared producer signal or deadline; do not repeatedly poll or report unchanged state.",
+      };
+    return {
+      ...base,
+      state: "ready",
+      instruction:
+        "Continue the existing approved work, inspect retained results and use explicit new attempts when necessary.",
+    };
+  }
   snapshot() {
     const m = this.store.mission();
     return {
+      recoveryPlan: this.recoveryPlan(),
       mission: m,
       recovery: this.recovery.current(),
       activity: this.activityClock.snapshot(m),
@@ -1565,6 +1732,7 @@ export class MissionKernel {
       m = s.mission;
     if (!m) return "";
     return [
+      `Current Mission Control recovery plan: ${JSON.stringify(this.recoveryPlan(5))}. Follow this current plan before repeating old recovery advice. Tools named here are callable by the lead model; do not claim that recovery failed unless an actual recovery tool returned an error.`,
       `Mission ${m.id}: ${m.status}. ${m.objective}`,
       `Acceptance: ${m.criteria.map((x, i) => `${i + 1}. ${x}`).join(" | ")}`,
       `Tasks: ${

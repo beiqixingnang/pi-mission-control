@@ -1,3 +1,11 @@
+# 2.0.19 — actionable recovery guidance on resumed conversations (2026-10-18)
+
+- Verify the reported failure against the original conversation's public tool declarations: the new recovery tools were present, but the assistant only queried status and repeated obsolete user-only recovery advice.
+- Put the current recovery plan before long objectives, histories and tool output. Return exact task epochs and goal revisions, loaded package version and recovery-tool visibility; preserve required real process inspection and all authoritative holds.
+- Update known old no-progress guidance without changing its blocked state or usage. Report unknown executions independently of the ordinary task history limit and require another status query before resuming a partial reconciliation batch.
+- Keep oversized status responses valid structured JSON by excerpting large fields and lists. Add three kernel regressions and strengthen the real Pi four-execution flow with obsolete history and oversized acceptance criteria.
+- Local full suite: 158 passed, four opt-in container skips, zero failures; 28 source files typechecked and all 43 tools loaded successfully.
+
 # 2.0.18 — unified lead tool registry and model-accessible recovery (2026-10-18)
 
 - Collect Mission Control tools from Pi's host registry across both package entrypoints and refresh active names and schemas at session start and before model runs. Expose all 43 lead tools directly, with an optional `mission_capabilities` catalog.
