@@ -1,3 +1,8 @@
+# 2.2.2 — remove browser operation prototype (2026-10-19)
+
+- Remove the unpublished browser/HTTP operation prototype, its concept page and prototype tests.
+- Keep TUI as the only task operation interface. Static archive reading remains available as a read-only snapshot viewer.
+
 # 2.2.1 — self-contained archive reader (2026-10-19)
 
 - Make exported archives directly readable from `index.html`: member, goal, task and message clicks load static data from the archive itself without a folder picker or access to a live Pi session.
