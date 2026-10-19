@@ -141,6 +141,8 @@ export default function (pi: ExtensionAPI) {
     renderTimer: ReturnType<typeof setTimeout> | undefined;
   let panel: MissionPanel | undefined;
   let goalPanel: GoalPanel | undefined;
+  let removeCompactionListener: (() => void) | undefined;
+  let activeCompactionRun: string | undefined;
   let agentsOpen = false;
   const sourceCache = new Map<string, string>();
   const sourcePath = (value: string) => {
@@ -305,6 +307,9 @@ export default function (pi: ExtensionAPI) {
     if (panel?.scope === "lead") refresh();
   });
   const close = async () => {
+    removeCompactionListener?.();
+    removeCompactionListener = undefined;
+    activeCompactionRun = undefined;
     goalPanel?.dispose();
     goalPanel = undefined;
     panel?.dispose();
@@ -323,6 +328,26 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, context) => {
     await close();
     ctx = context;
+    removeCompactionListener = pi.events.on(
+      "mission-control:compaction-state",
+      (value: any) => {
+        if (
+          value?.scope !== "lead" ||
+          value.sessionId !== kernel?.options.sessionId
+        )
+          return;
+        if (typeof value.runId !== "string") return;
+        if (value.phase === "started") {
+          activeCompactionRun = value.runId;
+          kernel?.compactionStarted();
+        }
+        if (value.phase === "failed" && value.runId === activeCompactionRun)
+          kernel?.compactionSettled(
+            undefined,
+            String(value.error ?? "Summary failed"),
+          );
+      },
+    );
     // Resumed sessions replay their historical active-tool set. Re-add tools
     // introduced by a newer plugin version before the next model request.
     activateMissionTools();
@@ -486,8 +511,10 @@ export default function (pi: ExtensionAPI) {
       context.sessionManager
         .getBranch()
         .some((entry) => entry.id === event.compactionEntry.id)
-    )
+    ) {
       kernel.compactionSettled(event.compactionEntry.id);
+      activeCompactionRun = undefined;
+    }
   });
   pi.on("session_compact_failed", (event) => {
     kernel?.compactionSettled(
@@ -495,6 +522,7 @@ export default function (pi: ExtensionAPI) {
       event.errorMessage ??
         (event.aborted ? "Compaction cancelled" : "Compaction failed"),
     );
+    activeCompactionRun = undefined;
   });
   pi.on("session_tree", async () => {
     if (

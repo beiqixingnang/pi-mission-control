@@ -1648,6 +1648,10 @@ export class MissionKernel {
     } else this.recovery.compactionFailed(error);
     this.changed();
   }
+  compactionStarted() {
+    this.recovery.compactionStarted();
+    this.changed();
+  }
   admitLeadRequest() {
     if (this.recovery.admit(this.automaticTurn)) {
       this.leadRunning = true;
@@ -1978,6 +1982,25 @@ export class MissionKernel {
         nextCall: progressResume,
       };
     const recovery = this.recovery.current();
+    if (recovery?.phase === "compaction_failed")
+      return {
+        ...base,
+        state: "compaction_failed",
+        reason: recovery.reason,
+        nextCall: {
+          tool: "compaction_model",
+          arguments: { action: "status", target: "lead" },
+        },
+        instruction:
+          "Inspect the exact summary route and failure. Automatic compaction has stopped; it is not waiting for an expired timer. Resume cached work with mission_compact or /compact after inspecting the cause. Never disable the custom summary route to fall back to a rate-limited inference model.",
+      };
+    if (recovery?.phase === "compacting")
+      return {
+        ...base,
+        state: "compacting",
+        instruction:
+          "Summary requests are running with bounded retries and retained chunk caches. Inspect compaction_model diagnostics for progress; do not start a second compaction.",
+      };
     if (recovery)
       return {
         ...base,
@@ -2498,7 +2521,10 @@ export class MissionKernel {
       },
     };
     const timeout = setTimeout(
-      () => controller.abort(new Error("Task execution timeout")),
+      () =>
+        controller.abort(
+          new Error(`Task execution deadline exceeded (${task.timeoutMs}ms)`),
+        ),
       task.timeoutMs,
     );
     timeout.unref?.();

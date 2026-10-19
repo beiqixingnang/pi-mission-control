@@ -21,8 +21,8 @@ export const stateNames: Record<string, string> = {
   interrupted: "中断待核对",
 };
 export function missionState(m?: Mission, recovery?: Recovery) {
-  if (!m) return recovery ? "连接恢复中" : "就绪";
-  if (m.status !== "active")
+  if (!m && !recovery) return "就绪";
+  if (m && m.status !== "active")
     return m.blocker?.kind === "budget"
       ? "预算耗尽"
       : m.blocker?.kind === "no_progress"
@@ -31,12 +31,14 @@ export function missionState(m?: Mission, recovery?: Recovery) {
   if (recovery)
     return {
       waiting_compaction: "等待压缩恢复",
+      compacting: "正在压缩",
+      compaction_failed: "压缩失败待重试",
       cooldown: "恢复等待",
       ready: "等待恢复验证",
       probing: "恢复验证中",
       exhausted: "恢复需要检查",
     }[recovery.phase];
-  return m.externalWait ? "等待外部事件" : stateNames[m.status];
+  return m?.externalWait ? "等待外部事件" : m ? stateNames[m.status] : "就绪";
 }
 function cell(text: string, width: number) {
   const value = truncateToWidth(

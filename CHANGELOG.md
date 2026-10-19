@@ -1,3 +1,11 @@
+# 2.1.1 — strict summary routes and bounded compaction recovery (2026-10-19)
+
+- Fix member compaction inheriting the parent-scoped member summary model; budget overrides retain that route, and explicit scoped routes override legacy environment defaults. Missing/unavailable custom routes fail closed instead of sending summaries to the inference GPT.
+- Share a small transient retry budget across a compaction, respect readable Retry-After hints without retrying early, cancel hung summary requests, and preserve user cancellation. Disable nested provider retries for explicit accounting.
+- Preserve complete caches; when an input overflows or a transport failure persists, reduce only the failed block with bounded subdivision. Never cache incomplete stream output.
+- Persist selected model, request duration/error, retries and chunk/merge/cache progress. Distinguish waiting, running and failed compaction, retain the actual summary error through Pi cancellation, and migrate old misleading waiting states on reload.
+- Preserve explicit task deadlines and report their cause separately from provider disconnections. Add standalone, real Pi SDK and member RPC regressions on Windows and WSL.
+
 # 2.1.0 — hierarchical goals and persistent acceptance ledger (2026-10-18)
 
 - Add transactional SQLite goal trees, multiple main goals with one selected, explicit stage dependencies and a default maximum depth of three. Extra depth requires a user command and remains discouraged.

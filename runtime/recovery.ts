@@ -138,9 +138,16 @@ export class LeadRecovery {
       value.compactionAttempted
     )
       return false;
-    value.compactionAttempted = true;
-    this.save(value, "compaction-started");
+    this.compactionStarted();
     return true;
+  }
+  compactionStarted() {
+    const value = this.current();
+    if (!value || value.kind !== "context") return;
+    value.compactionAttempted = true;
+    value.nextAt = undefined;
+    value.phase = "compacting";
+    this.save(value, "compaction-started");
   }
   compacted(id: string) {
     const value = this.current();
@@ -158,8 +165,17 @@ export class LeadRecovery {
   compactionFailed(reason: string) {
     const value = this.current();
     if (!value || value.kind !== "context") return;
-    value.reason = cleanText(reason, 1500);
-    value.phase = "waiting_compaction";
+    if (
+      !(
+        value.phase === "compaction_failed" &&
+        /^Compaction (?:cancelled|failed|failed or was cancelled)$/i.test(
+          reason,
+        )
+      )
+    )
+      value.reason = cleanText(reason, 1500);
+    value.phase = "compaction_failed";
+    value.nextAt = undefined;
     value.compactionAttempted = true;
     this.save(value, "compaction-failed");
   }
@@ -172,6 +188,19 @@ export class LeadRecovery {
   }
   restart() {
     const value = this.current();
+    if (
+      value?.kind === "context" &&
+      (value.phase === "compacting" ||
+        (value.phase === "waiting_compaction" && value.compactionAttempted))
+    ) {
+      value.phase = "compaction_failed";
+      value.nextAt = undefined;
+      value.reason =
+        value.reason === "Compaction cancelled"
+          ? "Previous compaction did not complete. Inspect compaction_model diagnostics and run /compact to resume cached work."
+          : value.reason;
+      this.save(value, "compaction-interrupted");
+    }
     if (value?.phase === "probing") {
       value.phase = "cooldown";
       value.nextAt = Math.max(

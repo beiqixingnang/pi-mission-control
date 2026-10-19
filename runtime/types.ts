@@ -215,7 +215,14 @@ export interface Recovery {
   missionId?: string;
   revision: number;
   kind: "context" | "provider" | "delivery";
-  phase: "waiting_compaction" | "cooldown" | "ready" | "probing" | "exhausted";
+  phase:
+    | "waiting_compaction"
+    | "compacting"
+    | "compaction_failed"
+    | "cooldown"
+    | "ready"
+    | "probing"
+    | "exhausted";
   reason: string;
   requests: number;
   probes: number;

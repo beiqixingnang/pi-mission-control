@@ -1,6 +1,7 @@
 /** Test-only deterministic provider. Never contacts a model service. */
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import fs from "node:fs";
 const textOf = (m: any) =>
   typeof m?.content === "string"
     ? m.content
@@ -16,6 +17,15 @@ export default function (pi: ExtensionAPI) {
     api: "mission-fixture",
     apiKey: "fixture-only",
     models: [
+      {
+        id: "summary",
+        name: "Independent offline summary fixture",
+        reasoning: false,
+        input: ["text"],
+        contextWindow: 64000,
+        maxTokens: 4096,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      },
       {
         id: "model",
         name: "Offline mission fixture",
@@ -79,11 +89,41 @@ export default function (pi: ExtensionAPI) {
             )
           ) {
             const summaryMode = process.env.MC_FIXTURE_SUMMARY;
+            if (process.env.MC_FIXTURE_SUMMARY_TRACE)
+              fs.appendFileSync(
+                process.env.MC_FIXTURE_SUMMARY_TRACE,
+                JSON.stringify({
+                  provider: model.provider,
+                  model: model.id,
+                  mode: summaryMode,
+                  inputChars: textOf(context.messages.at(-1)).length,
+                }) + "\n",
+              );
             if (
-              !["success", "subdivide", "overlong"].includes(summaryMode ?? "")
+              ![
+                "success",
+                "subdivide",
+                "overlong",
+                "stream-once",
+                "stream-always",
+                "rate-limit",
+              ].includes(summaryMode ?? "")
             )
               throw new Error("Intentional summary-provider failure");
             summaryCalls++;
+            const summaryKey = "summary:" + textOf(context.messages.at(-1));
+            const summaryAttempt = (requestAttempts.get(summaryKey) ?? 0) + 1;
+            requestAttempts.set(summaryKey, summaryAttempt);
+            if (
+              summaryMode === "stream-always" ||
+              (summaryMode === "stream-once" && summaryAttempt === 1) ||
+              summaryMode === "rate-limit"
+            )
+              throw new Error(
+                summaryMode === "rate-limit"
+                  ? "429 Too many requests retry-after: 0"
+                  : "OpenAI Responses stream ended before a terminal response event",
+              );
             if (
               summaryMode === "subdivide" &&
               textOf(context.messages.at(-1)).length > 2600

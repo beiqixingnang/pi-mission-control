@@ -2,7 +2,7 @@
 
 非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **2.1.0**，主对话直接获得51个插件工具。支持默认三级目标树、阶段依赖、逐项证据验收和多个主目标，一次只激活一个。主界面仅简要显示目标及二、三级验收数，`/mission goals`打开详细看板。默认在批准范围内自主决定执行细节，可用`mission_policy`检查或应用。浏览器工作台仍是独立实验，不安装或加载。恢复工具见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
+当前版本 **2.1.1**，主对话直接获得51个插件工具。支持默认三级目标树、阶段依赖、逐项证据验收和多个主目标，一次只激活一个。主界面仅简要显示目标及二、三级验收数，`/mission goals`打开详细看板。独立摘要模型按主/成员作用域严格选择，支持有界限流及断流恢复、失败块降载与缓存进度。默认在批准范围内自主决定执行细节，可用`mission_policy`检查或应用。浏览器工作台仍是独立实验，不安装或加载。恢复工具见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
 
 需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
 

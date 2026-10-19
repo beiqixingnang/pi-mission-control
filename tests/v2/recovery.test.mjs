@@ -299,7 +299,14 @@ test("failed compaction retains the fault and does not launch an automatic compa
     }
     assert.equal(h.compactions, 1);
     assert.equal(h.wakes.length, 1);
-    assert.equal(h.kernel.snapshot().recovery.phase, "waiting_compaction");
+    assert.equal(h.kernel.snapshot().recovery.phase, "compaction_failed");
+    assert.equal(h.kernel.snapshot().recovery.nextAt, undefined);
+    assert.equal(h.kernel.recoveryPlan().state, "compaction_failed");
+    h.kernel.compactionSettled(undefined, "Compaction cancelled");
+    assert.equal(
+      h.kernel.snapshot().recovery.reason,
+      "Summary provider failed",
+    );
   }));
 
 test("a repeated compaction checkpoint cannot rearm an already failed recovery probe", () =>
@@ -314,7 +321,7 @@ test("a repeated compaction checkpoint cannot rearm an already failed recovery p
     h.kernel.compactionSettled("checkpoint-1");
     await h.kernel.tick();
     assert.equal(h.wakes.length, 2);
-    assert.equal(h.kernel.snapshot().recovery.phase, "waiting_compaction");
+    assert.equal(h.kernel.snapshot().recovery.phase, "compacting");
   }));
 
 test("native and supplemental request admissions share a durable cap across reload", () =>

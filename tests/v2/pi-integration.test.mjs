@@ -147,6 +147,117 @@ async function until(fn, timeout = 25000) {
 }
 
 test(
+  "real Pi keeps an explicit summary route across transient streams, rate limits and reload without a GPT fallback",
+  { timeout: 25000 },
+  () =>
+    harness(async (h) => {
+      const before = {
+        mode: process.env.MC_FIXTURE_SUMMARY,
+        trace: process.env.MC_FIXTURE_SUMMARY_TRACE,
+        model: process.env.PI_COMPACTION_SUMMARY_MODEL,
+      };
+      const trace = path.join(h.cwd, "summary-requests.jsonl");
+      try {
+        await h.tool("goal_start", {
+          objective: "Compaction recovery fixture",
+          criteria: [
+            "Preserve precise failures and the independent summary model",
+          ],
+        });
+        await h.tool("compaction_model", {
+          action: "set",
+          target: "lead",
+          model: "mission-fixture/summary",
+          maxRetries: 2,
+        });
+        process.env.PI_COMPACTION_SUMMARY_MODEL = "mission-fixture/model";
+        process.env.MC_FIXTURE_SUMMARY = "stream-once";
+        process.env.MC_FIXTURE_SUMMARY_TRACE = trace;
+        h.settings.applyOverrides({
+          compaction: {
+            enabled: true,
+            reserveTokens: 1024,
+            keepRecentTokens: 100,
+          },
+        });
+        for (let i = 0; i < 2; i++)
+          await h.session.prompt(
+            "V2_TEST:" +
+              JSON.stringify({
+                op: "answer",
+                text: "Completed audit evidence ".repeat(100) + i,
+              }),
+          );
+        const result = await h.session.compact();
+        assert.match(result.summary, /Summary retained/);
+        const requests = JSON.parse(
+          "[" +
+            (await fs.readFile(trace, "utf8")).trim().split("\n").join(",") +
+            "]",
+        );
+        assert.ok(requests.length >= 2);
+        assert.ok(requests.every((r) => r.model === "summary"));
+        process.env.MC_FIXTURE_SUMMARY = "rate-limit";
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "answer",
+              text: "New audit evidence after the saved checkpoint. ".repeat(
+                150,
+              ),
+            }),
+        );
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "flaky",
+              key: crypto.randomUUID(),
+              failures: 1,
+              error:
+                "Your input exceeds the context window of this model. Please adjust your input and try again.",
+            }),
+        );
+        await until(
+          async () =>
+            (await h.snapshot()).recovery?.phase === "compaction_failed",
+          12000,
+        );
+        const failed = await h.snapshot();
+        assert.equal(failed.recovery.phase, "compaction_failed");
+        assert.equal(failed.recovery.nextAt, undefined);
+        assert.match(failed.recovery.reason, /429/);
+        assert.equal(failed.recoveryPlan.state, "compaction_failed");
+        const status = JSON.parse(
+          (await h.tool("compaction_model", { target: "lead" })).content[0]
+            .text,
+        );
+        assert.equal(status.model, "mission-fixture/summary");
+        assert.match(status.diagnostics.errorMessage, /429/);
+        assert.equal(status.diagnostics.retries, 2);
+        const count = (await fs.readFile(trace, "utf8"))
+          .trim()
+          .split("\n").length;
+        await h.session.reload();
+        assert.equal((await h.snapshot()).recovery.phase, "compaction_failed");
+        assert.match((await h.snapshot()).recovery.reason, /429/);
+        assert.equal(
+          (await fs.readFile(trace, "utf8")).trim().split("\n").length,
+          count,
+        );
+      } finally {
+        for (const [key, value] of [
+          ["MC_FIXTURE_SUMMARY", before.mode],
+          ["MC_FIXTURE_SUMMARY_TRACE", before.trace],
+          ["PI_COMPACTION_SUMMARY_MODEL", before.model],
+        ]) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    }),
+);
+
+test(
   "real Pi recovers custom provider errors and exhausts exactly ten supplemental retries",
   { timeout: 25000 },
   () =>

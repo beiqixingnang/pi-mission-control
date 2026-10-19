@@ -377,7 +377,10 @@ export function createWorkerFactory(
         ok: ok && !signal.aborted && !unknown,
         text: lastText,
         error: signal.aborted
-          ? "Task cancelled or exceeded its execution deadline"
+          ? signal.reason instanceof Error &&
+            signal.reason.name !== "AbortError"
+            ? signal.reason.message
+            : "Task cancelled by its controller"
           : lastError,
         outputTokens,
         sessionFile,
@@ -386,7 +389,10 @@ export function createWorkerFactory(
       });
     };
     const abort = () => {
-      lastError = "Task cancelled or exceeded its execution deadline";
+      lastError =
+        signal.reason instanceof Error
+          ? signal.reason.message
+          : "Task cancelled by its controller";
       void finish(false);
     };
     signal.addEventListener("abort", abort, { once: true });
