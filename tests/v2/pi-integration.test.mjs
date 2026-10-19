@@ -146,6 +146,25 @@ async function until(fn, timeout = 25000) {
   throw new Error("Timed out waiting for real Pi integration");
 }
 
+test("real Pi reload exposes archive export and both tool and command preserve the same live session", {timeout:30000}, () =>
+  harness(async h => {
+    await h.session.prompt('V2_TEST:{"op":"answer","text":"ARCHIVE_REAL_PI_READY"}');
+    await h.session.prompt('/mission start Archive the real session | Preserve its original identity');
+    await h.session.prompt('/mission pause');
+    const before=await h.snapshot(),id=h.session.sessionManager.getSessionId(),file=h.session.sessionManager.getSessionFile();
+    await h.session.reload();
+    const destination=path.join(h.cwd,'联合归档');
+    const result=await h.tool('mission_export',{destination,format:'archive'});
+    assert.ok(!result.isError,result.content[0].text);
+    const receipt=JSON.parse(result.content[0].text),manifest=JSON.parse(await fs.readFile(receipt.manifest,'utf8'));
+    assert.equal(manifest.sessionId,id);assert.equal(manifest.status,'complete');assert.ok(manifest.catalog.goal.count>=1);
+    assert.equal(h.session.sessionManager.getSessionId(),id);assert.equal(h.session.sessionManager.getSessionFile(),file);
+    assert.equal((await h.snapshot()).mission.outputTokens,before.mission.outputTokens);
+    const command=path.join(h.cwd,'command-archive');await h.session.prompt('/mission archive '+command);
+    assert.equal(JSON.parse(await fs.readFile(path.join(command,'manifest.json'),'utf8')).sessionId,id);
+    assert.equal(h.session.sessionManager.getSessionId(),id);
+  }));
+
 test(
   "real Pi keeps an explicit summary route across transient streams, rate limits and reload without a GPT fallback",
   { timeout: 25000 },

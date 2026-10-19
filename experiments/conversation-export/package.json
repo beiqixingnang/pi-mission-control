@@ -1,0 +1,9 @@
+{
+  "name": "mission-conversation-export-research",
+  "private": true,
+  "type": "module",
+  "description": "Isolated offline archive UI and streaming feasibility experiments; not an installed Pi extension.",
+  "dependencies": {
+    "stream-json": "1.9.1"
+  }
+}

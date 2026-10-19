@@ -1,3 +1,10 @@
+# 2.2.0 — long-task conversation archives (2026-10-19)
+
+- Add `/mission archive <new-directory>` and `mission_export` with `format=archive`. The exporter runs in a separate local process, reads Pi session files and Mission Control SQLite state without taking the runtime owner lock, and preserves the live conversation and budgets.
+- Export full public text and tool arguments/results into bounded content-addressed chunks with per-file LF boundaries, SHA-256 checksums, explicit partial/missing-source notices, branch ancestry, member/task/goal/evidence associations, archived identities and optional image attachments.
+- Add a light HTML reader with overview, goal and acceptance evidence, per-member task channels, target and branch paging, complete-text search, bounded body paging, local folder selection for offline reading and integrity diagnostics.
+- Keep `/mission export <file.jsonl>` unchanged. Private reasoning, signatures and credential fields stay excluded from the public reading archive; raw runtime backup remains a separate operation.
+
 # 2.1.1 — strict summary routes and bounded compaction recovery (2026-10-19)
 
 - Fix member compaction inheriting the parent-scoped member summary model; budget overrides retain that route, and explicit scoped routes override legacy environment defaults. Missing/unavailable custom routes fail closed instead of sending summaries to the inference GPT.

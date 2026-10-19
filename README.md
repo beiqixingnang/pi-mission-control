@@ -114,6 +114,7 @@ SQLite是唯一正式账本，不要求模型维护MD或JSON文件。当前阶�
 | `/mission unschedule ID` | 结束指定提醒，不影响任务维护 |
 | `/mission reconcile 任务ID` | 检查并停止残留进程后，用户确认unknown执行已结束，允许新attempt |
 | `/mission export 文件.jsonl` | LF流式导出主/成员公开历史，过滤私有块与重复状态 |
+| `/mission archive 新目录` | 生成长任务联合归档：目标树、验收证据、成员/任务关联、完整公开正文分卷和离线HTML阅读器；不覆盖已有目录 |
 
 Pi原生Esc继续停止当前主回合，不替换成全局停止；成员继续工作、结果保留，自动唤醒暂时抑制。发送新指令解除这次回合中断抑制；用户通过`/mission pause/stop`暂停时则必须明确resume。详情面板Esc只返回，不取消任务。
 

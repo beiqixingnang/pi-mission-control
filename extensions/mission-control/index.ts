@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { MissionKernel } from "../../runtime/kernel.ts";
+import { runArchive } from "../../runtime/archive/job.ts";
 import { openBridge } from "../../runtime/bridge.ts";
 import { createWorkerFactory } from "../../runtime/rpc-worker.ts";
 import {
@@ -144,6 +145,8 @@ export default function (pi: ExtensionAPI) {
   let removeCompactionListener: (() => void) | undefined;
   let activeCompactionRun: string | undefined;
   let agentsOpen = false;
+  const archiveControllers = new Set<AbortController>();
+  let archiveGeneration = 0;
   const sourceCache = new Map<string, string>();
   const sourcePath = (value: string) => {
     const cached = sourceCache.get(value);
@@ -307,6 +310,8 @@ export default function (pi: ExtensionAPI) {
     if (panel?.scope === "lead") refresh();
   });
   const close = async () => {
+    archiveGeneration++;
+    for (const controller of archiveControllers) controller.abort();
     removeCompactionListener?.();
     removeCompactionListener = undefined;
     activeCompactionRun = undefined;
@@ -324,6 +329,7 @@ export default function (pi: ExtensionAPI) {
     bridge = undefined;
     ctx?.ui.setWidget("mission-control", undefined);
     ctx?.ui.setStatus("mission-control", undefined);
+    ctx?.ui.setStatus("mission-export", undefined);
   };
   pi.on("session_start", async (_event, context) => {
     await close();
@@ -657,6 +663,36 @@ export default function (pi: ExtensionAPI) {
       throw error;
     } finally {
       signal?.removeEventListener("abort", abort);
+    }
+  }
+  async function exportArchive(
+    context: ExtensionContext,
+    destination: string,
+    signal?: AbortSignal,
+    includeArchived?: boolean,
+  ) {
+    if (!destination.trim()) throw new Error("A new archive directory is required");
+    const k = current(), sessionFile = context.sessionManager.getSessionFile();
+    if (!sessionFile) throw new Error("A saved Pi conversation is required");
+    const controller = new AbortController(), epoch = archiveGeneration;
+    archiveControllers.add(controller);
+    const sessionId = context.sessionManager.getSessionId()!;
+    const currentScope = () => epoch === archiveGeneration && context.sessionManager.getSessionId() === sessionId;
+    try {
+      return await runArchive({
+        stateDirectory: k.options.directory, sessionFile, sessionId,
+        leafId: context.sessionManager.getLeafId() ?? undefined,
+        destination: path.resolve(context.cwd, destination), includeArchived,
+      }, {
+        signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+        onProgress: value => {
+          if (currentScope() && context.mode === "tui")
+            context.ui.setStatus("mission-export", `归档 ${value.phase}${value.bytes !== undefined ? ` · ${Math.floor(value.bytes / 1048576)} MiB` : ""}`);
+        },
+      });
+    } finally {
+      archiveControllers.delete(controller);
+      if (currentScope() && context.mode === "tui") context.ui.setStatus("mission-export", undefined);
     }
   }
   async function workspace(
@@ -1598,13 +1634,16 @@ export default function (pi: ExtensionAPI) {
   tool(
     "mission_export",
     "Export public history",
-    "Stream this session's public lead/member history to a new local file. Reasoning, signatures and repeated private state are excluded; existing files are never overwritten.",
+    "Export this conversation and its members. format=jsonl keeps the bounded public transcript format; format=archive creates a complete-length, chunked HTML reading directory with goals, evidence, tasks and per-file snapshot boundaries, including archived members by default. Source runtime is read-only; existing destinations are never overwritten. A reading archive is not a raw runtime backup.",
     Type.Object({
       destination: Type.String({ minLength: 1 }),
       includeArchived: Type.Optional(Type.Boolean()),
+      format: Type.Optional(Type.Union([Type.Literal("jsonl"), Type.Literal("archive")])),
     }),
     (args, signal, context) =>
-      exportPublic(context, args.destination, signal, args.includeArchived),
+      args.format === "archive"
+        ? exportArchive(context, args.destination, signal, args.includeArchived)
+        : exportPublic(context, args.destination, signal, args.includeArchived),
   );
   tool(
     "mission_history",
@@ -1988,7 +2027,7 @@ export default function (pi: ExtensionAPI) {
   };
   pi.registerCommand("mission", {
     description:
-      "Mission dashboard; goals [export <new-file>|activate <id>|depth <3..12>|skip|cancel <id> <reason>] | policy status|business-only | time|timeline | view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl>",
+      "Mission dashboard; goals [export <new-file>|activate <id>|depth <3..12>|skip|cancel <id> <reason>] | policy status|business-only | time|timeline | view <member> | start <objective> | status | pause | resume | stop | report <seconds> | schedules | unschedule <id> | export <new-file.jsonl> | archive <new-directory>",
     handler: async (args, context) => {
       try {
         const [command, ...rest] = args.trim().split(/\s+/);
@@ -2138,6 +2177,12 @@ export default function (pi: ExtensionAPI) {
             "Recorded your confirmation that the previous process is stopped. A new attempt may now be created.",
             "info",
           );
+          return;
+        }
+        if (command === "archive") {
+          if (!rest.length) throw new Error("Use /mission archive <new-directory>");
+          const result = await exportArchive(context, rest.join(" ").replace(/^"|"$/g, ""));
+          context.ui.notify(`Archive ${result.status}: ${result.index}\n${result.sources} sources, ${result.items} content items. Source tasks and budgets were not changed.`, "info");
           return;
         }
         if (command === "export") {

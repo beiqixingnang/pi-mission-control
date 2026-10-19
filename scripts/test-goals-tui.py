@@ -25,6 +25,10 @@ def copy_package(source, destination):
     for name in ["runtime", "extensions/mission-control", "extensions/workspace", "extensions/project"]:
         shutil.copytree(source / name, destination / name, dirs_exist_ok=True)
     shutil.copy2(source / "package.json", destination / "package.json")
+    for library in ["stream-json", "stream-chain"]:
+        dependency = source / "node_modules" / library
+        if dependency.is_dir():
+            shutil.copytree(dependency, destination / "node_modules" / library, dirs_exist_ok=True)
 
 
 def main():
@@ -153,6 +157,14 @@ def main():
             ledger = json.loads(exported.read_text())
             assert ledger["format"] == "pi-mission-goals"
             assert next(record for record in ledger["records"] if record["goal"]["id"] == leaf["id"])["acceptance"]["evidence"][0]["fingerprint"]["sha256"]
+            archive = workspace / "conversation-archive"
+            line("/mission archive " + str(archive))
+            wait(lambda: (archive / "index.html").exists(), "archive command exported the same real TUI session after reload", 30)
+            archive_manifest = json.loads((archive / "manifest.json").read_text())
+            assert archive_manifest["status"] == "complete"
+            assert archive_manifest["catalog"]["goal"]["count"] == 3
+            assert mission()["id"] == original["id"]
+            assert set((agent / "sessions").rglob("*.jsonl")) == session_files
             assert not re.search(r"UnhandledPromiseRejection|ERR_UNSUPPORTED|Error loading extension", visible)
             report = {"passed": True, "oldVersion": json.loads((old / "package.json").read_text())["version"], "candidateVersion": json.loads((candidate / "package.json").read_text())["version"], "checks": checks, "sameProcess": process.poll() is None, "sameSession": True}
             (artifacts / "wsl-goals-tui-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
