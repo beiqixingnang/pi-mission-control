@@ -163,6 +163,11 @@ export function workerEnvironment(assignment: Assignment) {
   const env: Record<string, string> = {};
   for (const key of new Set([...ENV_ALLOW, ...assignment.settings.inheritEnv]))
     if (process.env[key] !== undefined) env[key] = process.env[key]!;
+  // The configured Pi agent directory is trusted input. Canonicalize it before
+  // the child discovers resources, so advertised skill paths do not use 8.3
+  // aliases that the ordinary restricted file tools intentionally reject.
+  if (env.PI_CODING_AGENT_DIR)
+    env.PI_CODING_AGENT_DIR = fs.realpathSync.native(env.PI_CODING_AGENT_DIR);
   env.MC_V2_MEMBER = JSON.stringify({
     member: assignment.member,
     taskId: assignment.task.id,

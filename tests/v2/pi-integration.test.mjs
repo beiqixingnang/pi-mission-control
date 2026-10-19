@@ -345,6 +345,7 @@ test(
             markers: [
               "MEMBER_PROJECT_CONTEXT_MARKER",
               "MEMBER_SKILL_CATALOG_MARKER",
+              fsSync.realpathSync.native(skill).replaceAll("\\", "\\\\"),
             ],
           }),
         );

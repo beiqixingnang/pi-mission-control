@@ -1,3 +1,8 @@
+# 2.3.1 — canonical skill paths on Windows runners (2026-10-19)
+
+- Canonicalize isolated test agent directories and the configured worker agent directory before resource discovery, so Windows 8.3 TEMP aliases such as RUNNER~1 do not leak into advertised skill paths.
+- Keep arbitrary short aliases, out-of-workspace paths and configuration writes blocked by the existing file policy. Add a real alias regression and verify that member prompts advertise a canonical skill path.
+
 # 2.3.0 — concrete goal scope and task-based member policies (2026-10-19)
 
 - Guide code leaves toward explicit files/batches, with lightweight scope in the existing goal ledger, revision-aware edits, TUI details and bounded full-scope queries. Members receive goal/stage context and can page complete criteria through a read-only goal_context tool.

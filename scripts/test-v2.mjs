@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { hostDir } from "./host.mjs";
-const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-mission-v2-tests-"));
+// Windows hosted runners can expose TEMP through an 8.3 alias (RUNNER~1).
+// Feed the same canonical paths to Pi, fixtures and the restricted file tools.
+const agentDir = fs.realpathSync.native(
+  fs.mkdtempSync(path.join(os.tmpdir(), "pi-mission-v2-tests-")),
+);
 fs.writeFileSync(
   path.join(agentDir, "settings.json"),
   JSON.stringify({ retry: { enabled: false }, cacheWarming: "off" }),

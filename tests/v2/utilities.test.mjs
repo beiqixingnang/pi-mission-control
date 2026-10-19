@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
+import { execFileSync } from "node:child_process";
+import { resolveInput } from "../../extensions/workspace/policy.ts";
 import { streamPublicSession } from "../../runtime/public.ts";
 import {
   summarizeChunks,
@@ -476,6 +478,47 @@ test("network guard rejects private/mapped addresses and worker environments do 
   } finally {
     if (previous === undefined) delete process.env.MC_FIXTURE_SECRET;
     else process.env.MC_FIXTURE_SECRET = previous;
+  }
+});
+
+test("worker resource discovery canonicalizes a configured agent alias without relaxing ordinary path guards", () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "mission-long-agent-directory-"),
+  );
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  try {
+    const alias =
+      process.platform === "win32"
+        ? execFileSync(
+            process.env.ComSpec ?? "cmd.exe",
+            ["/d", "/c", `for %I in ("${directory}") do @echo %~sI`],
+            {
+              encoding: "utf8",
+              windowsHide: true,
+              windowsVerbatimArguments: true,
+            },
+          ).trim()
+        : path.join(directory, "..", path.basename(directory));
+    process.env.PI_CODING_AGENT_DIR = alias;
+    const env = workerEnvironment({
+      member: {},
+      task: { id: "alias", epoch: 1 },
+      directory,
+      bridgeUrl: "unused",
+      token: "test-only",
+      settings: { inheritEnv: [] },
+    });
+    assert.equal(env.PI_CODING_AGENT_DIR, fs.realpathSync.native(directory));
+    assert.equal(process.env.PI_CODING_AGENT_DIR, alias);
+    if (process.platform === "win32" && /~[0-9]/.test(alias))
+      assert.throws(
+        () => resolveInput(path.join(alias, "SKILL.md"), directory),
+        /WORKSPACE_DENIED/,
+      );
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
