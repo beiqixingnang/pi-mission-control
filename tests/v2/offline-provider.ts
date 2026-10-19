@@ -163,7 +163,31 @@ export default function (pi: ExtensionAPI) {
               .filter((m: any) => m.role === "user")
               .at(-1),
             userText = textOf(latestUser);
-          if (command.op === "tools") {
+          if (
+            command.noRepeatWake &&
+            userText.startsWith("Mission Control updates.")
+          ) {
+            answer("FIXTURE_UPDATES_OBSERVED");
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: "stop", message });
+            stream.end();
+            return;
+          }
+          if (command.op === "prompt-markers") {
+            const input = JSON.stringify(
+              context.messages.filter((m: any) => m.role === "system"),
+            );
+            answer({
+              present: command.markers.map((marker: string) => ({
+                marker,
+                present: input.includes(marker),
+              })),
+            });
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: "stop", message });
+            stream.end();
+            return;
+          } else if (command.op === "tools") {
             const declared = new Map<string, any>();
             for (const message of context.messages) {
               if (message.role !== "system") continue;

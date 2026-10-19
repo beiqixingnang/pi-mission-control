@@ -172,6 +172,13 @@ export function workerEnvironment(assignment: Assignment) {
   env.MC_V2_BRIDGE = assignment.bridgeUrl;
   env.MC_V2_TOKEN = assignment.token;
   env.MC_V2_PARENT_PID = String(process.pid);
+  env.MC_V2_WORKER_EXTENSIONS = JSON.stringify(
+    assignment.settings.workerExtensions,
+  );
+  env.MC_V2_SEARCH = JSON.stringify({
+    searchProvider: assignment.settings.searchProvider,
+    searchUrl: assignment.settings.searchUrl,
+  });
   if (assignment.settings.reconnect)
     env.MC_V2_RECONNECT = JSON.stringify(assignment.settings.reconnect);
   env.NODE_NO_WARNINGS = "1";
@@ -228,34 +235,19 @@ export function createWorkerFactory(
     const publicStream = new WorkerPublicStream();
     const sessionDir = path.join(assignment.directory, "sessions", member.id);
     fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
-    const tools = [
-      "read",
-      "ls",
-      "grep",
-      "team_message",
-      "team_wait",
-      "team_collect",
-      "mission_decision",
-      ...(member.workspace.access === "read-write" ? ["write", "edit"] : []),
-      ...(member.workspace.execution === "host"
-        ? ["bash", ...(process.platform === "win32" ? ["powershell"] : [])]
-        : member.workspace.execution === "sandbox"
-          ? ["workspace_exec"]
-          : []),
-    ];
     const args = [
       cliPath,
       "--mode",
       "rpc",
       "--no-extensions",
       "--no-mcp",
-      "--no-skills",
       "--no-prompt-templates",
-      "--no-context-files",
       "--no-themes",
       "--no-approve",
       "--tools",
-      tools.join(","),
+      // The member extension owns the active allowlist and tool-call guard.
+      // A CLI name allowlist would erase configured project tools before discovery.
+      "*",
       "--session-dir",
       sessionDir,
       "--session-id",
@@ -498,7 +490,7 @@ export function createWorkerFactory(
         if (signal.aborted) return;
         const data = await send(
           { type: "prompt", message: assignment.prompt },
-          task.timeoutMs,
+          15000,
         );
         if (data?.disposition === "handled") {
           lastError = "Worker prompt was handled without running";

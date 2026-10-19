@@ -37,6 +37,7 @@ export interface Member {
   thinkingLevel: string;
   workspace: Workspace;
   allow: string[];
+  tools?: string[];
   sessionId: string;
   sessionFile?: string;
   createdAt: number;
@@ -44,6 +45,11 @@ export interface Member {
   revision?: number;
   archivedAt?: number;
   archiveReason?: string;
+}
+export interface TaskTiming {
+  timeoutPolicy?: "none" | "fixed";
+  timeoutMs?: number;
+  queueTimeoutMs?: number;
 }
 export interface Task {
   id: string;
@@ -68,6 +74,10 @@ export interface Task {
   startedAt?: number;
   finishedAt?: number;
   timeoutMs: number;
+  timeoutPolicy?: "none" | "fixed";
+  queueTimeoutMs?: number;
+  timeoutSource?: "default" | "task";
+  executionMs?: number;
   processState: "not-started" | "running" | "stopped" | "unknown";
   reviewDeliveryIds: string[];
   sessionFile?: string;
@@ -82,6 +92,11 @@ export type GoalState =
   | "accepted"
   | "cancelled"
   | "skipped";
+export interface GoalScope {
+  unitKind: "file" | "module" | "batch" | "artifact";
+  items: string[];
+  files?: string[];
+}
 export interface GoalNode {
   id: string;
   rootId: string;
@@ -92,6 +107,7 @@ export interface GoalNode {
   criteria: string[];
   dependsOn: string[];
   module?: string;
+  scope?: GoalScope;
   state: GoalState;
   revision: number;
   reason?: string;
@@ -108,6 +124,7 @@ export interface GoalDefinition {
   criteria: string[];
   dependsOn?: string[];
   module?: string;
+  scope?: GoalScope;
   nextStep?: string;
   estimateMs?: [number, number];
 }
@@ -285,7 +302,7 @@ export interface Settings {
 }
 export const DEFAULT_SETTINGS: Settings = {
   maxParallel: 4,
-  taskTimeoutMs: 600_000,
+  taskTimeoutMs: 0,
   progressIntervalMs: 3_600_000,
   maxMissionMs: 0,
   maxAutonomousTurns: 0,
@@ -303,7 +320,7 @@ export function resolveSettings(raw: Partial<Settings> = {}): Settings {
   const s = { ...DEFAULT_SETTINGS, ...raw };
   for (const [key, min, max] of [
     ["maxParallel", 1, 16],
-    ["taskTimeoutMs", 1000, 3_600_000],
+    ["taskTimeoutMs", 1000, Number.MAX_SAFE_INTEGER],
     ["progressIntervalMs", 1000, 86_400_000],
     ["maxMissionMs", 60_000, 604_800_000],
     ["maxAutonomousTurns", 1, 10000],
@@ -314,7 +331,12 @@ export function resolveSettings(raw: Partial<Settings> = {}): Settings {
     ["recoveryCooldownMs", 1000, 3_600_000],
   ] as const) {
     if (
-      ["maxMissionMs", "maxAutonomousTurns", "maxOutputTokens"].includes(key) &&
+      [
+        "maxMissionMs",
+        "maxAutonomousTurns",
+        "maxOutputTokens",
+        "taskTimeoutMs",
+      ].includes(key) &&
       s[key] === 0
     )
       continue;

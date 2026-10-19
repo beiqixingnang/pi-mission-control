@@ -146,24 +146,336 @@ async function until(fn, timeout = 25000) {
   throw new Error("Timed out waiting for real Pi integration");
 }
 
-test("real Pi reload exposes archive export and both tool and command preserve the same live session", {timeout:30000}, () =>
-  harness(async h => {
-    await h.session.prompt('V2_TEST:{"op":"answer","text":"ARCHIVE_REAL_PI_READY"}');
-    await h.session.prompt('/mission start Archive the real session | Preserve its original identity');
-    await h.session.prompt('/mission pause');
-    const before=await h.snapshot(),id=h.session.sessionManager.getSessionId(),file=h.session.sessionManager.getSessionFile();
-    await h.session.reload();
-    const destination=path.join(h.cwd,'联合归档');
-    const result=await h.tool('mission_export',{destination,format:'archive'});
-    assert.ok(!result.isError,result.content[0].text);
-    const receipt=JSON.parse(result.content[0].text),manifest=JSON.parse(await fs.readFile(receipt.manifest,'utf8'));
-    assert.equal(manifest.sessionId,id);assert.equal(manifest.status,'complete');assert.ok(manifest.catalog.goal.count>=1);
-    assert.equal(h.session.sessionManager.getSessionId(),id);assert.equal(h.session.sessionManager.getSessionFile(),file);
-    assert.equal((await h.snapshot()).mission.outputTokens,before.mission.outputTokens);
-    const command=path.join(h.cwd,'command-archive');await h.session.prompt('/mission archive '+command);
-    assert.equal(JSON.parse(await fs.readFile(path.join(command,'manifest.json'),'utf8')).sessionId,id);
-    assert.equal(h.session.sessionManager.getSessionId(),id);
-  }));
+test(
+  "real Pi role labels do not narrow development tools; explicit tool/workspace limits remain effective",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      const run = async (args) => {
+        const result = await h.tool("subagent", args);
+        assert.ok(!result.isError, result.content[0].text);
+        const id = JSON.parse(result.content[0].text).accepted[0].taskId;
+        await until(async () =>
+          ["completed", "failed"].includes(
+            (await h.snapshot()).tasks.find((t) => t.id === id)?.state,
+          ),
+        );
+        const task = (await h.snapshot()).tasks.find((t) => t.id === id);
+        assert.equal(task.state, "completed", task.error);
+        return {
+          task,
+          text: JSON.parse(
+            (await h.tool("team_collect", { taskId: id })).content[0].text,
+          )[0].result,
+        };
+      };
+      const full = await run({
+        agent: "reviewer",
+        task: 'V2_TEST:{"op":"tools"}',
+      });
+      const tools = JSON.parse(full.text).names;
+      for (const name of [
+        "write",
+        "edit",
+        "bash",
+        "find",
+        "web_search",
+        "web_fetch",
+        "goal_context",
+      ])
+        assert.ok(tools.includes(name), name);
+      for (const name of [
+        "goal_stop",
+        "goal_activate",
+        "team_cancel",
+        "team_disband",
+      ])
+        assert.ok(!tools.includes(name), name);
+      assert.equal(full.task.timeoutPolicy, "none");
+      assert.equal(full.task.timeoutMs, 0);
+      const limited = await run({
+        agent: "worker",
+        workspace: { access: "read-only", execution: "files" },
+        tools: ["read", "find"],
+        timeoutPolicy: "fixed",
+        timeoutMs: 7200000,
+        queueTimeoutMs: 10000,
+        task: 'V2_TEST:{"op":"tools"}',
+      });
+      const selected = JSON.parse(limited.text).names;
+      assert.ok(selected.includes("read"));
+      assert.ok(selected.includes("find"));
+      assert.ok(!selected.includes("bash"));
+      assert.ok(!selected.includes("write"));
+      assert.ok(!selected.includes("web_search"));
+      assert.equal(limited.task.timeoutMs, 7200000);
+      assert.equal(limited.task.queueTimeoutMs, 10000);
+    }),
+);
+
+test(
+  "real Pi members can use configured project tools and scoped goal criteria after reload",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      await fs.writeFile(
+        path.join(process.env.PI_CODING_AGENT_DIR, "mission-control.json"),
+        JSON.stringify({
+          workerExtensions: [
+            fixture,
+            path.join(root, "tests/v2/member-project-fixture.ts"),
+          ],
+          progressIntervalMs: 3600000,
+        }),
+      );
+      await h.session.reload();
+      const planned = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                key: "main",
+                objective: "Member context regression",
+                criteria: ["Batch accepted"],
+              },
+              {
+                key: "stage",
+                parentId: "main",
+                objective: "Decode stage",
+                criteria: ["Decode criteria covered"],
+              },
+              {
+                key: "leaf",
+                parentId: "stage",
+                objective: "Audit decode file group",
+                criteria: ["FULL_CRITERION_FROM_LEDGER"],
+                scope: {
+                  unitKind: "file",
+                  items: ["decode.py", "immediate.py"],
+                },
+              },
+            ],
+          })
+        ).content[0].text,
+      );
+      const leaf = planned.created.find((n) => n.key === "leaf");
+      await h.tool("goal_focus", { goalId: leaf.id, revision: 0 });
+      await h.tool("team_spawn", {
+        name: "project-reader",
+        role: "Review files",
+      });
+      const assign = async (name, args) => {
+        const accepted = await h.tool("team_send", {
+          to: "project-reader",
+          message: "V2_TEST:" + JSON.stringify({ op: "tool", name, args }),
+        });
+        const id = JSON.parse(accepted.content[0].text).taskId;
+        await until(
+          async () =>
+            (await h.snapshot()).tasks.find((t) => t.id === id)?.state ===
+            "completed",
+        );
+        return JSON.parse(
+          (await h.tool("team_collect", { taskId: id })).content[0].text,
+        )[0].result;
+      };
+      assert.match(
+        await assign("project_build_probe", {}),
+        /PROJECT_TOOL_AVAILABLE/,
+      );
+      assert.match(
+        await assign("goal_context", { section: "criteria" }),
+        /FULL_CRITERION_FROM_LEDGER/,
+      );
+      assert.equal((await h.snapshot()).goals.focus.state, "active");
+      await h.session.prompt("/mission pause");
+      await h.session.reload();
+      const definition = JSON.parse(
+        (await h.tool("goal_tree", { goalId: leaf.id, section: "scope" }))
+          .content[0].text,
+      );
+      assert.equal(definition.entries[1].value, "immediate.py");
+    }),
+);
+
+test(
+  "real Pi members load project instructions and can read configured skill resources without broadening file writes",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      await fs.writeFile(
+        path.join(h.cwd, "AGENTS.md"),
+        "MEMBER_PROJECT_CONTEXT_MARKER: carry the assigned task through.\n",
+      );
+      const skillRoot = path.join(
+        process.env.PI_CODING_AGENT_DIR,
+        "skills",
+        "member-resource-fixture",
+      );
+      await fs.mkdir(skillRoot, { recursive: true });
+      const skill = path.join(skillRoot, "SKILL.md");
+      await fs.writeFile(
+        skill,
+        "---\nname: member-resource-fixture\ndescription: MEMBER_SKILL_CATALOG_MARKER\n---\nMEMBER_SKILL_BODY_MARKER\n",
+      );
+      try {
+        await h.tool("team_spawn", {
+          name: "resource-reader",
+          role: "Inspect task resources",
+          workspace: { root: h.cwd, access: "read-only", execution: "files" },
+        });
+        const run = async (command) => {
+          const accepted = await h.tool("team_send", {
+            to: "resource-reader",
+            message: "V2_TEST:" + JSON.stringify(command),
+          });
+          const id = JSON.parse(accepted.content[0].text).taskId;
+          await until(
+            async () =>
+              (await h.snapshot()).tasks.find((t) => t.id === id)?.state ===
+              "completed",
+          );
+          return JSON.parse(
+            (await h.tool("team_collect", { taskId: id })).content[0].text,
+          )[0].result;
+        };
+        const marker = JSON.parse(
+          await run({
+            op: "prompt-markers",
+            markers: [
+              "MEMBER_PROJECT_CONTEXT_MARKER",
+              "MEMBER_SKILL_CATALOG_MARKER",
+            ],
+          }),
+        );
+        assert.ok(marker.present.every((entry) => entry.present));
+        assert.match(
+          await run({ op: "read", file: skill }),
+          /MEMBER_SKILL_BODY_MARKER/,
+        );
+        await fs.writeFile(
+          path.join(process.env.PI_CODING_AGENT_DIR, "private-fixture.txt"),
+          "PRIVATE_RESOURCE_MUST_STAY_OUTSIDE",
+        );
+        assert.match(
+          await run({
+            op: "read",
+            file: path.join(
+              process.env.PI_CODING_AGENT_DIR,
+              "private-fixture.txt",
+            ),
+          }),
+          /WORKSPACE_DENIED/,
+        );
+      } finally {
+        await fs.rm(skillRoot, { recursive: true, force: true });
+      }
+    }),
+);
+
+test(
+  "all Pi delegation entrypoints accept independent task deadlines and keep malformed batches atomic",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      await h.tool("team_spawn", {
+        name: "timed-member",
+        role: "Small bounded task",
+      });
+      const broadcast = await h.tool("team_broadcast", {
+        members: ["timed-member"],
+        message: 'V2_TEST:{"op":"answer","text":"BROADCAST_POLICY"}',
+        timeoutPolicy: "fixed",
+        timeoutMs: 7200000,
+      });
+      assert.ok(!broadcast.isError, broadcast.content[0].text);
+      const first = JSON.parse(broadcast.content[0].text)[0];
+      assert.equal(first.timeoutMs, 7200000);
+      await until(
+        async () =>
+          (await h.snapshot()).tasks.find((t) => t.id === first.id)?.state ===
+          "completed",
+      );
+      const before = (await h.snapshot()).members.length;
+      const invalid = await h.tool("subagent", {
+        tasks: [
+          { task: "Valid" },
+          { task: "Invalid", timeoutPolicy: "fixed", timeoutMs: 0 },
+        ],
+      });
+      assert.equal(invalid.isError, true);
+      assert.equal((await h.snapshot()).members.length, before);
+      const chain = await h.tool("subagent", {
+        timeoutPolicy: "none",
+        chain: [
+          { task: 'V2_TEST:{"op":"answer","text":"CHAIN_FIRST"}' },
+          {
+            task: 'V2_TEST:{"op":"answer","text":"CHAIN_SECOND"}',
+            timeoutPolicy: "fixed",
+            timeoutMs: 7200000,
+          },
+        ],
+      });
+      const ids = JSON.parse(chain.content[0].text).accepted.map(
+        (t) => t.taskId,
+      );
+      await until(async () => {
+        const snapshot = await h.snapshot();
+        return ids.every(
+          (id) =>
+            snapshot.tasks.find((t) => t.id === id)?.state === "completed",
+        );
+      });
+      const tasks = (await h.snapshot()).tasks;
+      assert.equal(tasks.find((t) => t.id === ids[0]).timeoutPolicy, "none");
+      assert.equal(tasks.find((t) => t.id === ids[1]).timeoutMs, 7200000);
+    }),
+);
+
+test(
+  "real Pi reload exposes archive export and both tool and command preserve the same live session",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"ARCHIVE_REAL_PI_READY"}',
+      );
+      await h.session.prompt(
+        "/mission start Archive the real session | Preserve its original identity",
+      );
+      await h.session.prompt("/mission pause");
+      const before = await h.snapshot(),
+        id = h.session.sessionManager.getSessionId(),
+        file = h.session.sessionManager.getSessionFile();
+      await h.session.reload();
+      const destination = path.join(h.cwd, "联合归档");
+      const result = await h.tool("mission_export", {
+        destination,
+        format: "archive",
+      });
+      assert.ok(!result.isError, result.content[0].text);
+      const receipt = JSON.parse(result.content[0].text),
+        manifest = JSON.parse(await fs.readFile(receipt.manifest, "utf8"));
+      assert.equal(manifest.sessionId, id);
+      assert.equal(manifest.status, "complete");
+      assert.ok(manifest.catalog.goal.count >= 1);
+      assert.equal(h.session.sessionManager.getSessionId(), id);
+      assert.equal(h.session.sessionManager.getSessionFile(), file);
+      assert.equal(
+        (await h.snapshot()).mission.outputTokens,
+        before.mission.outputTokens,
+      );
+      const command = path.join(h.cwd, "command-archive");
+      await h.session.prompt("/mission archive " + command);
+      assert.equal(
+        JSON.parse(
+          await fs.readFile(path.join(command, "manifest.json"), "utf8"),
+        ).sessionId,
+        id,
+      );
+      assert.equal(h.session.sessionManager.getSessionId(), id);
+    }),
+);
 
 test(
   "real Pi keeps an explicit summary route across transient streams, rate limits and reload without a GPT fallback",
@@ -1351,6 +1663,7 @@ test(
         name: "persistent-reader",
         role: "reload fixture",
         workspace: { root: h.cwd, execution: "files", access: "read-only" },
+        tools: ["read", "find"],
       });
       const sent = JSON.parse(
         (
@@ -1370,6 +1683,7 @@ test(
       await h.session.reload();
       const state = await h.snapshot();
       assert.equal(state.members[0].id, identity);
+      assert.deepEqual(state.members[0].tools, ["read", "find"]);
       assert.equal(state.mission.status, "paused");
       assert.equal(state.mission.humanPaused, true);
       assert.equal(

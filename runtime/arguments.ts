@@ -67,14 +67,13 @@ export function delegationInput(args: any) {
       model: optionalText(input.model) ?? optionalText(args.model),
       workspace: workspaceInput(
         input.workspace,
-        workspaceInput(args.workspace, {
-          access: ["scout", "reviewer", "planner"].includes(
-            optionalText(input.agent) ?? optionalText(args.agent) ?? "worker",
-          )
-            ? "read-only"
-            : "read-write",
-        }),
+        workspaceInput(args.workspace, { access: "read-write" }),
       ),
+      timeoutPolicy: input.timeoutPolicy ?? args.timeoutPolicy,
+      timeoutMs: input.timeoutMs ?? args.timeoutMs,
+      queueTimeoutMs: input.queueTimeoutMs ?? args.queueTimeoutMs,
+      tools: input.tools ?? args.tools,
+      goalId: input.goalId ?? args.goalId,
     };
   });
   return { inputs, chain: Boolean(chain) };

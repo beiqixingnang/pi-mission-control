@@ -111,6 +111,14 @@ export class GoalPanel {
               ]
             : []),
           ...(goal.module ? [`模块：${goal.module}`] : []),
+          ...(goal.scope
+            ? [
+                `范围（${goal.scope.unitKind}）：${goal.scope.items.join("、")}`,
+                ...(goal.scope.files?.length
+                  ? [`文件：${goal.scope.files.join("、")}`]
+                  : []),
+              ]
+            : []),
           ...(goal.reason ? [`原因：${goal.reason}`] : []),
           ...(goal.nextStep ? [`下一步：${goal.nextStep}`] : []),
           ...detail.blockers.map((b) => `阻塞：${b}`),

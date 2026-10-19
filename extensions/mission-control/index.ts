@@ -41,6 +41,11 @@ import {
 import installReconnect from "./reconnect.ts";
 import { installProject } from "./project.ts";
 import {
+  goalPlanningGuidance,
+  delegationGuidance,
+} from "../../runtime/guidance.ts";
+import { taskTiming } from "../../runtime/task-policy.ts";
+import {
   delegationInput,
   optionalText,
   workspaceInput,
@@ -48,6 +53,32 @@ import {
 
 const optional = (schema: any) =>
   Type.Optional(Type.Union([schema, Type.Null()]));
+const timingSchema = {
+  timeoutPolicy: optional(
+    Type.Union([Type.Literal("none"), Type.Literal("fixed")]),
+  ),
+  timeoutMs: optional(
+    Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  ),
+  queueTimeoutMs: optional(
+    Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  ),
+};
+const scopeSchema = Type.Object({
+  unitKind: Type.Union(
+    ["file", "module", "batch", "artifact"].map((value) => Type.Literal(value)),
+  ),
+  items: Type.Array(Type.String({ minLength: 1, maxLength: 400 }), {
+    minItems: 1,
+    maxItems: 100,
+  }),
+  files: Type.Optional(
+    Type.Array(Type.String({ minLength: 1, maxLength: 400 }), {
+      minItems: 1,
+      maxItems: 100,
+    }),
+  ),
+});
 const pluginVersion: string = JSON.parse(
   fsSync.readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ).version;
@@ -443,6 +474,10 @@ export default function (pi: ExtensionAPI) {
     // building this model request, including schema changes to existing tools.
     activateMissionTools();
     event.systemPromptOptions.promptGuidelines.unshift(
+      goalPlanningGuidance,
+      delegationGuidance,
+    );
+    event.systemPromptOptions.promptGuidelines.unshift(
       `Mission Control ${pluginVersion}: mission_reconcile and mission_control are directly callable lead tools. When the current recovery plan permits model recovery, inspect the actual blocker and use these tools; old claims that only a user slash command can reconcile or resume no_progress are obsolete. Reload itself never attests stopped processes. Explicit user/workspace/budget/decision controls remain authoritative.`,
     );
     event.systemPromptOptions.promptGuidelines.unshift(
@@ -671,28 +706,45 @@ export default function (pi: ExtensionAPI) {
     signal?: AbortSignal,
     includeArchived?: boolean,
   ) {
-    if (!destination.trim()) throw new Error("A new archive directory is required");
-    const k = current(), sessionFile = context.sessionManager.getSessionFile();
+    if (!destination.trim())
+      throw new Error("A new archive directory is required");
+    const k = current(),
+      sessionFile = context.sessionManager.getSessionFile();
     if (!sessionFile) throw new Error("A saved Pi conversation is required");
-    const controller = new AbortController(), epoch = archiveGeneration;
+    const controller = new AbortController(),
+      epoch = archiveGeneration;
     archiveControllers.add(controller);
     const sessionId = context.sessionManager.getSessionId()!;
-    const currentScope = () => epoch === archiveGeneration && context.sessionManager.getSessionId() === sessionId;
+    const currentScope = () =>
+      epoch === archiveGeneration &&
+      context.sessionManager.getSessionId() === sessionId;
     try {
-      return await runArchive({
-        stateDirectory: k.options.directory, sessionFile, sessionId,
-        leafId: context.sessionManager.getLeafId() ?? undefined,
-        destination: path.resolve(context.cwd, destination), includeArchived,
-      }, {
-        signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
-        onProgress: value => {
-          if (currentScope() && context.mode === "tui")
-            context.ui.setStatus("mission-export", `归档 ${value.phase}${value.bytes !== undefined ? ` · ${Math.floor(value.bytes / 1048576)} MiB` : ""}`);
+      return await runArchive(
+        {
+          stateDirectory: k.options.directory,
+          sessionFile,
+          sessionId,
+          leafId: context.sessionManager.getLeafId() ?? undefined,
+          destination: path.resolve(context.cwd, destination),
+          includeArchived,
         },
-      });
+        {
+          signal: signal
+            ? AbortSignal.any([signal, controller.signal])
+            : controller.signal,
+          onProgress: (value) => {
+            if (currentScope() && context.mode === "tui")
+              context.ui.setStatus(
+                "mission-export",
+                `归档 ${value.phase}${value.bytes !== undefined ? ` · ${Math.floor(value.bytes / 1048576)} MiB` : ""}`,
+              );
+          },
+        },
+      );
     } finally {
       archiveControllers.delete(controller);
-      if (currentScope() && context.mode === "tui") context.ui.setStatus("mission-export", undefined);
+      if (currentScope() && context.mode === "tui")
+        context.ui.setStatus("mission-export", undefined);
     }
   }
   async function workspace(
@@ -733,6 +785,9 @@ export default function (pi: ExtensionAPI) {
       ),
     ),
     workspace: optional(WorkspaceSchema),
+    tools: optional(
+      Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
+    ),
     communication: optional(
       Type.Object({ allow: Type.Array(Type.String(), { maxItems: 50 }) }),
     ),
@@ -765,6 +820,7 @@ export default function (pi: ExtensionAPI) {
       thinkingLevel: optionalText(args.thinkingLevel) ?? pi.getThinkingLevel(),
       workspace: await workspace(args.workspace, context),
       allow: args.communication?.allow ?? [],
+      tools: args.tools ?? undefined,
       temporary,
     };
   }
@@ -785,13 +841,16 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_configure",
     "Configure idle member",
-    "Change an idle member's role/model/workspace/communication. Existing running work must finish or be cancelled.",
+    "Change an idle member's role/model/workspace/communication or optional tool allowlist. Omit tools to keep the current list; tools:null restores all permitted tools. Existing running work must finish or be cancelled.",
     Type.Object({
       name: Type.String(),
       role: optional(Type.String()),
       model: optional(Type.String()),
       thinkingLevel: optional(Type.String()),
       workspace: optional(WorkspaceSchema),
+      tools: optional(
+        Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
+      ),
       communication: optional(
         Type.Object({ allow: Type.Array(Type.String()) }),
       ),
@@ -829,6 +888,7 @@ export default function (pi: ExtensionAPI) {
           context,
         );
       if (args.communication) patch.allow = args.communication.allow;
+      if (args.tools !== undefined) patch.tools = args.tools ?? undefined;
       return current().configureMember(args.name, patch);
     },
   );
@@ -854,19 +914,19 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_send",
     "Assign team task",
-    "Durably assign work. TUI/RPC default wait:false returns immediately with automatic completion wakeups. One-shot print/json always waits for the result so Pi can finish normally without abandoning children.",
+    "Durably assign work. Choose deadlines for the actual task: none disables the total deadline; fixed requires positive timeoutMs. Queue timeout is separate. Default has no execution deadline unless configured. TUI/RPC wait:false returns immediately with automatic completion wakeups. One-shot print/json joins children.",
     Type.Object({
       to: Type.String(),
       message: Type.String({ minLength: 1, maxLength: 200000 }),
       wait: Type.Optional(Type.Boolean()),
-      timeoutMs: Type.Optional(
-        Type.Integer({ minimum: 1000, maximum: 3600000 }),
-      ),
+      ...timingSchema,
       goalId: Type.Optional(Type.String()),
     }),
     async (args, signal, context) => {
       const task = current().dispatch(args.to, args.message, {
         timeoutMs: args.timeoutMs,
+        timeoutPolicy: args.timeoutPolicy,
+        queueTimeoutMs: args.queueTimeoutMs,
         goalId: args.goalId,
       });
       if (args.wait || oneShot(context))
@@ -915,11 +975,15 @@ export default function (pi: ExtensionAPI) {
       members: Type.Array(Type.String(), { minItems: 1, maxItems: 16 }),
       message: Type.String({ maxLength: 200000 }),
       goalId: Type.Optional(Type.String()),
+      ...timingSchema,
     }),
     async (args, signal, context) => {
       const tasks = current().store.transaction(() =>
         args.members.map((name: string) =>
-          current().dispatch(name, args.message, { goalId: args.goalId }),
+          current().dispatch(name, args.message, {
+            ...taskTiming(args, current().settings.taskTimeoutMs),
+            goalId: args.goalId,
+          }),
         ),
       );
       return oneShot(context)
@@ -1013,12 +1077,17 @@ export default function (pi: ExtensionAPI) {
   tool(
     "subagent",
     "Delegate isolated task",
-    "Run one task, parallel tasks, or a dependency chain. All are tracked and wake the lead automatically. Default is asynchronous.",
+    "Run one task, parallel tasks, or a dependency chain. Choose workspace, tools and deadlines from the task rather than its role name. Default has full permitted development tools and no total deadline unless configured. Each task can override shared timing. All work is tracked; default is asynchronous.",
     Type.Object({
       agent: optional(Type.String()),
       task: optional(Type.String()),
       model: optional(Type.String()),
       workspace: optional(WorkspaceSchema),
+      tools: optional(
+        Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
+      ),
+      goalId: optional(Type.String()),
+      ...timingSchema,
       tasks: optional(
         Type.Array(
           Type.Object({
@@ -1026,6 +1095,11 @@ export default function (pi: ExtensionAPI) {
             task: Type.String(),
             model: optional(Type.String()),
             workspace: optional(WorkspaceSchema),
+            tools: optional(
+              Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
+            ),
+            goalId: optional(Type.String()),
+            ...timingSchema,
           }),
           { maxItems: 16 },
         ),
@@ -1037,6 +1111,11 @@ export default function (pi: ExtensionAPI) {
             task: Type.String(),
             model: optional(Type.String()),
             workspace: optional(WorkspaceSchema),
+            tools: optional(
+              Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
+            ),
+            goalId: optional(Type.String()),
+            ...timingSchema,
           }),
           { maxItems: 16 },
         ),
@@ -1047,6 +1126,8 @@ export default function (pi: ExtensionAPI) {
       const prepared: {
         definition: Awaited<ReturnType<typeof prepareMember>>;
         task: string;
+        timing: ReturnType<typeof taskTiming>;
+        goalId?: string;
       }[] = [];
       for (const input of inputs) {
         const name = `sub-${(input.agent ?? "worker").replace(/[^a-z0-9-]/g, "").slice(0, 20)}-${randomUUID().slice(0, 8)}`;
@@ -1056,18 +1137,26 @@ export default function (pi: ExtensionAPI) {
             role: input.agent ?? "worker",
             model: input.model ?? args.model,
             workspace: input.workspace,
+            tools: input.tools,
           },
           context,
           true,
         );
-        prepared.push({ definition, task: input.task });
+        prepared.push({
+          definition,
+          task: input.task,
+          timing: taskTiming(input, current().settings.taskTimeoutMs),
+          goalId: input.goalId,
+        });
       }
       const jobs = current().store.transaction(() => {
         let previous: string | undefined;
-        return prepared.map(({ definition, task: input }) => {
+        return prepared.map(({ definition, task: input, timing, goalId }) => {
           current().addMember(definition);
           const task = current().dispatch(definition.name, input, {
             dependsOn: chain ? previous : undefined,
+            ...timing,
+            goalId,
           });
           previous = task.id;
           return task;
@@ -1171,7 +1260,8 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_plan",
     "Register goal plan",
-    "Atomically register main goals and stage/leaf deliverables with explicit acceptance criteria. Default maximum depth is three including the main goal. parentId/dependsOn may reference this batch's keys; no cyclic or cross-main-goal dependencies. Multiple main goals coexist, with only one selected. Plan execution stages before complex implementation.",
+    "Atomically register main goals and stage/leaf deliverables with explicit acceptance criteria. Level 2 organizes phases; level 3+ code leaves name concrete files or an explicitly listed batch, the work and its verifiable output. Record scope when known; a vague subsystem-wide objective is not a useful leaf. Scope describes work and never grants file permissions. Default depth is three; parentId/dependsOn can reference batch keys. " +
+      goalPlanningGuidance,
     Type.Object({
       goals: Type.Array(
         Type.Object({
@@ -1186,6 +1276,7 @@ export default function (pi: ExtensionAPI) {
             Type.Array(Type.String(), { maxItems: 100 }),
           ),
           module: Type.Optional(Type.String({ maxLength: 200 })),
+          scope: Type.Optional(scopeSchema),
           nextStep: Type.Optional(Type.String({ maxLength: 2000 })),
           estimateMs: Type.Optional(
             Type.Tuple([
@@ -1207,6 +1298,7 @@ export default function (pi: ExtensionAPI) {
           revision: node.revision,
         })),
       progress: current().goals.summary(),
+      planningGuidance: goalPlanningGuidance,
     }),
   );
   tool(
@@ -1221,6 +1313,7 @@ export default function (pi: ExtensionAPI) {
           [
             "summary",
             "definition",
+            "scope",
             "acceptance",
             "history",
             "receipts",
@@ -1240,6 +1333,17 @@ export default function (pi: ExtensionAPI) {
         objective: cleanText(node.objective, 300),
         criteria: undefined,
         criterionCount: node.criteria.length,
+        scope: node.scope
+          ? {
+              unitKind: node.scope.unitKind,
+              items: node.scope.items
+                .slice(0, 2)
+                .map((value: string) => cleanText(value, 120)),
+              itemCount: node.scope.items.length,
+              fileCount: node.scope.files?.length ?? 0,
+              full: "goal_tree(section:scope)",
+            }
+          : undefined,
         reason: node.reason ? cleanText(node.reason, 300) : undefined,
         nextStep: node.nextStep ? cleanText(node.nextStep, 300) : undefined,
       });
@@ -1251,6 +1355,7 @@ export default function (pi: ExtensionAPI) {
             goalId: detail.goal.id,
             revision: detail.goal.revision,
             objective: detail.goal.objective,
+            scope: brief(detail.goal).scope,
             dependsOn: detail.goal.dependsOn,
             nextStep: detail.goal.nextStep,
             reason: detail.goal.reason,
@@ -1266,26 +1371,37 @@ export default function (pi: ExtensionAPI) {
           };
         }
         const entries =
-          args.section === "acceptance"
-            ? (detail.acceptance?.evidence ?? [])
-            : args.section === "history"
-              ? detail.history.map((r) => ({
-                  id: r.id,
-                  revision: r.revision,
-                  at: r.at,
-                  imported: r.imported,
-                }))
-              : args.section === "receipts"
-                ? detail.receipts
-                : args.section === "tasks"
-                  ? detail.tasks.map((t) => ({
-                      id: t.id,
-                      goalId: t.goalId,
-                      state: t.state,
-                      processState: t.processState,
-                      resultPath: t.resultPath,
-                    }))
-                  : undefined;
+          args.section === "scope"
+            ? [
+                ...(detail.goal.scope?.items.map((value) => ({
+                  kind: "item",
+                  value,
+                })) ?? []),
+                ...(detail.goal.scope?.files?.map((value) => ({
+                  kind: "file",
+                  value,
+                })) ?? []),
+              ]
+            : args.section === "acceptance"
+              ? (detail.acceptance?.evidence ?? [])
+              : args.section === "history"
+                ? detail.history.map((r) => ({
+                    id: r.id,
+                    revision: r.revision,
+                    at: r.at,
+                    imported: r.imported,
+                  }))
+                : args.section === "receipts"
+                  ? detail.receipts
+                  : args.section === "tasks"
+                    ? detail.tasks.map((t) => ({
+                        id: t.id,
+                        goalId: t.goalId,
+                        state: t.state,
+                        processState: t.processState,
+                        resultPath: t.resultPath,
+                      }))
+                    : undefined;
         const pageSize =
           args.section === "receipts" ? Math.min(limit, 4) : limit;
         if (entries)
@@ -1350,7 +1466,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_edit",
     "Update goal progress",
-    "Update a goal's definition, blockers, next step or estimate. state:planned explicitly reopens accepted work and invalidates affected parent/dependent acceptances while retaining history. Cannot accept or silently exclude scope. For a held mission, definition edits preserve all execution holds and budgets.",
+    "Update a goal's definition, concrete scope, blockers, next step or estimate. Scope changes revise the goal and invalidate affected acceptances. Keep code leaves at explicit file or batch level. state:planned reopens accepted work. Cannot accept or silently exclude scope; holds and budgets remain authoritative.",
     Type.Object({
       goalId: Type.String(),
       revision: Type.Integer({ minimum: 0 }),
@@ -1362,6 +1478,7 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
       dependsOn: Type.Optional(Type.Array(Type.String(), { maxItems: 100 })),
+      scope: optional(scopeSchema),
       state: Type.Optional(
         Type.Union(
           ["planned", "active", "review", "blocked"].map((value) =>
@@ -1638,7 +1755,9 @@ export default function (pi: ExtensionAPI) {
     Type.Object({
       destination: Type.String({ minLength: 1 }),
       includeArchived: Type.Optional(Type.Boolean()),
-      format: Type.Optional(Type.Union([Type.Literal("jsonl"), Type.Literal("archive")])),
+      format: Type.Optional(
+        Type.Union([Type.Literal("jsonl"), Type.Literal("archive")]),
+      ),
     }),
     (args, signal, context) =>
       args.format === "archive"
@@ -2180,9 +2299,16 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (command === "archive") {
-          if (!rest.length) throw new Error("Use /mission archive <new-directory>");
-          const result = await exportArchive(context, rest.join(" ").replace(/^"|"$/g, ""));
-          context.ui.notify(`Archive ${result.status}: ${result.index}\n${result.sources} sources, ${result.items} content items. Source tasks and budgets were not changed.`, "info");
+          if (!rest.length)
+            throw new Error("Use /mission archive <new-directory>");
+          const result = await exportArchive(
+            context,
+            rest.join(" ").replace(/^"|"$/g, ""),
+          );
+          context.ui.notify(
+            `Archive ${result.status}: ${result.index}\n${result.sources} sources, ${result.items} content items. Source tasks and budgets were not changed.`,
+            "info",
+          );
           return;
         }
         if (command === "export") {

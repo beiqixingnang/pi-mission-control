@@ -9,6 +9,7 @@ import type {
   GoalNode,
   GoalReceipt,
   GoalState,
+  GoalScope,
   Mission,
 } from "./types.ts";
 import { cleanText } from "./public.ts";
@@ -36,6 +37,26 @@ function estimate(value?: [number, number]) {
       "estimateMs must be [minimum, maximum] remaining effort in milliseconds",
     );
   return value;
+}
+function scope(value?: GoalScope | null): GoalScope | undefined {
+  if (value == null) return undefined;
+  if (!["file", "module", "batch", "artifact"].includes(value.unitKind))
+    throw new Error("Scope unitKind must be file, module, batch or artifact");
+  const list = (items: string[], name: string) => {
+    if (!Array.isArray(items) || !items.length || items.length > 100)
+      throw new Error(`${name} requires 1..100 explicit entries`);
+    return [...new Set(items.map((item) => text(item, name, 400)))];
+  };
+  const result = {
+    unitKind: value.unitKind,
+    items: list(value.items, "Scope items"),
+    ...(value.files !== undefined
+      ? { files: list(value.files, "Scope files") }
+      : {}),
+  };
+  if (JSON.stringify(result).length > 16000)
+    throw new Error("Scope exceeds 16000 characters; use a smaller batch");
+  return result;
 }
 
 /** Durable acceptance ledger. Task settlement is deliberately separate from acceptance. */
@@ -241,6 +262,7 @@ export class GoalLedger {
           module: definition.module
             ? text(definition.module, "Module", 200)
             : undefined,
+          scope: scope(definition.scope),
           nextStep: definition.nextStep
             ? text(definition.nextStep, "Next step")
             : undefined,
@@ -398,6 +420,7 @@ export class GoalLedger {
       reason?: string;
       nextStep?: string;
       estimateMs?: [number, number];
+      scope?: GoalScope | null;
     },
     revision?: number,
     allowExclusion = false,
@@ -431,6 +454,7 @@ export class GoalLedger {
         patch.objective !== undefined ||
         patch.criteria !== undefined ||
         patch.dependsOn !== undefined ||
+        patch.scope !== undefined ||
         patch.state === "planned" ||
         patch.state === "cancelled" ||
         patch.state === "skipped";
@@ -460,6 +484,7 @@ export class GoalLedger {
         ...(patch.dependsOn !== undefined
           ? { dependsOn: [...new Set(patch.dependsOn)] }
           : {}),
+        ...(patch.scope !== undefined ? { scope: scope(patch.scope) } : {}),
         ...(patch.state !== undefined
           ? { state: patch.state }
           : definitionChanged

@@ -12,7 +12,7 @@ test("empty optional arrays/null never hide a supplied task, parallel list or ch
   });
   assert.equal(chain.chain, true);
   assert.equal(chain.inputs[0].agent, "reviewer");
-  assert.equal(chain.inputs[0].workspace.access, "read-only");
+  assert.equal(chain.inputs[0].workspace.access, "read-write");
   assert.equal(
     delegationInput({ task: "single", tasks: [], chain: [] }).chain,
     false,

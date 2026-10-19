@@ -15,6 +15,8 @@ import {
 import { WorkspaceAccess, resolveWorkspace } from "../workspace/policy.ts";
 import { runSandbox } from "../workspace/sandbox.ts";
 import installReconnect from "./reconnect.ts";
+import { searchWeb, fetchPage } from "../../runtime/web.ts";
+import { fileURLToPath } from "node:url";
 import type { Member } from "../../runtime/types.ts";
 
 const result = (value: unknown) => ({
@@ -56,6 +58,22 @@ export default async function (pi: ExtensionAPI) {
     config.directory,
   ]);
   const names: string[] = [];
+  let permitted = new Set<string>();
+  let resourceAccess: WorkspaceAccess[] = [];
+  const readAccess = async (source: string) => {
+    try {
+      await access.authorize(source);
+      return access;
+    } catch (error) {
+      for (const resource of resourceAccess) {
+        try {
+          await resource.authorize(source);
+          return resource;
+        } catch {}
+      }
+      throw error;
+    }
+  };
   const register = <TParams extends TSchema, TDetails, TState>(
     definition: ToolDefinition<TParams, TDetails, TState>,
   ) => {
@@ -93,11 +111,9 @@ export default async function (pi: ExtensionAPI) {
         if (typeof source !== "string")
           throw new Error("File tool path must be a string");
         const writing = ["write", "edit"].includes(definition.name);
-        const target = await access.authorize(
-          source,
-          writing,
-          definition.name === "write",
-        );
+        const target = await (
+          writing ? access : await readAccess(source)
+        ).authorize(source, writing, definition.name === "write");
         return original(id, { ...args, path: target }, signal, update, ctx);
       },
     };
@@ -107,9 +123,9 @@ export default async function (pi: ExtensionAPI) {
       createReadToolDefinition(process.cwd(), {
         operations: {
           access: async (target) => {
-            await access.authorize(target);
+            await readAccess(target);
           },
-          readFile: (target) => access.read(target),
+          readFile: async (target) => (await readAccess(target)).read(target),
           detectImageMimeType: async () => undefined,
         },
       }),
@@ -242,6 +258,112 @@ export default async function (pi: ExtensionAPI) {
       },
     });
   register({
+    name: "find",
+    label: "Find workspace files",
+    description:
+      "Find authorized regular files by a glob (*, **, ?) or literal path fragment. Bounded to 10000 entries and 500 results.",
+    parameters: Type.Object({
+      pattern: Type.String({ maxLength: 400 }),
+      path: Type.Optional(Type.String()),
+    }),
+    async execute(_id, args, signal) {
+      const root = await access.authorize(args.path ?? ".");
+      const escape = (value: string) =>
+        value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+      const matcher =
+        args.pattern.includes("*") || args.pattern.includes("?")
+          ? new RegExp(
+              "^" +
+                args.pattern
+                  .split("**")
+                  .map((part) => part.split("*").map(escape).join("[^/]*"))
+                  .join(".*")
+                  .replaceAll("\\?", ".") +
+                "$",
+            )
+          : undefined;
+      const matches: string[] = [];
+      let visits = 0;
+      async function walk(file: string) {
+        signal?.throwIfAborted();
+        if (++visits > 10000 || matches.length >= 500) return;
+        const stat = await fs.lstat(file);
+        if (stat.isSymbolicLink()) return;
+        if (stat.isDirectory())
+          for (const entry of await fs.readdir(file, { withFileTypes: true })) {
+            if (
+              [
+                ".git",
+                ".pi",
+                ".agents",
+                "node_modules",
+                ".mission-control",
+              ].includes(entry.name)
+            )
+              continue;
+            await walk(path.join(file, entry.name));
+            if (visits > 10000 || matches.length >= 500) break;
+          }
+        else if (stat.isFile()) {
+          await access.authorize(file);
+          const relative = path.relative(root, file).replaceAll("\\", "/");
+          if (
+            matcher
+              ? matcher.test(relative) || matcher.test(path.basename(file))
+              : relative.includes(args.pattern)
+          )
+            matches.push(relative);
+        }
+      }
+      await walk(root);
+      return result({
+        files: matches,
+        bounded: visits > 10000 || matches.length >= 500,
+      });
+    },
+  });
+  const searchConfig = JSON.parse(process.env.MC_V2_SEARCH ?? "{}");
+  register({
+    name: "web_search",
+    label: "Search web",
+    description:
+      "Search public references for the assigned task using the configured provider.",
+    parameters: Type.Object({
+      query: Type.String({ minLength: 1, maxLength: 2000 }),
+    }),
+    async execute(_id, args, signal) {
+      return result(await searchWeb(args.query, searchConfig, signal));
+    },
+  });
+  register({
+    name: "web_fetch",
+    label: "Fetch public page",
+    description:
+      "Read a public HTTP(S) page for the assigned task; private hosts and unbounded responses are rejected.",
+    parameters: Type.Object({ url: Type.String() }),
+    async execute(_id, args, signal) {
+      return result(await fetchPage(args.url, signal));
+    },
+  });
+  register({
+    name: "goal_context",
+    label: "Read assigned goal",
+    description:
+      "Read this task's goal revision, parent stages, scope and acceptance criteria. Fetch missing pages when the assignment preview is incomplete; do not duplicate a complete lookup. Read-only; cannot edit or accept any goal.",
+    parameters: Type.Object({
+      section: Type.Optional(
+        Type.Union(
+          ["summary", "criteria", "scope"].map((value) => Type.Literal(value)),
+        ),
+      ),
+      offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
+    }),
+    async execute(id, args) {
+      return result(await request(id, { op: "goal-context", ...args }));
+    },
+  });
+  register({
     name: "team_message",
     label: "Team message",
     description:
@@ -260,7 +382,13 @@ export default async function (pi: ExtensionAPI) {
         ]),
       ),
       timeoutMs: Type.Optional(
-        Type.Integer({ minimum: 1000, maximum: 3600000 }),
+        Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+      ),
+      timeoutPolicy: Type.Optional(
+        Type.Union([Type.Literal("none"), Type.Literal("fixed")]),
+      ),
+      queueTimeoutMs: Type.Optional(
+        Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
       ),
     }),
     async execute(id, args) {
@@ -304,7 +432,7 @@ export default async function (pi: ExtensionAPI) {
     },
   });
   pi.on("tool_call", (event) => {
-    if (!names.includes(event.toolName))
+    if (!permitted.has(event.toolName))
       return {
         block: true,
         reason: "Tool is outside this member's explicit capability set",
@@ -321,7 +449,83 @@ export default async function (pi: ExtensionAPI) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let failures = 0;
   pi.on("session_start", (_event, ctx) => {
-    pi.setActiveTools(names);
+    const configured: string[] = JSON.parse(
+      process.env.MC_V2_WORKER_EXTENSIONS ?? "[]",
+    );
+    const sourcePath = (value: string) =>
+      path
+        .resolve(value.startsWith("file:") ? fileURLToPath(value) : value)
+        .replaceAll("\\", "/")
+        .toLowerCase();
+    const extraSources = new Set(configured.map(sourcePath));
+    extraSources.add(
+      sourcePath(
+        path.join(
+          path.dirname(fileURLToPath(import.meta.url)),
+          "compaction.ts",
+        ),
+      ),
+    );
+    const coordinator = new Set([
+      "team_spawn",
+      "team_configure",
+      "team_disband",
+      "team_send",
+      "team_broadcast",
+      "team_cancel",
+      "team_resume",
+      "goal_start",
+      "goal_plan",
+      "goal_edit",
+      "goal_focus",
+      "goal_accept",
+      "goal_activate",
+      "goal_update",
+      "goal_stop",
+      "goal_finish",
+      "mission_complete",
+      "mission_control",
+      "mission_policy",
+      "mission_recover",
+      "mission_reconcile",
+      "mission_report",
+      "mission_compact",
+      "mission_wait_external",
+      "mission_signal",
+      "supervisor_control",
+      "schedule",
+      "subagent",
+      "reconnect_config",
+      "project_status",
+      "project_resolve",
+      "project_apply",
+      "project_recover",
+    ]);
+    const extras = pi
+      .getAllTools()
+      .filter(
+        (tool) =>
+          tool.exposure !== "hidden" &&
+          extraSources.has(sourcePath(tool.sourceInfo.path)) &&
+          !coordinator.has(tool.name),
+      )
+      .map((tool) => tool.name);
+    const available = new Set([...names, ...extras]);
+    if (member.tools?.some((name) => !available.has(name)))
+      throw new Error(
+        "Requested member tool is unavailable under its workspace/extension policy",
+      );
+    const coordination = [
+      "team_message",
+      "team_wait",
+      "team_collect",
+      "mission_decision",
+      "goal_context",
+    ];
+    permitted = new Set(
+      member.tools ? [...coordination, ...member.tools] : available,
+    );
+    pi.setActiveTools([...permitted]);
     timer = setInterval(() => {
       let alive = true;
       try {
@@ -349,9 +553,25 @@ export default async function (pi: ExtensionAPI) {
     }, 2000);
     timer.unref();
   });
-  pi.on("before_agent_start", (event) => {
+  pi.on("before_agent_start", async (event) => {
+    resourceAccess = [];
+    for (const skill of event.systemPromptOptions.skills) {
+      const root = await fs.realpath(skill.baseDir);
+      resourceAccess.push(
+        new WorkspaceAccess(
+          {
+            root,
+            access: "read-only",
+            execution: "disabled",
+            extraReadRoots: [],
+          },
+          process.cwd(),
+        ),
+      );
+    }
+    pi.setActiveTools([...permitted]);
     event.systemPromptOptions.promptGuidelines.push(
-      `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use team_message for permitted peers, team_wait alone for descendants, and report only significant decisions/failures to lead. Never ask the lead to run routine tests on your behalf.`,
+      `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use tools needed for the actual approved task; role names add no separate restrictions. Use goal_context for complete assigned criteria and scope. Reuse valid evidence, report concrete results and uncovered items, and let the lead record acceptance. Choose routine methods yourself; avoid repeated checks or needless permission requests. Use team_message for permitted peers and team_wait alone for descendants. Never ask the lead to run routine tests on your behalf when your tools allow them; report an actual capability gap precisely.`,
     );
   });
   pi.on("session_shutdown", () => {

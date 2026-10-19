@@ -2,7 +2,7 @@
 
 非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **2.1.1**，主对话直接获得51个插件工具。支持默认三级目标树、阶段依赖、逐项证据验收和多个主目标，一次只激活一个。主界面仅简要显示目标及二、三级验收数，`/mission goals`打开详细看板。独立摘要模型按主/成员作用域严格选择，支持有界限流及断流恢复、失败块降载与缓存进度。默认在批准范围内自主决定执行细节，可用`mission_policy`检查或应用。稳定版只提供 TUI 操作界面，浏览器操作原型已移除。恢复工具见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
+当前版本 **2.3.0**，主对话直接获得51个插件工具。支持默认三级目标树、明确文件/批次范围、阶段依赖和逐项证据验收。子智能体默认没有任务硬截止，主模型按实际任务选择时限、工具和工作区；角色名称不再自动缩减权限。主界面简要显示目标及二、三级验收数，`/mission goals`打开详细看板。独立摘要模型支持限流、断流恢复及缓存。TUI负责操作，静态HTML归档用于离线阅读。恢复工具见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
 
 需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
 
@@ -144,6 +144,12 @@ Pi原生Esc继续停止当前主回合，不替换成全局停止；成员继续
 
 ## 成员与权限
 
+主模型根据任务选择限制，不机械沿用角色模板。代码审查、实现和验证默认提供授权范围内完整开发工具；`scout/reviewer/planner`只是角色名称，不再自动设成只读。需要只读时显式设置 `workspace.access:"read-only"` 和 `execution:"files"` 或合适的 sandbox。默认成员另有 find、web_search、web_fetch 和只读 goal_context，后者分页读取当前任务的完整标准与范围，不允许修改或验收目标。
+
+可选 `tools:["read","find"]` 明确收窄成员工具；省略时开放当前工作区策略及受信任 workerExtensions 所提供的可用工具，`team_configure(tools:null)`恢复此默认。协调通信与 goal_context 保留；全局目标切换、停止和其他成员管理不作为普通成员工具开放。配置的项目工具属于受信任扩展，其副作用由扩展自身实现；不能把宿主命令或第三方工具宣称为OS级路径隔离。
+
+成员加载自己工作目录适用的项目指令和已配置技能；技能资源目录只额外授予读取，不扩大项目写权限。MCP和其他用户插件不会自动全部启动；需要的项目扩展仍由用户配置 workerExtensions，再按成员工具策略暴露。
+
 ```json
 {
   "name": "cpu-executor",
@@ -208,12 +214,12 @@ Pi原生Esc继续停止当前主回合，不替换成全局停止；成员继续
 
 **维护器依赖Pi进程存活。关闭Pi或系统休眠期间不会启动模型回合。** 恢复后扫描到期提醒，循环提醒只补最近一次。没有安装独立服务、Windows计划任务或cron。失败恢复有退避与次数上限，预算耗尽明确显示需要处理。
 
-默认4并行、每任务10分钟，目标的时间、自动回合及主输出上限均为0（不启用硬截止）；只有用户明确配置正值时才限制。用户配置`<Pi agent目录>/mission-control.json`：
+默认4并行，任务与目标均没有默认硬截止。模型可以根据实际任务设置固定时限；已有用户配置的正值仍保留。用户配置`<Pi agent目录>/mission-control.json`：
 
 ```json
 {
   "maxParallel": 4,
-  "taskTimeoutMs": 600000,
+  "taskTimeoutMs": 0,
   "progressIntervalMs": 3600000,
   "maxMissionMs": 0,
   "maxAutonomousTurns": 0,
@@ -228,6 +234,10 @@ Pi原生Esc继续停止当前主回合，不替换成全局停止；成员继续
 ```
 
 自定义provider由扩展注册时，将受信任扩展路径加入workerExtensions；模型不能指定加载任意扩展。Pi的models/auth正文不被插件复制。
+
+`team_send`、`team_broadcast`、`subagent`（包括批量/链条的单项覆盖）和成员向下派工共用时限策略：`timeoutPolicy:"none"`不设执行截止；`"fixed"`配正数`timeoutMs`，不再限于一小时；`queueTimeoutMs`单独约束排队。固定时限累计该任务实际执行的回合，排队及等待下游不计入。单个API、RPC控制请求与命令仍有各自超时；不将心跳或没有输出当成业务进展，也不默认因安静而杀任务。取消、暂停新派工、重载中断及未知进程核对仍有效，原已登记任务保留其时限。
+
+WSL固定回归会话位于 `/home/lishuo/pi-mission-control-test`，与实际开发会话分离；通过其 `open-test-session.sh`恢复。新增 `scripts/test-task-policies-tui.py`用于在此专用会话中替换候选包、同进程两次/reload并检查范围/验收和成员能力；使用离线provider。
 
 活动计时仅累计主回合或成员实际执行区间，排除重连冷却、裁决/外部等待、暂停和离线时间；主会话连接失败但成员仍在执行时继续计时。旧版没有活动记录的区间不伪装成精确统计；若用户已显式设置时间上限，则保留旧耗时的保守估算。`/mission resume`显式续期本轮限额时仍保留累计活动耗时。旧默认预算阻塞可在重载后解除，已有回合和输出计数保留，真实暂停和显式耗尽的限额不会被自动解除。
 

@@ -1,3 +1,10 @@
+# 2.3.0 — concrete goal scope and task-based member policies (2026-10-19)
+
+- Guide code leaves toward explicit files/batches, with lightweight scope in the existing goal ledger, revision-aware edits, TUI details and bounded full-scope queries. Members receive goal/stage context and can page complete criteria through a read-only goal_context tool.
+- Default new tasks to no execution deadline; support none/fixed timing and independent queue deadlines across every delegation entrypoint, including chains and downstream member tasks. Preserve explicit settings and stored task policies, cancellation, reload interruption and process reconciliation.
+- Stop narrowing temporary members based only on role names. Provide permitted development/search tools, project context and skills, with optional explicit member tool allowlists; expose configured worker-extension tools through the member capability guard without granting global team controls.
+- Add isolated real Pi regressions and a persistent dedicated WSL test conversation for candidate upgrades through /reload before production installation.
+
 # 2.2.2 — remove browser operation prototype (2026-10-19)
 
 - Remove the unpublished browser/HTTP operation prototype, its concept page and prototype tests.

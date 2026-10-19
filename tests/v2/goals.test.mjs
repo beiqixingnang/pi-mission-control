@@ -49,6 +49,58 @@ const claim = (criterion = 1) => ({
   source: "statement",
   summary: "Concrete fixture result recorded for this criterion",
 });
+test("explicit scope survives reload/export and revising it invalidates affected acceptance without breaking legacy goals", () =>
+  using(async (h) => {
+    const nodes = h.kernel.planGoals([
+      { key: "main", objective: "Scope project", criteria: ["Accepted batch"] },
+      {
+        key: "stage",
+        parentId: "main",
+        objective: "Stage",
+        criteria: ["Accepted files"],
+      },
+      {
+        key: "leaf",
+        parentId: "stage",
+        objective: "Check decode",
+        criteria: ["Findings recorded"],
+        scope: { unitKind: "file", items: ["decode.py"], files: ["decode.py"] },
+      },
+    ]);
+    const leaf = nodes[2];
+    h.kernel.acceptGoal(leaf.id, [claim()], 0);
+    const acceptanceId = h.kernel.goals.node(leaf.id).acceptanceId;
+    await h.reload();
+    assert.deepEqual(h.kernel.goals.node(leaf.id).scope, leaf.scope);
+    h.kernel.editGoal(
+      leaf.id,
+      { scope: { unitKind: "batch", items: ["decode.py", "immediate.py"] } },
+      0,
+    );
+    const revised = h.kernel.goals.node(leaf.id);
+    assert.equal(revised.revision, 1);
+    assert.equal(revised.state, "planned");
+    assert.equal(revised.acceptanceId, undefined);
+    assert.ok(h.kernel.store.acceptance(acceptanceId));
+    assert.throws(
+      () =>
+        h.kernel.editGoal(
+          leaf.id,
+          { scope: { unitKind: "file", items: [] } },
+          1,
+        ),
+      /Scope items/,
+    );
+    assert.equal(h.kernel.goals.node(leaf.id).revision, 1);
+    const target = path.join(h.directory, "scope-export.json");
+    h.kernel.goals.export(target);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(target)).nodes.find((n) => n.id === leaf.id)
+        .scope,
+      revised.scope,
+    );
+    assert.equal(h.kernel.goals.node(nodes[1].id).scope, undefined);
+  }));
 function plan(h) {
   const nodes = h.kernel.planGoals([
     {

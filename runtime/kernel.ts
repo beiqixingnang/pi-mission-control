@@ -7,6 +7,7 @@ import { LeadRecovery } from "./recovery.ts";
 import { contextLimitError } from "./reconnect.ts";
 import { MissionActivityClock } from "./activity-clock.ts";
 import { GoalLedger } from "./goals.ts";
+import { taskTiming, executionDeadline } from "./task-policy.ts";
 import {
   resolveSettings,
   terminal,
@@ -25,6 +26,7 @@ import {
   type GoalDefinition,
   type GoalEvidence,
   type GoalNode,
+  type TaskTiming,
 } from "./types.ts";
 
 const noProgressReason =
@@ -876,7 +878,10 @@ export class MissionKernel {
   configureMember(
     name: string,
     patch: Partial<
-      Pick<Member, "model" | "thinkingLevel" | "allow" | "role" | "workspace">
+      Pick<
+        Member,
+        "model" | "thinkingLevel" | "allow" | "role" | "workspace" | "tools"
+      >
     >,
   ) {
     const m = this.store.member(name);
@@ -942,6 +947,8 @@ export class MissionKernel {
       attemptOf?: string;
       dependsOn?: string;
       timeoutMs?: number;
+      timeoutPolicy?: TaskTiming["timeoutPolicy"];
+      queueTimeoutMs?: number;
       goalId?: string;
     } = {},
   ): Task {
@@ -996,9 +1003,7 @@ export class MissionKernel {
       mission.id,
       options.goalId ?? parent?.goalId,
     );
-    const timeout = options.timeoutMs ?? this.settings.taskTimeoutMs;
-    if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 3_600_000)
-      throw new Error("timeoutMs must be between 1000 and 3600000");
+    const timing = taskTiming(options, this.settings.taskTimeoutMs);
     const id = randomUUID(),
       now = this.now();
     const t: Task = {
@@ -1018,7 +1023,8 @@ export class MissionKernel {
       inputPath: this.store.artifact(id, "input", message),
       createdAt: now,
       updatedAt: now,
-      timeoutMs: timeout,
+      ...timing,
+      executionMs: 0,
       processState: "not-started",
       reviewDeliveryIds: [],
     };
@@ -1046,7 +1052,13 @@ export class MissionKernel {
     return this.dispatch(
       old.member,
       this.store.readArtifact(old.inputPath, 200_000),
-      { attemptOf: old.id, timeoutMs: old.timeoutMs, goalId: old.goalId },
+      {
+        attemptOf: old.id,
+        timeoutMs: old.timeoutMs,
+        timeoutPolicy: old.timeoutPolicy,
+        queueTimeoutMs: old.queueTimeoutMs,
+        goalId: old.goalId,
+      },
     );
   }
   async cancelTask(id: string, reason = "Cancelled by coordinator") {
@@ -2234,14 +2246,18 @@ export class MissionKernel {
           if (task.missionId !== mission?.id) continue;
           if (task.goalId && this.goals.blockers(task.goalId).length) continue;
           if (task.blockedReason) continue;
-          if (task.phase === "work" && now - task.createdAt >= task.timeoutMs) {
+          if (
+            task.phase === "work" &&
+            task.queueTimeoutMs &&
+            now - task.createdAt >= task.queueTimeoutMs
+          ) {
             this.finishWithoutWorker(
               task,
               "Queue deadline exceeded; no member process was started",
             );
             continue;
           }
-          if (this.live.size >= this.settings.maxParallel) break;
+          if (this.live.size >= this.settings.maxParallel) continue;
           if (
             [...this.live.keys()].some(
               (id) => this.store.task(id)?.memberId === task.memberId,
@@ -2453,6 +2469,143 @@ export class MissionKernel {
       );
     }
   }
+  private assignedGoalContext(
+    task: Task,
+    section = "summary",
+    offset = 0,
+    limit = 5,
+  ) {
+    if (!task.goalId) return { goalId: null, note: "No goal bound" };
+    if (
+      !["summary", "criteria", "scope"].includes(section) ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 5
+    )
+      throw new Error(
+        "goal_context needs summary|criteria|scope, offset >= 0 and limit 1..5",
+      );
+    const goal = this.goals.node(task.goalId);
+    const page = (entries: string[]) => ({
+      total: entries.length,
+      offset,
+      nextOffset: offset + limit < entries.length ? offset + limit : undefined,
+      entries: entries
+        .slice(offset, offset + limit)
+        .map((text, index) => ({ index: offset + index + 1, text })),
+    });
+    if (section === "criteria")
+      return {
+        goalId: goal.id,
+        revision: goal.revision,
+        ...page(goal.criteria),
+      };
+    if (section === "scope") {
+      const entries = [
+        ...(goal.scope?.items.map((item) => "item: " + item) ?? []),
+        ...(goal.scope?.files?.map((file) => "file: " + file) ?? []),
+      ];
+      return {
+        goalId: goal.id,
+        revision: goal.revision,
+        unitKind: goal.scope?.unitKind,
+        ...page(entries),
+      };
+    }
+    const path: GoalNode[] = [];
+    for (
+      let node: GoalNode | undefined = goal;
+      node;
+      node = node.parentId ? this.store.goal(node.parentId) : undefined
+    )
+      path.unshift(node);
+    const dependencies = path.flatMap((node) =>
+      node.dependsOn.map((id) => {
+        const dependency = this.goals.node(id);
+        return {
+          stage: node.id,
+          id,
+          revision: dependency.revision,
+          state: dependency.state,
+          accepted:
+            dependency.state === "accepted" && !!dependency.acceptanceId,
+          acceptanceId: dependency.acceptanceId,
+        };
+      }),
+    );
+    const acceptance = goal.acceptanceId
+      ? this.store.acceptance(goal.acceptanceId)
+      : undefined;
+    return {
+      goalId: goal.id,
+      assignedRevision: task.goalRevision,
+      currentRevision: goal.revision,
+      objective: cleanText(goal.objective, 2000),
+      parentPath: path.slice(0, -1).map((node) => ({
+        id: node.id,
+        revision: node.revision,
+        objective: cleanText(node.objective, 300),
+      })),
+      scope: goal.scope
+        ? {
+            unitKind: goal.scope.unitKind,
+            complete:
+              goal.scope.items.length <= 5 &&
+              (goal.scope.files?.length ?? 0) <= 5 &&
+              [...goal.scope.items, ...(goal.scope.files ?? [])].every(
+                (value) => value.length <= 200,
+              ),
+            total: goal.scope.items.length,
+            items: goal.scope.items
+              .slice(0, 5)
+              .map((value) => cleanText(value, 200)),
+            files: goal.scope.files
+              ?.slice(0, 5)
+              .map((value) => cleanText(value, 200)),
+            full: "goal_context(section:scope)",
+          }
+        : undefined,
+      criteria: {
+        total: goal.criteria.length,
+        complete:
+          goal.criteria.length <= 3 &&
+          goal.criteria.every((value) => value.length <= 400),
+        preview: goal.criteria.slice(0, 3).map((value, index) => ({
+          criterion: index + 1,
+          text: cleanText(value, 400),
+        })),
+        full:
+          goal.criteria.length <= 3 &&
+          goal.criteria.every((value) => value.length <= 400)
+            ? "All criteria are shown; no duplicate lookup is needed."
+            : "Retrieve the missing full criteria using goal_context(section:criteria) before claiming delivery.",
+      },
+      dependencyCount: dependencies.length,
+      dependencies: dependencies.slice(0, 10),
+      dependenciesSatisfied: dependencies.every((d) => d.accepted),
+      focusId: this.store.get<string>(`goalFocus:${goal.rootId}`),
+      nextStep: goal.nextStep,
+      acceptance: acceptance
+        ? { id: acceptance.id, revision: acceptance.revision }
+        : undefined,
+      lastTaskResults: this.store
+        .missionTasks(goal.rootId)
+        .filter((t) => t.goalId === goal.id && t.resultPath)
+        .slice(0, 3)
+        .map((t) => ({ id: t.id, state: t.state, resultPath: t.resultPath })),
+      evidenceWrites: task.memberId
+        ? {
+            root: this.store.member(task.memberId)?.workspace.root,
+            access: this.store.member(task.memberId)?.workspace.access,
+            note: "Use existing authorized output paths. No new evidence directory is required.",
+          }
+        : undefined,
+      acceptanceRule:
+        "Task completion is not goal acceptance. Report concrete results and uncovered criteria; the lead records acceptance once.",
+    };
+  }
   private launch(task: Task) {
     const member = this.store.member(task.memberId)!;
     this.previews.delete(member.id);
@@ -2482,8 +2635,15 @@ export class MissionKernel {
       `Assigned task ${task.id}; phase ${task.phase}. Follow the existing user authorization.`,
       original,
       task.goalId
-        ? `Goal ${task.goalId}: ${this.store.goal(task.goalId)?.objective}\nStay within this goal. Deliver concrete artifacts and verification results; the lead records acceptance separately.`
+        ? "Assigned goal context (bounded previews; goal_context retrieves full criteria and scope):\n" +
+          JSON.stringify(this.assignedGoalContext(task))
         : "",
+      `Execution policy: ${JSON.stringify({
+        timeoutPolicy:
+          task.timeoutPolicy ?? (task.timeoutMs ? "fixed" : "none"),
+        timeoutMs: task.timeoutMs,
+        queueTimeoutMs: task.queueTimeoutMs ?? 0,
+      })}. No total deadline does not disable cancellation, process ownership or per-command/API timeouts.`,
       this.store.get("pathMappings")
         ? `Workspace rename mappings: ${JSON.stringify(this.store.get("pathMappings"))}. Resolve old references against the current assigned root before executing commands; do not rewrite evidence.`
         : "",
@@ -2520,14 +2680,15 @@ export class MissionKernel {
         },
       },
     };
-    const timeout = setTimeout(
+    const cancelDeadline = executionDeadline(
+      task.timeoutMs
+        ? Math.max(1, task.timeoutMs - (task.executionMs ?? 0))
+        : 0,
       () =>
         controller.abort(
           new Error(`Task execution deadline exceeded (${task.timeoutMs}ms)`),
         ),
-      task.timeoutMs,
     );
-    timeout.unref?.();
     void (async () => {
       try {
         live.worker = await this.options.workerFactory(
@@ -2591,7 +2752,7 @@ export class MissionKernel {
           processState: "unknown",
         });
       } finally {
-        clearTimeout(timeout);
+        cancelDeadline();
         this.previews.delete(member.id);
         this.tokens.delete(token);
         if (this.live.get(task.id) === live) this.live.delete(task.id);
@@ -2619,6 +2780,8 @@ export class MissionKernel {
       this.store.putMember(member);
     }
     if (task.epoch !== started.epoch || terminal(task)) return;
+    task.executionMs =
+      (started.executionMs ?? 0) + Math.max(0, this.now() - started.startedAt!);
     task.processState = outcome.processState;
     if (outcome.sessionFile) task.sessionFile = outcome.sessionFile;
     task.updatedAt = this.now();
@@ -2740,7 +2903,14 @@ export class MissionKernel {
     }
     return this.store.transaction(() => {
       let result: unknown;
-      if (request.op === "collect") {
+      if (request.op === "goal-context") {
+        result = this.assignedGoalContext(
+          task,
+          request.section,
+          request.offset,
+          request.limit,
+        );
+      } else if (request.op === "collect") {
         const target = this.store.task(request.taskId);
         if (!target || (target.parentId !== task.id && target.id !== task.id))
           throw new Error(
@@ -2798,6 +2968,8 @@ export class MissionKernel {
           result = this.dispatch(to, request.message, {
             parentId: task.id,
             timeoutMs: request.timeoutMs,
+            timeoutPolicy: request.timeoutPolicy,
+            queueTimeoutMs: request.queueTimeoutMs,
           });
       } else if (request.op === "decision") {
         task.state = "waiting";
