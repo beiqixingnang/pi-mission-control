@@ -12,6 +12,25 @@ const parse=row=>row?JSON.parse(row.data):undefined;
 const publicSource=s=>({id:s.id,member:s.member,file:s.file,bytes:s.size,frozenBytes:s.end,incompleteTailBytes:s.incompleteTail,capturedAt:s.capturedAt,sessionId:s.sessionId,leafId:s.lastEntryId,records:s.result?.records,sha256:s.result?.sha256,appendedBytes:s.result?.appendedBytes});
 const viewId=key=>'v'+hash(key).slice(0,24);
 
+async function writeStaticDataScripts(root) {
+  const files=[];
+  async function walk(dir,relative='') {
+    for await(const entry of await fs.promises.opendir(dir)) {
+      const full=path.join(dir,entry.name),rel=relative?`${relative}/${entry.name}`:entry.name;
+      if(entry.isDirectory())await walk(full,rel);
+      else if(entry.isFile()&&rel.endsWith('.json')&&rel!=='manifest.json'&&rel!=='job.json')files.push([full,rel]);
+    }
+  }
+  await walk(root);
+  for(const [source,rel] of files) {
+    const value=JSON.parse(await fs.promises.readFile(source,'utf8'));
+    const key=rel.replaceAll('\\','/'),script=path.join(root,key.slice(0,-5)+'.js');
+    const payload=JSON.stringify(value).replaceAll('\u2028','\\u2028').replaceAll('\u2029','\\u2029');
+    await fs.promises.writeFile(script,`window.__PI_MISSION_ARCHIVE__||(window.__PI_MISSION_ARCHIVE__=Object.create(null));window.__PI_MISSION_ARCHIVE__[${JSON.stringify(key)}]=${payload};\n`);
+  }
+  return files.length;
+}
+
 function cleanUnreferenced(index,root) {
   index.exec(`DELETE FROM item_bodies WHERE item IN (SELECT items.seq FROM items JOIN records ON records.seq=items.record WHERE records.eligible=0);
     DELETE FROM items WHERE record IN (SELECT seq FROM records WHERE eligible=0);
@@ -213,7 +232,8 @@ export async function exportMissionArchive(options) {
     fs.writeFileSync(path.join(work,'index.html'),template.replaceAll('__NONCE__',nonce).replace('__CSS__',css).replace('__BOOT__',safeJson(manifest)).replace('__APP__',js));
     manifest.elapsedMs=Date.now()-started;writeJson(work,'manifest.json',manifest);
     writeJson(work,'job.json',{status:manifest.status,sessionId:options.sessionId,completedAt:new Date().toISOString()});
-    fs.writeFileSync(path.join(work,'README.txt'),'Open index.html. For offline reading, select this archive folder once when prompted. The HTML includes its reader; data stays local. Copy the entire folder. manifest.json records snapshot boundaries and omissions. index.sqlite and checksums.jsonl preserve the exported indexes and file identities.\n');
+    await writeStaticDataScripts(work);
+    fs.writeFileSync(path.join(work,'README.txt'),'Open index.html. Click any member, goal, task, or message to read the frozen archive directly. The archive is self-contained and never reads the currently running Pi session. Copy the entire folder. manifest.json records snapshot boundaries and omissions. index.sqlite and checksums.jsonl preserve the exported indexes and file identities.\n');
     const checksum=fs.openSync(path.join(work,'checksums.jsonl'),'wx');let files=0;
     async function walk(dir){for await(const entry of await fs.promises.opendir(dir)){const full=path.join(dir,entry.name);if(entry.isDirectory())await walk(full);else if(entry.name!=='checksums.jsonl'){const digest=createHash('sha256');for await(const chunk of fs.createReadStream(full))digest.update(chunk);fs.writeSync(checksum,JSON.stringify({path:path.relative(work,full).replaceAll('\\','/'),bytes:fs.statSync(full).size,sha256:digest.digest('hex')})+'\n');files++;}}}
     await walk(work);fs.closeSync(checksum);options.signal?.throwIfAborted();fs.renameSync(work,destination);

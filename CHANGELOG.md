@@ -1,8 +1,14 @@
+# 2.2.1 — self-contained archive reader (2026-10-19)
+
+- Make exported archives directly readable from `index.html`: member, goal, task and message clicks load static data from the archive itself without a folder picker or access to a live Pi session.
+- Generate nonce-compatible classic-script data volumes beside JSON volumes for `file://` reading, while retaining JSON volumes for HTTP preview, checksums and compatibility tools.
+- Keep archive snapshots frozen and update the reader documentation and regression coverage accordingly.
+
 # 2.2.0 — long-task conversation archives (2026-10-19)
 
 - Add `/mission archive <new-directory>` and `mission_export` with `format=archive`. The exporter runs in a separate local process, reads Pi session files and Mission Control SQLite state without taking the runtime owner lock, and preserves the live conversation and budgets.
 - Export full public text and tool arguments/results into bounded content-addressed chunks with per-file LF boundaries, SHA-256 checksums, explicit partial/missing-source notices, branch ancestry, member/task/goal/evidence associations, archived identities and optional image attachments.
-- Add a light HTML reader with overview, goal and acceptance evidence, per-member task channels, target and branch paging, complete-text search, bounded body paging, local folder selection for offline reading and integrity diagnostics.
+- Add a light HTML reader with overview, goal and acceptance evidence, per-member task channels, target and branch paging, complete-text search, bounded body paging, self-contained offline reading and integrity diagnostics.
 - Keep `/mission export <file.jsonl>` unchanged. Private reasoning, signatures and credential fields stay excluded from the public reading archive; raw runtime backup remains a separate operation.
 
 # 2.1.1 — strict summary routes and bounded compaction recovery (2026-10-19)

@@ -1,8 +1,9 @@
 (() => {
   'use strict';
   const M=JSON.parse(document.getElementById('archive-boot').textContent),main=document.getElementById('main');
-  const S={view:'overview',channel:'lead',branch:false,viewMeta:null,page:0,goals:M.goals??[],tree:M.goalTree,roots:M.roots??[],rootPage:0,treePage:0,catalogPage:0,catalogKind:'task',selected:null,body:null,bodyPart:0,epoch:0,searchEpoch:0,files:null};
+  const S={view:'overview',channel:'lead',branch:false,viewMeta:null,page:0,goals:M.goals??[],tree:M.goalTree,roots:M.roots??[],rootPage:0,treePage:0,catalogPage:0,catalogKind:'task',selected:null,body:null,bodyPart:0,epoch:0,searchEpoch:0};
   const cache=new Map(),maxBytes=8*1024*1024;let cachedBytes=0;
+  const staticData=window.__PI_MISSION_ARCHIVE__??(window.__PI_MISSION_ARCHIVE__=Object.create(null)),scriptLoads=new Map();
   const E=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const names={active:'推进中',planned:'已计划',review:'待验收',accepted:'已验收',blocked:'受阻',paused:'用户暂停',waiting_user:'等待用户',complete:'已完成',completed:'本批完成',cancelled:'已取消',interrupted:'已中断',running:'执行中',failed:'失败',queued:'排队',attention:'需处理',stopped:'已停止'};
   const label=s=>names[s]??s??'未记录';
@@ -11,14 +12,32 @@
   const when=t=>t?new Date(t).toLocaleString('zh-CN',{hour12:false}):'时间未记录';
   const ch=id=>M.channels.find(c=>c.id===id);
   const goal=id=>S.goals.find(g=>g.id===id);
-  const foot=()=>{const f=document.getElementById('foot');f.textContent=`${S.files?'离线文件读取':'本机页面读取'} · ${M.sources.length} 份日志 · ${M.itemCount.toLocaleString()} 条公开内容项 · 导出后状态不实时更新`;f.dataset.cachedPages=cache.size;f.dataset.cachedBytes=cachedBytes;f.dataset.visibleMessages=document.querySelectorAll('.message').length;};
+  const foot=()=>{const f=document.getElementById('foot');f.textContent=`静态归档快照 · ${M.sources.length} 份日志 · ${M.itemCount.toLocaleString()} 条公开内容项 · 导出后状态不实时更新`;f.dataset.cachedPages=cache.size;f.dataset.cachedBytes=cachedBytes;f.dataset.visibleMessages=document.querySelectorAll('.message').length;};
+  function loadStaticScript(name){
+    if(staticData[name]!==undefined)return Promise.resolve(staticData[name]);
+    const jsName=name.slice(0,-5)+'.js';
+    if(scriptLoads.has(jsName))return scriptLoads.get(jsName);
+    const promise=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      const nonce=document.querySelector('script[nonce]')?.getAttribute('nonce');
+      script.src=jsName;if(nonce)script.setAttribute('nonce',nonce);
+      script.onload=()=>staticData[name]===undefined?reject(new Error('归档缺少静态分卷：'+name)):resolve(staticData[name]);
+      script.onerror=()=>reject(new Error('归档分卷读取失败：'+name));
+      document.head.appendChild(script);
+    });
+    scriptLoads.set(jsName,promise);return promise;
+  }
   async function load(name) {
     if(!/^[a-zA-Z0-9/_-]+\.json$/.test(name))throw Error('不安全的数据路径');
     if(cache.has(name)){const x=cache.get(name);cache.delete(name);cache.set(name,x);return x.data;}
-    let text;if(S.files){const file=S.files.get(name);if(!file)throw Error('归档缺少分卷：'+name);if(file.size>32*1024*1024)throw Error('归档分卷超过读取限制：'+name);text=await file.text();}
-    else{if(location.protocol==='file:')throw Error('请先选择这个归档文件夹以读取离线数据。');const r=await fetch(name,{credentials:'omit'});if(!r.ok)throw Error('归档分卷读取失败：'+name+' ('+r.status+')');if(Number(r.headers.get('Content-Length')??0)>32*1024*1024)throw Error('归档分卷超过读取限制：'+name);text=await r.text();}
-    if(text.length>32*1024*1024)throw Error('元数据分卷超过读取限制：'+name);
-    const data=JSON.parse(text),size=text.length*2;cache.set(name,{data,size});cachedBytes+=size;
+    let data,size;
+    if(location.protocol==='file:'){
+      data=await loadStaticScript(name);size=JSON.stringify(data).length*2;
+    }else{
+      const r=await fetch(name,{credentials:'omit'});if(!r.ok)throw Error('归档分卷读取失败：'+name+' ('+r.status+')');if(Number(r.headers.get('Content-Length')??0)>32*1024*1024)throw Error('归档分卷超过读取限制：'+name);const text=await r.text();
+      if(text.length>32*1024*1024)throw Error('元数据分卷超过读取限制：'+name);data=JSON.parse(text);size=text.length*2;
+    }
+    cache.set(name,{data,size});cachedBytes+=size;
     while(cache.size>8||cachedBytes>maxBytes){const key=cache.keys().next().value;cachedBytes-=cache.get(key).size;cache.delete(key);}foot();return data;
   }
   async function itemAt(n){const rows=await load('items/'+Math.floor((n-1)/M.itemPageSize)+'.json');return rows[(n-1)%M.itemPageSize];}
@@ -52,7 +71,7 @@
     const v=e.target.closest('button[data-view]'),c=e.target.closest('button[data-channel]'),g=e.target.closest('[data-goal]'),body=e.target.closest('[data-body-item]');
     if(v){S.view=v.dataset.view;await render();}else if(c){S.view='chat';S.channel=c.dataset.channel;S.viewMeta=null;S.page=0;await render();}
     else if(g){S.selected=g.dataset.goal;await render();}else if(body){const r=await itemAt(Number(body.dataset.bodyItem));await openBody(r[body.dataset.bodyField],r.toolName??r.name??'对话正文');}
-    else if(e.target.dataset.imageItem){const r=await itemAt(Number(e.target.dataset.imageItem)),a=r.asset;if(!/^assets\/[a-f0-9]{64}\.(png|jpg|webp|gif)$/.test(a.path)||a.bytes>16*1048576)throw Error('附件已保存在 assets 中；此类型或大小请使用本地查看器打开。');if(S.imageURL)URL.revokeObjectURL(S.imageURL);const file=S.files?.get(a.path);S.imageURL=file?URL.createObjectURL(file):new URL(a.path,location.href).href;const img=document.createElement('img');img.src=S.imageURL;img.alt='归档图像附件';img.style.maxWidth='100%';document.getElementById('body-content').replaceChildren(img);document.getElementById('body-title').textContent='图像附件 · '+bytes(a.bytes);document.getElementById('body-position').textContent=a.sha256;for(const id of ['body-prev','body-next','body-last'])document.getElementById(id).disabled=true;document.getElementById('body-dialog').showModal();}
+    else if(e.target.dataset.imageItem){const r=await itemAt(Number(e.target.dataset.imageItem)),a=r.asset;if(!/^assets\/[a-f0-9]{64}\.(png|jpg|webp|gif)$/.test(a.path)||a.bytes>16*1048576)throw Error('附件已保存在 assets 中；此类型或大小请使用本地查看器打开。');if(S.imageURL?.startsWith('blob:'))URL.revokeObjectURL(S.imageURL);S.imageURL=new URL(a.path,location.href).href;const img=document.createElement('img');img.src=S.imageURL;img.alt='归档图像附件';img.style.maxWidth='100%';document.getElementById('body-content').replaceChildren(img);document.getElementById('body-title').textContent='图像附件 · '+bytes(a.bytes);document.getElementById('body-position').textContent=a.sha256;for(const id of ['body-prev','body-next','body-last'])document.getElementById(id).disabled=true;document.getElementById('body-dialog').showModal();}
     else if(e.target.dataset.locate)await locate(Number(e.target.dataset.locate));
     else if(e.target.dataset.goalChat){const g=goal(e.target.dataset.goalChat);S.view='chat';S.viewMeta=S.branch?g.archiveViews?.branch:g.archiveViews?.all;S.page=0;await render();}
     else if(e.target.dataset.taskId){const rows=await load(M.catalog[S.catalogKind].pages[S.catalogPage]);const t=rows.find(r=>r.id===e.target.dataset.taskId);S.view='chat';S.channel=t.memberId??S.channel;S.viewMeta=t.archiveViews?.all;S.page=0;await render();}
@@ -64,11 +83,9 @@
     else if(e.target.id==='root-page-next'){S.rootPage=(S.rootPage+1)%Math.max(1,M.rootPages);S.roots=await load(`roots/${S.rootPage}.json`);await render();}
     else if(e.target.id==='close-body')document.getElementById('body-dialog').close();
     else if(['body-prev','body-next','body-last'].includes(e.target.id))await showBody(e.target.id==='body-last'?S.body.segments-1:S.bodyPart+(e.target.id==='body-next'?1:-1));
-    else if(e.target.id==='pick-folder')document.getElementById('folder-input').click();
     else if(e.target.id==='integrity'){S.epoch++;S.searchEpoch++;main.innerHTML=heading('档案范围与完整性','这是已捕获历史的阅读包，不是可恢复运行的任务数据库备份。')+`<div class="card integrity-list"><p>状态：${E(M.status)} · ${M.itemCount} 条公开内容项 · ${M.sources.length} 个源文件</p><p>${E(M.capturedScope)}</p><p>${E(M.textPolicy)}</p><p>结构性私有字段省略 ${M.redactedFields} 次；附件未嵌入 ${M.omittedAttachments} 个；未知内容块 ${M.unknownBlocks} 个。</p><p>导出时已生成 checksums.jsonl。当前页面未对全部文件逐一重新校验，不把“有哈希”显示成“真实性已验证”。</p>${M.notices.map(n=>`<p>${E(JSON.stringify(n))}</p>`).join('')}${M.sources.map(s=>`<details><summary>${E(s.id)} · ${E(ch(s.member)?.name??s.member)} · ${bytes(s.frozenBytes)} / 尾部未闭合 ${s.incompleteTailBytes} B</summary><code>${E(s.file)}</code><p>${E(s.capturedAt)}<br>SHA-256 ${E(s.sha256)}<br>叶节点来源：${E(s.leafOrigin)}</p></details>`).join('')}</div>`;}
   }catch(error){main.innerHTML=`<div class="error">${E(error.message)}</div>`;}});
   document.addEventListener('change',async e=>{if(e.target.id==='root-select'){const selected=S.roots.find(r=>r.id===e.target.value);S.tree=await load(`trees/${selected.tree}/meta.json`);S.treePage=0;S.goals=await load(`trees/${selected.tree}/0.json`);S.selected=S.goals.find(g=>g.depth===3)?.id??S.tree.rootId;await render();}else if(e.target.id==='catalog-kind'){S.catalogKind=e.target.value;S.catalogPage=0;await render();}});
-  document.getElementById('folder-input').addEventListener('change',async e=>{const files=new Map();for(const f of e.target.files){const parts=f.webkitRelativePath.split('/');parts.shift();files.set(parts.join('/'),f);}if(!files.has('manifest.json')){main.innerHTML='<div class="error">请选择包含 index.html 和 manifest.json 的整个归档文件夹。</div>';return;}const local=JSON.parse(await files.get('manifest.json').text());if(local.sessionId!==M.sessionId||local.createdAt!==M.createdAt){main.innerHTML='<div class="error">所选文件夹与当前档案不匹配。</div>';return;}S.files=files;cache.clear();cachedBytes=0;document.getElementById('offline-banner').hidden=true;await render();});
   function might(bits,q){if(q.length<2)return true;const b=Uint8Array.from(atob(bits),c=>c.charCodeAt(0)),words=new DataView(b.buffer),test=x=>(words.getUint32(((x>>>0)&8191)>>>5<<2,true)&(1<<(x&31)))!==0;
     for(let i=0;i+1<q.length;i++){const a=q.charCodeAt(i),b=q.charCodeAt(i+1),values=[Math.imul(a^0x9e37,65599)^b];if(i+2<q.length)values.push(Math.imul(Math.imul(a^0x85eb,65599)^b,65599)^q.charCodeAt(i+2));for(const h of values){const x=h>>>0,y=(Math.imul(x,0x45d9f3b)^x>>>16)>>>0;if(!test(x)||!test(y))return false;}}return true;}
   document.getElementById('search-form').addEventListener('submit',async e=>{e.preventDefault();const q=document.getElementById('search').value.trim().toLowerCase();if(!q)return;const epoch=++S.searchEpoch;S.epoch++;const found=new Map();let scanned=0,limit=false;main.innerHTML=heading('全文搜索','检索全部用户/助手文本与工具参数、返回；状态快照不进入全文索引。切换视图即可取消。')+'<div class="card" id="search-results"></div>';try{
@@ -76,5 +93,5 @@
     const box=document.getElementById('search-results');if(!box)return;box.innerHTML=`<div class="card-title"><h2>${limit?'至少 ':''}${found.size} 项匹配</h2><small>${limit?'达到显示上限，请缩小关键词':'已完成全部已索引公开正文检索'}</small></div>`;
     for(const [n,hit] of found){if(epoch!==S.searchEpoch)return;const r=await itemAt(n),button=document.createElement('button');button.className='search-result';button.textContent=`${ch(r.member)?.name??r.member} · ${when(r.time)} · #${n}\n${preview(r.body??r.args).slice(0,160)}`;button.onclick=async()=>{await locate(n);const body=[r.body,r.args].find(b=>b?.id===hit.body);if(body&&body.text===undefined)await openBody(body,'搜索匹配正文',hit.part);};box.append(button);}foot();
   }catch(error){main.innerHTML=`<div class="error">${E(error.message)}</div>`;}});
-  document.getElementById('export-time').textContent=when(M.createdAt);document.getElementById('status').textContent=M.status==='complete'?'所选范围已导出':'存在范围提示';document.getElementById('offline-banner').hidden=location.protocol!=='file:';document.title='Mission Archive · '+(M.title??M.sessionId??'对话');render();
+  document.getElementById('export-time').textContent=when(M.createdAt);document.getElementById('status').textContent=M.status==='complete'?'所选范围已导出':'存在范围提示';document.title='Mission Archive · '+(M.title??M.sessionId??'对话');render();
 })();

@@ -1,6 +1,6 @@
 {
   "name": "pi-mission-control",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": true,
   "description": "Pi task runtime with automatic completion wakeups, persistent teams, runtime-owned maintenance, bounded compaction and native UI integration.",
   "type": "module",

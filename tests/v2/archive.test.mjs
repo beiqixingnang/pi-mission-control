@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {exportMissionArchive} from '../../runtime/archive/core.mjs';
@@ -38,7 +39,7 @@ test('archive captures main, member, goals and every receipt without acquiring t
     assert.equal(result.status,'complete');assert.equal(m.catalog.task.count,1105);assert.equal(m.catalog.receipt.count,125);assert.equal(m.catalog.member.count,2);
     assert.equal(fs.readFileSync(path.join(h.state,'owner.lock'),'utf8'),'OWNER_MUST_NOT_CHANGE');assert.equal(h.db.prepare("SELECT data FROM meta WHERE key='mission'").get().data,before);
     const text=allItems(result.destination,m).map(r=>readBody(result.destination,r.body??r.args??{text:''})).join('\n');assert.match(text,/CHILD_PUBLIC_END/);assert.doesNotMatch(text,/PRIVATE_THOUGHT/);
-    assert.ok(fs.existsSync(path.join(result.destination,'checksums.jsonl')));assert.equal(m.sources.length,2);
+    assert.ok(fs.existsSync(path.join(result.destination,'checksums.jsonl')));assert.ok(fs.existsSync(path.join(result.destination,'items/0.js')));assert.match(fs.readFileSync(path.join(result.destination,'items/0.js'),'utf8'),/__PI_MISSION_ARCHIVE__/);const staticWindow={};vm.runInNewContext(fs.readFileSync(path.join(result.destination,'items/0.js'),'utf8'),{window:staticWindow});assert.ok(staticWindow.__PI_MISSION_ARCHIVE__['items/0.json']);assert.doesNotMatch(fs.readFileSync(path.join(result.destination,'README.txt'),'utf8'),/选择归档文件夹/);assert.equal(m.sources.length,2);
   } finally{h.close();}
 });
 test('archive retains all recorded branches and embeds image bytes without executing their content',async()=>{
