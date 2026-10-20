@@ -2,6 +2,7 @@
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
+import { Type } from "typebox";
 const textOf = (m: any) =>
   typeof m?.content === "string"
     ? m.content
@@ -12,7 +13,31 @@ const textOf = (m: any) =>
 let summaryCalls = 0;
 const requestAttempts = new Map<string, number>();
 let notesCycle: any;
+let bulkRun: any;
+let previousPayload = "";
 export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "fixture_large_read",
+    label: "Read synthetic source batch",
+    description:
+      "Test-only generated public source, never reads production files.",
+    parameters: Type.Object({ index: Type.Integer() }),
+    async execute(_id, args) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `SYNTHETIC_SOURCE_${args.index}\n` +
+              "export const public_value = 173; // synthetic source only\n".repeat(
+                1200,
+              ),
+          },
+        ],
+        details: undefined,
+      };
+    },
+  });
   pi.on("session_start", (_event, ctx) => {
     if (process.env.MC_FIXTURE_LIFECYCLE_TRACE)
       fs.appendFileSync(
@@ -48,8 +73,38 @@ export default function (pi: ExtensionAPI) {
         maxTokens: 4096,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       },
+      {
+        id: "wide",
+        name: "Wide offline context fixture",
+        reasoning: false,
+        input: ["text"],
+        contextWindow: 1050000,
+        maxTokens: 128000,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      },
     ],
     streamSimple(model, context, options) {
+      if (process.env.MC_FIXTURE_CACHE_TRACE) {
+        const payload = JSON.stringify(context.messages);
+        let prefix = 0;
+        while (
+          prefix < Math.min(payload.length, previousPayload.length) &&
+          payload[prefix] === previousPayload[prefix]
+        )
+          prefix++;
+        fs.appendFileSync(
+          process.env.MC_FIXTURE_CACHE_TRACE,
+          JSON.stringify({
+            chars: payload.length,
+            prefixChars: prefix,
+            hintIndex: context.messages.findIndex(
+              (m: any) => m.customType === "context-memory-hint",
+            ),
+            messages: context.messages.length,
+          }) + "\n",
+        );
+        previousPayload = payload;
+      }
       const stream = createAssistantMessageEventStream();
       queueMicrotask(() => {
         const message: any = {
@@ -97,6 +152,7 @@ export default function (pi: ExtensionAPI) {
         try {
           if (
             !notesCycle &&
+            !bulkRun &&
             textOf(
               context.messages.filter((m: any) => m.role === "user").at(-1),
             ).startsWith("The notes context window has been refreshed.")
@@ -184,9 +240,57 @@ export default function (pi: ExtensionAPI) {
               .at(-1) ?? "";
           const command =
             notesCycle ??
+            bulkRun ??
             JSON.parse(
               marker.slice(marker.indexOf("V2_TEST:") + 8).split("\n")[0],
             );
+          if (command.op === "large-rpc-run") {
+            bulkRun ??= { ...command, step: 0 };
+            const sequence: any[] = [
+              { name: "context_mode", args: { mode: "notes" } },
+            ];
+            for (let cycle = 0; cycle < (command.windows ?? 4); cycle++) {
+              for (let i = 0; i < (command.readsPerWindow ?? 40); i++)
+                sequence.push({
+                  name: "fixture_large_read",
+                  args: { index: cycle * 40 + i },
+                });
+              sequence.push(
+                {
+                  name: "context_note",
+                  args: {
+                    action: "write",
+                    notes: [
+                      {
+                        name: "index",
+                        text: `Synthetic window ${cycle}; exact progress only.`,
+                      },
+                      {
+                        name: "handoff",
+                        text: `Completed batch ${cycle}; continue next synthetic file. No goal acceptance.`,
+                      },
+                    ],
+                  },
+                },
+                { name: "context_rollover", args: {} },
+              );
+            }
+            const next = sequence[bulkRun.step++];
+            if (next) tool(next.name, next.args);
+            else if (!bulkRun.failed) {
+              bulkRun.failed = true;
+              throw Error(
+                "Error reading response: malformed server-sent event JSON.",
+              );
+            } else {
+              bulkRun = undefined;
+              answer("BIG_RPC_RECOVERED_WITHOUT_REPLAY");
+            }
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: message.stopReason, message });
+            stream.end();
+            return;
+          }
           if (command.op === "notes-cycle") {
             notesCycle ??= { ...command, step: 0 };
             const sequence: any[] = [
@@ -266,8 +370,10 @@ export default function (pi: ExtensionAPI) {
             if (current) {
               tool(current.name, current.args);
               if (current.highUsage) {
-                message.usage.input = 43000;
-                message.usage.totalTokens = 43001;
+                message.usage.input =
+                  command.highUsageTokens ??
+                  (command.burstOvershoot ? 55000 : 43000);
+                message.usage.totalTokens = message.usage.input + 1;
               }
             } else {
               notesCycle = undefined;

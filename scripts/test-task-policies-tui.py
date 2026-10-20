@@ -284,6 +284,19 @@ def main():
         (reports / "recovery-fault-injection.json").write_text(json.dumps({"passed": True,
             "sameProcess": process.poll() is None, "sessionId": config["id"], "outage": burst,
             "providerAbort": attempts(abort_trace), "chainWrites": 24, "pauseAttempts": attempts(pause_trace)}, indent=2))
+        previous_tasks = {task["id"] for task in query("tasks")}
+        line("/mission resume")
+        wait(lambda: not mission()["humanPaused"], "test mission resumed for a long RPC lifecycle")
+        tool("subagent", {"task": 'V2_TEST:{"op":"large-rpc-run","windows":4,"readsPerWindow":40}', "timeoutPolicy": "none"})
+        wait(lambda: any(t["id"] not in previous_tasks and t["state"] == "completed" for t in query("tasks")),
+            "real TUI member completed four notes windows, 160 source reads and a stream retry despite an oversized cumulative RPC snapshot", timeout=50)
+        big_task = next(t for t in query("tasks") if t["id"] not in previous_tasks and t["state"] == "completed")
+        assert "BIG_RPC_RECOVERED_WITHOUT_REPLAY" in Path(big_task["resultPath"]).read_text()
+        big_rows = [json.loads(row) for row in Path(big_task["sessionFile"]).read_text().splitlines()]
+        assert sum(len(json.dumps(row.get("message", {})).encode()) for row in big_rows) > 8 * 1024 * 1024
+        assert sum(row.get("type") == "compaction" for row in big_rows) == 4
+        line("/mission pause")
+        wait(lambda: mission()["humanPaused"], "long RPC regression paused without changing prior acceptance")
         memory_file = agent / "context-memory" / config["id"] / "memory.sqlite"
 
         def memory_rows(sql, args=()):
@@ -308,6 +321,17 @@ def main():
         wait(lambda: bool(memory_rows("SELECT name FROM notes WHERE name='index'")), "short memory index saved")
         tool("context_note", {"action": "write", "name": "handoff", "text": note_marker + ": inspect decoder.py line 120 next; this note does not accept any goal."})
         wait(lambda: any(note_marker in row[0] for row in memory_rows("SELECT text FROM notes WHERE name='handoff'")), "fresh handoff saved by a real model tool call")
+        tool("context_note", {"action": "write", "notes": [
+            {"name": "index", "text": "Atomic notes regression; exact next file/line in handoff."},
+            {"name": "handoff", "text": note_marker + ": decoder.py line 173; still unaccepted."}]})
+        wait(lambda: any("line 173; still unaccepted" in row[0] for row in memory_rows("SELECT text FROM notes WHERE name='handoff'")), "index and handoff saved in one atomic model tool call")
+        versions = memory_rows("SELECT name,revision FROM notes WHERE name IN ('index','handoff') ORDER BY name")
+        tool("context_note", {"action": "write", "notes": [
+            {"name": "index", "text": "Atomic notes regression; exact next file/line in handoff."},
+            {"name": "handoff", "text": note_marker + ": decoder.py line 173; still unaccepted."}]})
+        quiet(.6)
+        assert memory_rows("SELECT name,revision FROM notes WHERE name IN ('index','handoff') ORDER BY name") == versions
+        checks.append("unchanged note batches retained their versions")
         before_windows = len(compactions())
         line("/context rollover")
         wait(lambda: len(compactions()) > before_windows, "notes rollover installed a new context without a summary-model request")
@@ -323,8 +347,26 @@ def main():
         checks.append("reload preserved the model-specific input budget")
         tool("context_history", {"action": "search", "query": note_marker})
         wait(lambda: bool(memory_rows("SELECT id FROM history WHERE instr(text,?)>0", (note_marker,))), "earlier public history remains searchable after rollover and reload")
+        tool("context_history", {"action": "batch", "requests": [
+            {"action": "search", "query": note_marker, "role": "user", "limit": 3},
+            {"action": "search", "query": "decoder", "limit": 3}], "budgetTokens": 1000})
+        wait(lambda: assistant_said('{"isError":false,"text":"{\\"results\\":') or 'requestIndex' in visible[-20000:], "batched history lookup returned bounded results through the TUI")
         line("/context budget auto")
         wait(lambda: 40000 not in local_budget(), "explicit input override reset without changing Pi model settings")
+        line("/model wide")
+        quiet(.7)
+        os.write(master, b"\r")
+        quiet(.5)
+        tool("context_mode", {"mode": "notes", "inputLimitTokens": 300000})
+        wait(lambda: 300000 in local_budget(), "300k notes budget selected for the wide test model")
+        before_windows = len(compactions())
+        line('V2_TEST:' + json.dumps({"op": "notes-cycle", "windows": 2, "auto": True,
+            "file": str(workspace / "decode-findings.txt"), "highUsageTokens": 290000}, separators=(",", ":")))
+        wait(lambda: len(compactions()) == before_windows + 2, "a burst beyond the 300k window handoff reserve still produced two safe windows and continued")
+        line("/model model")
+        quiet(.6)
+        os.write(master, b"\r")
+        quiet(.5)
         line("/context mode summary")
         wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)], "same conversation switched back to summary mode")
         assert len(list(sessions.glob("*_" + config["id"] + ".jsonl"))) == 1

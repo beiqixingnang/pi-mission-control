@@ -342,7 +342,14 @@ export default async function (pi: ExtensionAPI) {
       "Read a public HTTP(S) page for the assigned task; private hosts and unbounded responses are rejected.",
     parameters: Type.Object({ url: Type.String() }),
     async execute(_id, args, signal) {
-      return result(await fetchPage(args.url, signal));
+      return result(
+        await fetchPage(
+          args.url,
+          signal,
+          undefined,
+          JSON.parse(process.env.MC_V2_WEB_FETCH ?? "{}"),
+        ),
+      );
     },
   });
   register({

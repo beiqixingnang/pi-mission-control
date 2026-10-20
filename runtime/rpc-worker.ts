@@ -9,7 +9,7 @@ import type {
   WorkerFactory,
   WorkerOutcome,
 } from "./types.ts";
-import { lfLines } from "./jsonl.ts";
+import { rpcRecords } from "./rpc-records.ts";
 import { readTime } from "./time.ts";
 
 const ENV_ALLOW = [
@@ -184,6 +184,10 @@ export function workerEnvironment(assignment: Assignment) {
     searchProvider: assignment.settings.searchProvider,
     searchUrl: assignment.settings.searchUrl,
   });
+  if (assignment.settings.webFetch)
+    env.MC_V2_WEB_FETCH = JSON.stringify(assignment.settings.webFetch);
+  if (assignment.settings.memberContext)
+    env.PI_CONTEXT_DEFAULTS = JSON.stringify(assignment.settings.memberContext);
   if (assignment.settings.reconnect)
     env.MC_V2_RECONNECT = JSON.stringify(assignment.settings.reconnect);
   env.NODE_NO_WARNINGS = "1";
@@ -415,11 +419,6 @@ export function createWorkerFactory(
       }
     });
     const receive = (line: string) => {
-      if (Buffer.byteLength(line) > 8 * 1024 * 1024) {
-        lastError = "Worker protocol line exceeded 8 MiB";
-        void finish(false);
-        return;
-      }
       let event: any;
       try {
         event = JSON.parse(line);
@@ -478,8 +477,7 @@ export function createWorkerFactory(
     };
     void (async () => {
       try {
-        for await (const line of lfLines(child.stdout, 8 * 1024 * 1024))
-          receive(line);
+        for await (const line of rpcRecords(child.stdout)) receive(line);
       } catch (error) {
         lastError = String(error);
         await finish(false);

@@ -2,8 +2,45 @@ import dns from "node:dns/promises";
 import net from "node:net";
 import http from "node:http";
 import https from "node:https";
+import tls from "node:tls";
 import { Readable } from "node:stream";
 import type { Settings } from "./types.ts";
+
+export interface WebFetchPolicy {
+  /** Explicit public HTTPS hostnames allowed through the user's loopback accelerator. */
+  trustedLocalHosts?: string[];
+  useSystemCa?: boolean;
+}
+export function resolveWebFetchPolicy(
+  raw: WebFetchPolicy = {},
+): WebFetchPolicy {
+  if (
+    (raw.useSystemCa !== undefined && typeof raw.useSystemCa !== "boolean") ||
+    (raw.trustedLocalHosts !== undefined &&
+      (!Array.isArray(raw.trustedLocalHosts) ||
+        raw.trustedLocalHosts.length > 100 ||
+        raw.trustedLocalHosts.some(
+          (h) =>
+            typeof h !== "string" ||
+            !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/.test(h) ||
+            /(?:^|\.)(?:localhost|local|internal)$/.test(h) ||
+            net.isIP(h),
+        )))
+  )
+    throw Error(
+      "Invalid webFetch policy: exact public hostnames and useSystemCa boolean required",
+    );
+  return {
+    trustedLocalHosts: [...new Set(raw.trustedLocalHosts ?? [])],
+    useSystemCa: raw.useSystemCa ?? false,
+  };
+}
+interface WebFetchDependencies {
+  lookup?: (
+    host: string,
+  ) => Promise<Array<{ address: string; family?: number }>>;
+  request?: typeof pinnedPage;
+}
 
 async function boundedText(response: Response, max = 1024 * 1024) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -57,6 +94,7 @@ function pinnedPage(
   url: URL,
   addresses: Array<{ address: string; family?: number }>,
   signal: AbortSignal,
+  policy: WebFetchPolicy = {},
 ): Promise<Response> {
   return new Promise((resolve, reject) => {
     const lookup: any = (_host: string, options: any, callback: any) => {
@@ -67,9 +105,26 @@ function pinnedPage(
       if (options?.all) callback(null, records);
       else callback(null, records[0].address, records[0].family);
     };
+    const certificates = policy.useSystemCa
+      ? (() => {
+          if (typeof tls.getCACertificates !== "function")
+            throw Error(
+              "System certificate support requires a newer Node.js runtime",
+            );
+          return [
+            ...tls.getCACertificates("default"),
+            ...tls.getCACertificates("system"),
+          ];
+        })()
+      : undefined;
     const request = (url.protocol === "https:" ? https : http).request(
       url,
-      { lookup, signal, headers: { "user-agent": "Pi-Mission-Control/2.0" } },
+      {
+        lookup,
+        signal,
+        ...(certificates ? { ca: certificates } : {}),
+        headers: { "user-agent": "Pi-Mission-Control/2.0" },
+      },
       (response) => {
         const headers = new Headers();
         for (const [key, value] of Object.entries(response.headers))
@@ -101,7 +156,13 @@ export async function fetchPage(
   url: string,
   signal?: AbortSignal,
   fetcher?: typeof fetch,
+  options: WebFetchPolicy = {},
+  dependencies: WebFetchDependencies = {},
 ) {
+  const policy = resolveWebFetchPolicy(options);
+  const deadline = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(20000)])
+    : AbortSignal.timeout(20000);
   let target = new URL(url);
   for (let redirects = 0; redirects <= 3; redirects++) {
     if (
@@ -115,17 +176,40 @@ export async function fetchPage(
     const host = target.hostname.replace(/^\[|\]$/g, "");
     const addresses = net.isIP(host)
       ? [{ address: host }]
-      : await dns.lookup(host, { all: true });
-    if (!addresses.length || addresses.some((a) => privateAddress(a.address)))
+      : await (dependencies.lookup?.(host) ?? dns.lookup(host, { all: true }));
+    const privateTargets = addresses.filter((a) => privateAddress(a.address));
+    const trustedLoopback =
+      !net.isIP(host) &&
+      policy.trustedLocalHosts?.includes(host) &&
+      target.protocol === "https:" &&
+      (!target.port || target.port === "443") &&
+      privateTargets.length > 0 &&
+      addresses.every((a) => a.address === "127.0.0.1" || a.address === "::1");
+    if (!addresses.length || (privateTargets.length && !trustedLoopback))
       throw new Error(
-        "Private/local network targets are not allowed by web_fetch",
+        `Private/local network targets are not allowed by web_fetch: ${host} resolved to ${addresses.map((a) => a.address).join(", ") || "no address"}. Public hostnames mapped to loopback by an accelerator require an exact trustedLocalHosts entry; direct local URLs remain blocked.`,
       );
-    const deadline = signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(20000)])
-      : AbortSignal.timeout(20000);
-    const response = fetcher
-      ? await fetcher(target, { redirect: "manual", signal: deadline })
-      : await pinnedPage(target, addresses, deadline);
+    let response: Response;
+    try {
+      response = fetcher
+        ? await fetcher(target, { redirect: "manual", signal: deadline })
+        : await (dependencies.request ?? pinnedPage)(
+            target,
+            addresses,
+            deadline,
+            policy,
+          );
+    } catch (error) {
+      if (
+        /UNABLE_TO_VERIFY|SELF_SIGNED|CERT_HAS_EXPIRED|unable to verify|self.signed/i.test(
+          String((error as any)?.code) + String(error),
+        )
+      )
+        throw Error(
+          `TLS certificate verification failed for ${host}. ${policy.useSystemCa ? "System trust was enabled; inspect the accelerator certificate and its expiry." : "A trusted local accelerator may need webFetch.useSystemCa=true."} Original error: ${String(error)}`,
+        );
+      throw error;
+    }
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel();
       const location = response.headers.get("location");

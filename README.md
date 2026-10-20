@@ -2,7 +2,7 @@
 
 非官方Pi插件包。v2将成员任务、消息交付、Goal和调度收敛到一个持久运行核心：**派发任务即自动登记维护，完成唤醒不要求模型先创建Goal或开启监督器**。
 
-当前版本 **2.4.0**，主对话直接获得55个插件工具。支持默认三级目标树、明确文件/批次范围、阶段依赖和逐项证据验收。子智能体默认没有任务硬截止，主模型按实际任务选择时限、工具和工作区；角色名称不再自动缩减权限。主界面简要显示目标及二、三级验收数，`/mission goals`打开详细看板。独立摘要模型支持限流、断流恢复及缓存；上下文还可切换独立笔记模式。正常工具调用不消耗失败重试额度，临时故障冷却后自动续接。TUI负责操作，静态HTML归档用于离线阅读。恢复工具见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
+当前版本 **2.5.0**，主对话直接获得55个插件工具。支持默认三级目标树、明确文件/批次范围、阶段依赖和逐项证据验收。子智能体默认没有任务硬截止，主模型按实际任务选择时限、工具和工作区；角色名称不再自动缩减权限。主界面简要显示目标及二、三级验收数，`/mission goals`打开详细看板。独立摘要模型支持限流、断流恢复及缓存；上下文还可切换独立笔记模式。正常工具调用不消耗失败重试额度，临时故障冷却后自动续接。TUI负责操作，静态HTML归档用于离线阅读。恢复工具见[工具接口记录](docs/design/mission-control-v2/TOOLS-2026-10-18.md)，测试边界见[验证记录](docs/design/mission-control-v2/VALIDATION.md)。
 
 需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
 
@@ -304,6 +304,26 @@ WSL固定回归会话位于 `/home/lishuo/pi-mission-control-test`，与实际�
 `context_history`支持当前分支公开历史的字面搜索和按消息ID分页读取，跨换窗保留原始证据；偏移按Unicode字符计数。存储位于`<agentDir>/context-memory/<Pi session ID>/memory.sqlite`，只索引当前会话正常可见的历史和本扩展自己的笔记，不读取目标、任务或其他插件的内部数据库。已保存笔记有版本记录；每次模型请求只带最新入口。
 
 笔记模式仍需模型实际执行保存和换窗，不是零成本记忆，也不保证优于摘要模式。大窗口可用性、信息保留、写入及回查消耗需要针对实际模型线路验证。可复现实验脚本为`scripts/benchmark-context-modes.mjs`，仅手动运行，不属于离线测试套件。
+
+2.5.0支持一次原子保存入口、交接与主题笔记：`context_note(action="write",notes=[{name:"index",text:"..."},{name:"handoff",text:"..."}])`，最多12项、合计16000估算tokens。任一版本冲突则全部不写；正文相同不增加版本，但记录这次显式确认的来源。新窗口注明已完整注入的index/handoff版本，优先直接续读；交接保存当前文件/行、已完成与未完成项、撤回结论和准确主题/历史引用，详细分析留在主题笔记。
+
+`context_history(action="batch",requests=[{action:"search",query:"...",role:"user"},{action:"read",id:"...",offset:0}],budgetTokens=4000)`一次处理最多8项，合计输出预算256–6000估算tokens；`nextRequest`及`nextOffset`提供续读位置。单项旧调用继续有效。
+
+用户配置`mission-control.json`可设置`"memberContext":{"mode":"notes","inputLimitTokens":300000}`，只为新成员会话提供默认值，主对话模式保持自己的设置。独立上下文扩展也可单独接受`PI_CONTEXT_DEFAULTS` JSON，不读取Mission Control数据库。已有会话显式模式、预算及更低的已学习安全上限仍优先；30万预算通常在22.5万准备交接。一批大读取跳过预留区也会进入有界交接，不能继续无声膨胀。修改已有成员预算可在该成员使用`context_mode`或`/context budget`。
+
+动态笔记提示位于历史尾部附近，不插入最后一组工具调用与结果之间，避免在每次index更新或用量变化时破坏整个历史前缀。换窗本身仍会改变前缀，网关缓存路由和保留时间也不由插件控制。排查可用`scripts/audit-prompt-cache.mjs --state-dir <会话状态目录> --session-file <主日志> --since <带时区时间> --until <带时区时间> --output <新文件>`；只读已保存的usage，分成员计算token加权命中率，不导出正文、私有推理或密钥。具体案例见[长任务与缓存修复](docs/design/mission-control-v2/LONG-RUN-CACHE-2026-10-20.md)。
+
+## 公共网页与本地加速器
+
+`web_fetch`默认拒绝私网/本地目标，逐次检查重定向并固定已检查的DNS地址。Steam++等加速器可能将公共域名映射到127.0.0.1；可由用户在`mission-control.json`明确设置：
+
+```json
+{"webFetch":{"trustedLocalHosts":["github.com","raw.githubusercontent.com","api.github.com"],"useSystemCa":true}}
+```
+
+仅所列精确公共域名、HTTPS 443及回环地址适用该路由；不能因此访问localhost、私网IP、其他端口或重定向内网。`useSystemCa`只为该工具请求合并Node默认及系统信任证书，保持主机名和证书验证，不修改全局TLS、hosts或Node启动参数；因此原会话`/reload`即可加载。证书不可信、映射被拒和上游HTTP错误分别提示。该配置也传给成员。
+
+长成员通过RPC工作时，`agent_end/turn_end`重复快照按流丢弃，不将整段累计历史拼进内存；逐条消息、工具事件、RPC响应和最终`agent_settled`收据继续处理。必要记录仍限长，残缺协议不能伪装为成功结束。
 
 ## 工作区切换与改名
 

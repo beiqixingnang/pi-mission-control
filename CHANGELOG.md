@@ -1,3 +1,11 @@
+# 2.5.0 — long RPC runs, bounded notes and cache-friendly context (2026-10-20)
+
+- Drain duplicate agent_end/turn_end RPC snapshots without retaining their unbounded accumulated message arrays. Keep canonical records bounded, preserve LF framing and settle only on agent_settled; a transport retry no longer kills a long member merely because its accumulated snapshot exceeded 8 MiB.
+- Start bounded handoff even when one large read jumps past the preparation reserve. Put mutable memory hints near the tail, preserving the stable history prefix and complete tool pairs instead of invalidating earlier prompt-cache content on each index/usage update.
+- Add atomic note batches, unchanged-text version preservation and output-bounded history batches. Mark the full injected index/handoff and their revisions, and use precise topic/history references to reduce repeat reads.
+- Add optional memberContext defaults for new member conversations without reading another plugin's data. Preserve explicit session choices and learned limits. Add exact-host HTTPS loopback accelerator compatibility and optional system trust for web_fetch; redirects, direct local URLs and arbitrary private targets remain checked.
+- Correlate the supplied gateway screenshot with normalized Pi usage and report token-weighted cache totals separately by member. Add read-only audit-prompt-cache.mjs; no prompts or credentials are exported and no gateway cache hit rate is guaranteed.
+
 # 2.4.0 — context modes and durable fault recovery (2026-10-20)
 
 - Count actual consecutive provider failures separately from successful tool continuations; clear a recovery episode immediately on a healthy model response. Exhausted bursts retry after durable, increasing cooldowns instead of requiring another human continue.

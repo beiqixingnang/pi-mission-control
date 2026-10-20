@@ -1,3 +1,4 @@
+import { resolveWebFetchPolicy } from "./web.ts";
 export type Execution = "host" | "sandbox" | "files";
 export type TaskState =
   | "queued"
@@ -291,6 +292,8 @@ export interface Schedule {
 }
 export type ArchiveKind = "goal" | "member" | "schedule";
 export interface Settings {
+  memberContext?: { mode: "notes" | "summary"; inputLimitTokens?: number };
+  webFetch?: import("./web.ts").WebFetchPolicy;
   reconnect?: import("./reconnect.ts").ReconnectOptions;
   maxParallel: number;
   taskTimeoutMs: number;
@@ -326,6 +329,16 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 export function resolveSettings(raw: Partial<Settings> = {}): Settings {
   const s = { ...DEFAULT_SETTINGS, ...raw };
+  if (s.webFetch !== undefined) s.webFetch = resolveWebFetchPolicy(s.webFetch);
+  if (
+    s.memberContext &&
+    (!["notes", "summary"].includes(s.memberContext.mode) ||
+      (s.memberContext.inputLimitTokens !== undefined &&
+        (!Number.isSafeInteger(s.memberContext.inputLimitTokens) ||
+          s.memberContext.inputLimitTokens < 1024 ||
+          s.memberContext.inputLimitTokens > 10000000)))
+  )
+    throw Error("Invalid memberContext mode/inputLimitTokens");
   for (const [key, min, max] of [
     ["maxParallel", 1, 16],
     ["taskTimeoutMs", 1000, Number.MAX_SAFE_INTEGER],

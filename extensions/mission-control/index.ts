@@ -2062,7 +2062,8 @@ export default function (pi: ExtensionAPI) {
     "Read web page",
     "Fetch a bounded public HTTP(S) page. Local/private network destinations and credentials in URLs are rejected.",
     Type.Object({ url: Type.String({ maxLength: 4000 }) }),
-    (args, signal) => fetchPage(args.url, signal),
+    (args, signal) =>
+      fetchPage(args.url, signal, undefined, current().settings.webFetch),
   );
 
   const openAgents = async (

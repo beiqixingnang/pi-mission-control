@@ -148,6 +148,116 @@ async function until(fn, timeout = 25000) {
 }
 
 test(
+  "new real Pi members inherit notes and a 300k budget while the lead retains summary mode",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      await fs.writeFile(
+        path.join(process.env.PI_CODING_AGENT_DIR, "mission-control.json"),
+        JSON.stringify({
+          workerExtensions: [fixture],
+          memberContext: { mode: "notes", inputLimitTokens: 300000 },
+        }),
+      );
+      await h.session.reload();
+      const lead = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      try {
+        await h.tool("team_spawn", {
+          name: "notes-default-reader",
+          role: "Inspect current standalone memory preferences",
+          model: "mission-fixture/wide",
+        });
+        const result = await h.tool("team_send", {
+          to: "notes-default-reader",
+          message: 'V2_TEST:{"op":"tool","name":"context_mode","args":{}}',
+          wait: true,
+        });
+        assert.ok(!result.isError, result.content[0].text);
+        const reply = JSON.parse(JSON.parse(result.content[0].text).result);
+        const state = JSON.parse(reply.text);
+        assert.equal(state.mode, "notes");
+        assert.equal(state.budget.inputLimitTokens, 300000);
+        assert.equal(
+          JSON.parse((await h.tool("context_mode")).content[0].text).mode,
+          "summary",
+        );
+      } finally {
+        await h.session.abort();
+        await lead;
+      }
+    }),
+);
+
+test(
+  "real Pi member drains cumulative RPC snapshots above 8 MiB, retries a stream failure and keeps every notes window",
+  { timeout: 45000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt("/reconnect on");
+      await h.session.prompt("/reconnect delay 0");
+      const held = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      try {
+        const accepted = await h.tool("subagent", {
+          task: 'V2_TEST:{"op":"large-rpc-run","windows":4,"readsPerWindow":40}',
+          timeoutPolicy: "none",
+        });
+        const id = JSON.parse(accepted.content[0].text).accepted[0].taskId;
+        await until(
+          async () =>
+            ["completed", "failed"].includes(
+              (await h.snapshot()).tasks.find((t) => t.id === id)?.state,
+            ),
+          35000,
+        );
+        const task = (await h.snapshot()).tasks.find((t) => t.id === id);
+        assert.equal(task.state, "completed", task.error);
+        const result = JSON.parse(
+          (await h.tool("team_collect", { taskId: id })).content[0].text,
+        )[0].result;
+        assert.match(result, /BIG_RPC_RECOVERED_WITHOUT_REPLAY/);
+        const rows = (await fs.readFile(task.sessionFile, "utf8"))
+          .trim()
+          .split("\n")
+          .map(JSON.parse);
+        assert.equal(
+          rows.filter(
+            (r) =>
+              r.type === "compaction" && r.details?.contextMode === "notes",
+          ).length,
+          4,
+        );
+        assert.equal(
+          rows.filter(
+            (r) =>
+              r.message?.role === "toolResult" &&
+              r.message.toolName === "fixture_large_read" &&
+              !r.message.isError,
+          ).length,
+          160,
+        );
+        const bytes = rows.reduce(
+          (n, r) =>
+            n + (r.message ? Buffer.byteLength(JSON.stringify(r.message)) : 0),
+          0,
+        );
+        assert.ok(bytes > 8 * 1024 * 1024, `only ${bytes} bytes accumulated`);
+        assert.ok(
+          rows.some(
+            (r) =>
+              r.message?.stopReason === "error" &&
+              r.message.errorMessage?.includes("malformed"),
+          ),
+        );
+      } finally {
+        await h.session.abort();
+        await held;
+      }
+    }),
+);
+
+test(
   "real Pi notes rollover automatically resumes the same conversation and keeps searchable public history",
   { timeout: 20000 },
   () =>

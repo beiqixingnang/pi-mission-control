@@ -111,6 +111,58 @@ const until = async (fn) => {
   throw Error("Timed out waiting for notes fixture");
 };
 
+test(
+  "real Pi keeps the stable source prefix across live index updates and handoff hints",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const trace = path.join(h.cwd, "cache-prefix.jsonl"),
+        before = process.env.MC_FIXTURE_CACHE_TRACE;
+      process.env.MC_FIXTURE_CACHE_TRACE = trace;
+      try {
+        await h.tool("context_mode", { mode: "notes" });
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "answer",
+              text: "SYNTHETIC_STABLE_SOURCE ".repeat(1000),
+            }),
+        );
+        await h.run({ windows: 1, auto: true });
+        const rows = fs
+          .readFileSync(trace, "utf8")
+          .trim()
+          .split("\n")
+          .map(JSON.parse);
+        assert.ok(
+          rows.filter((r) => r.prefixChars > 20000).length >= 3,
+          JSON.stringify(rows),
+        );
+        assert.equal(h.windows().length, 1);
+        assert.match(h.session.getLastAssistantText(), /NOTES_CYCLES_COMPLETE/);
+      } finally {
+        if (before === undefined) delete process.env.MC_FIXTURE_CACHE_TRACE;
+        else process.env.MC_FIXTURE_CACHE_TRACE = before;
+      }
+    }),
+);
+
+test(
+  "a real Pi burst crossing the local handoff reserve still saves notes and resumes the next window",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      await h.run({ windows: 2, auto: true, burstOvershoot: true });
+      assert.equal(h.windows().length, 2);
+      assert.match(h.session.getLastAssistantText(), /NOTES_CYCLES_COMPLETE/);
+      assert.equal(
+        h.events.filter((e) => e.type === "tool_execution_end" && e.isError)
+          .length,
+        0,
+      );
+    }),
+);
+
 for (const ignored of ["read", "claim"]) {
   test(
     `real Pi stops uncooperative ${ignored} handoff as a local error without claiming task completion`,

@@ -9,6 +9,7 @@ import {
   historyText,
   recentUserContext,
   NOTE_LIMITS,
+  appendContextHint,
 } from "../../runtime/context-memory.ts";
 import {
   summarizeChunks,
@@ -32,6 +33,138 @@ const entry = (id, text, role = "user") => ({
   id,
   type: "message",
   message: { role, content: [{ type: "text", text }] },
+});
+
+test("batched note writes are atomic, preserve unchanged versions and refresh explicit handoff coverage", () =>
+  usingMemory((m) => {
+    m.writeMany(
+      [
+        { name: "index", text: "task G rev1" },
+        { name: "handoff", text: "decoder.ts line173; not accepted" },
+      ],
+      "a",
+    );
+    assert.throws(
+      () =>
+        m.writeMany(
+          [
+            { name: "index", text: "changed", expectedRevision: 1 },
+            { name: "handoff", text: "bad", expectedRevision: 0 },
+          ],
+          "b",
+        ),
+      /revision changed/,
+    );
+    assert.equal(m.note("index").text, "task G rev1");
+    const receipts = m.writeMany(
+      [
+        { name: "index", text: "task G rev1", expectedRevision: 1 },
+        {
+          name: "handoff",
+          text: "decoder.ts line173; not accepted",
+          expectedRevision: 1,
+        },
+      ],
+      "b",
+    );
+    assert.ok(
+      receipts.every(
+        (r) => r.unchanged && r.revision === 1 && r.source === "b",
+      ),
+    );
+    assert.equal(
+      m.db.prepare("select count(*) n from note_versions").get().n,
+      2,
+    );
+    const prepared = m.prepare(
+      [entry("a", "old"), entry("b", "latest operation")],
+      "b",
+    );
+    assert.match(prepared.summary, /INCLUDED IN FULL/);
+    assert.match(prepared.summary, /decoder.ts line173/);
+  }));
+
+test("batched history lookup bounds its total output and preserves Unicode read cursors and role filters", () =>
+  usingMemory((m) => {
+    m.sync([
+      entry("user", "CORRECT-ID revision 1 中文🙂 ".repeat(100)),
+      entry("claim", "WRONG-ID correction", "assistant"),
+      entry("source", "dense source lines ".repeat(4000), "toolResult"),
+    ]);
+    const result = m.historyBatch(
+      [
+        { action: "search", query: "CORRECT-ID", role: "user" },
+        { action: "read", id: "user", offset: 5, limit: 6000 },
+        { action: "read", id: "source", limit: 6000 },
+      ],
+      600,
+    );
+    assert.ok(estimateSummaryTokens(JSON.stringify(result)) <= 610);
+    assert.equal(result.results[0].matches[0].id, "user");
+    const read = result.results.find((r) => r.id === "user");
+    if (read?.nextOffset)
+      assert.equal(read.nextOffset, read.offset + Array.from(read.text).length);
+    assert.ok(result.truncated);
+    assert.throws(
+      () =>
+        m.historyBatch(Array(9).fill({ action: "search", query: "source" })),
+      /1..8/,
+    );
+  }));
+
+test("changing an index or threshold hint preserves the large history prefix and complete final tool pairs", () => {
+  const history = [
+    { role: "user", content: "SOURCE ".repeat(20000) },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "r",
+          name: "read",
+          arguments: { path: "decoder.ts" },
+        },
+      ],
+    },
+    { role: "toolResult", toolCallId: "r", content: "page1" },
+  ];
+  const hint = (content) => ({
+    role: "custom",
+    customType: "context-memory-hint",
+    content,
+    timestamp: 0,
+  });
+  const before = appendContextHint(history, hint("index rev1"));
+  const after = appendContextHint(
+    [
+      ...history,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "r2",
+            name: "read",
+            arguments: { path: "decoder.ts", offset: 100 },
+          },
+        ],
+      },
+      { role: "toolResult", toolCallId: "r2", content: "page2" },
+    ],
+    hint("index rev2; threshold reached"),
+  );
+  const a = JSON.stringify(before),
+    b = JSON.stringify(after);
+  let common = 0;
+  while (common < Math.min(a.length, b.length) && a[common] === b[common])
+    common++;
+  assert.ok(
+    common > 140000,
+    "mutable working notes must not replace the prefix before the source history",
+  );
+  assert.equal(before.at(-1), history.at(-1));
+  assert.equal(after.at(-2).role, "assistant");
+  assert.equal(after.at(-1).toolCallId, "r2");
 });
 
 test("bounded user excerpts retain literal latest corrections separately from erroneous working notes", () => {

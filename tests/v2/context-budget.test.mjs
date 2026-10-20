@@ -187,6 +187,36 @@ test("model-specific local budgets survive reload, learn only context failures a
     );
   }));
 
+test("standalone host defaults initialize a fresh member but explicit mode and auto-budget survive reload", () =>
+  harness(async (h) => {
+    const previous = process.env.PI_CONTEXT_DEFAULTS;
+    try {
+      await h.emit("session_shutdown");
+      const id = "defaults-" + crypto.randomUUID();
+      h.ctx.sessionManager.getSessionId = () => id;
+      h.ctx.model = {
+        ...h.ctx.model,
+        contextWindow: 1050000,
+        maxTokens: 128000,
+      };
+      process.env.PI_CONTEXT_DEFAULTS = JSON.stringify({
+        mode: "notes",
+        inputLimitTokens: 300000,
+      });
+      await h.emit("session_start");
+      assert.equal((await h.state()).mode, "notes");
+      assert.equal((await h.state()).budget.prepareAtTokens, 225000);
+      await h.tool("context_mode", { mode: "summary", inputLimitTokens: 0 });
+      await h.emit("session_shutdown");
+      await h.emit("session_start");
+      assert.equal((await h.state()).mode, "summary");
+      assert.equal((await h.state()).budget.inputLimitTokens, 889232);
+    } finally {
+      if (previous === undefined) delete process.env.PI_CONTEXT_DEFAULTS;
+      else process.env.PI_CONTEXT_DEFAULTS = previous;
+    }
+  }));
+
 test("automatic handoff is bounded, deduplicated across reload and pauses on cancellation", () =>
   harness(async (h) => {
     await h.tool("context_mode", { mode: "notes", inputLimitTokens: 40000 });
@@ -224,6 +254,37 @@ test("automatic handoff is bounded, deduplicated across reload and pauses on can
     await h.turn();
     await h.turn({ outcome: "aborted" });
     assert.equal((await h.state()).preparation.phase, "paused");
+  }));
+
+test("one oversized read cannot skip handoff by jumping past its reserved interval", () =>
+  harness(async (h) => {
+    await h.tool("context_mode", { mode: "notes", inputLimitTokens: 40000 });
+    h.setTokens(48000);
+    const turn = await h.turn();
+    assert.equal(turn.continue, true);
+    assert.equal((await h.state()).preparation.phase, "preparing");
+    assert.equal((await h.emit("tool_call", { toolName: "read" })).block, true);
+    assert.equal(
+      await h.emit("tool_call", { toolName: "context_note" }),
+      undefined,
+    );
+    await h.emit("session_shutdown");
+    await h.emit("session_start");
+    assert.equal((await h.state()).preparation.phase, "preparing");
+  }));
+
+test("an existing over-budget notes session starts handoff before another project tool after reload", () =>
+  harness(async (h) => {
+    await h.tool("context_mode", { mode: "notes", inputLimitTokens: 40000 });
+    h.setTokens(800000);
+    await h.emit("context", {
+      messages: [{ role: "user", content: "continue original task" }],
+    });
+    assert.equal(
+      (await h.emit("tool_call", { toolName: "powershell" })).block,
+      true,
+    );
+    assert.equal((await h.state()).preparation.phase, "preparing");
   }));
 
 test("notes rollover is committed at the tool boundary with no intermediate task settlement and retains full tool pairs", () =>

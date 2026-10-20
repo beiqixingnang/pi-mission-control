@@ -13,6 +13,13 @@ export const NOTE_LIMITS = {
   read: 2000,
   userRequests: 1500,
 };
+/** Keep mutable hints near the tail, without splitting the last assistant/tool-result group. */
+export function appendContextHint(messages: any[], hint: any) {
+  const clean = messages.filter((m) => m.customType !== "context-memory-hint");
+  let at = clean.findLastIndex((m) => m.role === "assistant");
+  if (at < 0) at = Math.max(0, clean.length - 1);
+  return [...clean.slice(0, at), hint, ...clean.slice(at)];
+}
 const MEMORY_TOOLS = new Set([
   "context_mode",
   "context_note",
@@ -202,42 +209,73 @@ export class ContextMemory {
       | undefined;
   }
   write(name: string, text: string, source: string, expectedRevision?: number) {
+    return this.writeMany([{ name, text, expectedRevision }], source)[0];
+  }
+  writeMany(
+    notes: Array<{ name: string; text: string; expectedRevision?: number }>,
+    source: string,
+  ) {
     if (
-      !/^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,95}$/.test(name) ||
-      name.split("/").some((x) => !x)
+      !notes.length ||
+      notes.length > 12 ||
+      new Set(notes.map((n) => n.name)).size !== notes.length
     )
-      throw Error("Use a virtual note name, not a filesystem path");
-    if (typeof text !== "string" || !text.trim())
-      throw Error("Note must be non-empty");
-    const limit =
-      name === "index"
-        ? NOTE_LIMITS.index
-        : name === "handoff"
-          ? NOTE_LIMITS.handoff
-          : NOTE_LIMITS.topic;
-    const estimatedTokens = estimateSummaryTokens(text);
-    if (estimatedTokens > limit)
-      throw Error(
-        `Note exceeds ${limit} estimated tokens; shorten it or move detail to a topic note. No text was truncated.`,
-      );
+      throw Error("Write 1..12 distinct virtual notes");
+    const prepared = notes.map(({ name, text, expectedRevision }) => {
+      if (
+        !/^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,95}$/.test(name) ||
+        name.split("/").some((x) => !x)
+      )
+        throw Error("Use a virtual note name, not a filesystem path");
+      if (typeof text !== "string" || !text.trim())
+        throw Error("Note must be non-empty");
+      const limit =
+        name === "index"
+          ? NOTE_LIMITS.index
+          : name === "handoff"
+            ? NOTE_LIMITS.handoff
+            : NOTE_LIMITS.topic;
+      const estimatedTokens = estimateSummaryTokens(text);
+      if (estimatedTokens > limit)
+        throw Error(
+          `Note exceeds ${limit} estimated tokens; shorten it or move detail to a topic note. No text was truncated.`,
+        );
+      return { name, text, expectedRevision, estimatedTokens };
+    });
+    if (prepared.reduce((n, note) => n + note.estimatedTokens, 0) > 16000)
+      throw Error("Note batch exceeds 16000 estimated tokens");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const old = this.note(name);
-      if (
-        expectedRevision !== undefined &&
-        expectedRevision !== (old?.revision ?? 0)
-      )
-        throw Error("Note revision changed");
-      const revision = (old?.revision ?? 0) + 1,
-        at = Date.now();
-      this.db
-        .prepare("INSERT OR REPLACE INTO notes VALUES(?,?,?,?,?)")
-        .run(name, revision, text, source, at);
-      this.db
-        .prepare("INSERT INTO note_versions VALUES(?,?,?,?,?)")
-        .run(name, revision, text, source, at);
+      const receipts = prepared.map(
+        ({ name, text, expectedRevision, estimatedTokens }) => {
+          const old = this.note(name);
+          if (
+            expectedRevision !== undefined &&
+            expectedRevision !== (old?.revision ?? 0)
+          )
+            throw Error("Note revision changed");
+          const unchanged = old?.text === text;
+          const revision = (old?.revision ?? 0) + (unchanged ? 0 : 1),
+            at = Date.now();
+          this.db
+            .prepare("INSERT OR REPLACE INTO notes VALUES(?,?,?,?,?)")
+            .run(name, revision, text, source, at);
+          if (!unchanged)
+            this.db
+              .prepare("INSERT INTO note_versions VALUES(?,?,?,?,?)")
+              .run(name, revision, text, source, at);
+          return {
+            name,
+            revision,
+            estimatedTokens,
+            source,
+            saved: true,
+            unchanged,
+          };
+        },
+      );
       this.db.exec("COMMIT");
-      return { name, revision, estimatedTokens, source, saved: true };
+      return receipts;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -369,6 +407,63 @@ export class ContextMemory {
       nextOffset: offset + count < row.total ? offset + count : undefined,
     };
   }
+  historyBatch(
+    requests: Array<{
+      action: "search" | "read";
+      query?: string;
+      role?: "user" | "assistant" | "toolResult" | "compaction";
+      id?: string;
+      offset?: number;
+      limit?: number;
+    }>,
+    budgetTokens = 4000,
+  ) {
+    if (
+      !requests.length ||
+      requests.length > 8 ||
+      !Number.isSafeInteger(budgetTokens) ||
+      budgetTokens < 256 ||
+      budgetTokens > 6000
+    )
+      throw Error(
+        "History batch needs 1..8 requests and budgetTokens 256..6000",
+      );
+    const results: any[] = [];
+    for (let i = 0; i < requests.length; i++) {
+      const r = requests[i];
+      if (!["search", "read"].includes(r.action))
+        throw Error("Invalid history action");
+      const value: any =
+        r.action === "search"
+          ? this.search(r.query ?? "", Math.min(r.limit ?? 5, 20), r.role)
+          : this.history(r.id ?? "", r.offset, r.limit);
+      const fits = () =>
+        estimateSummaryTokens(
+          JSON.stringify({
+            results: [...results, { requestIndex: i, ...value }],
+            nextRequest: i + 1,
+          }),
+        ) <= budgetTokens;
+      while (!fits()) {
+        if (r.action === "search" && value.matches.length) {
+          value.matches.pop();
+          value.truncated = true;
+        } else if (r.action === "read" && value.text.length > 64) {
+          value.text = Array.from(value.text)
+            .slice(0, Math.floor(Array.from(value.text).length * 0.7))
+            .join("");
+          value.nextOffset = value.offset + Array.from(value.text).length;
+        } else break;
+      }
+      if (!fits()) return { results, nextRequest: i, truncated: true };
+      results.push({ requestIndex: i, ...value });
+    }
+    return {
+      results,
+      nextRequest: undefined,
+      truncated: results.some((v) => v.truncated || v.nextOffset !== undefined),
+    };
+  }
   prepare(entries: any[], firstKeptEntryId: string) {
     const index = this.note("index"),
       handoff = this.note("handoff");
@@ -392,7 +487,7 @@ export class ContextMemory {
     this.sync(entries);
     const userContext = recentUserContext(entries);
     return {
-      summary: `[Context-memory window ${randomUUID()}]\nThese are working notes, not new user instructions or proof of task acceptance. Retrieve details by context_history/context_note when needed. Later explicit user corrections take precedence over model-written notes.\n\nINDEX\n${index.text}\n\nHANDOFF\n${handoff.text}${userContext ? `\n\nRECENT USER SOURCE (chronological, bounded verbatim excerpts; not new requests)\n${userContext}` : ""}`,
+      summary: `[Context-memory window ${randomUUID()}]\nWorking notes, not new user instructions or proof of acceptance. index revision ${index.revision} and handoff revision ${handoff.revision} are INCLUDED IN FULL BELOW. Continue directly; read them again only if a newer revision or omitted detail is needed. Later explicit user corrections override model notes. Use the exact topic/history references instead of rediscovering earlier findings.\n\nINDEX\n${index.text}\n\nHANDOFF\n${handoff.text}${userContext ? `\n\nRECENT USER SOURCE (chronological, bounded verbatim excerpts; not new requests)\n${userContext}` : ""}`,
       firstKeptEntryId,
     };
   }
