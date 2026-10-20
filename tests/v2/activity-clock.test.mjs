@@ -6,6 +6,83 @@ import path from "node:path";
 import { MissionKernel } from "../../runtime/kernel.ts";
 import { resolveSettings } from "../../runtime/types.ts";
 
+test("stopping a root settles its running tail and retains an ended clock through reload and a new goal", () =>
+  using(async (h) => {
+    const root = h.kernel.store.mission().id;
+    h.kernel.leadStarted();
+    h.advance(4000);
+    const stopped = await h.kernel.stopGoal(
+      root,
+      "Explicit test stop with no children",
+    );
+    const ended = h.kernel.store.get("goalActivityClock:" + root);
+    assert.equal(ended.activeMs, 4000);
+    assert.equal(ended.state, "ended");
+    assert.equal(ended.updatedAt, 104000);
+    assert.equal(h.kernel.goals.node(root).updatedAt, 104000);
+    assert.equal(stopped.status, "stopped");
+    assert.equal(h.kernel.store.mission(), undefined);
+    await h.restart(3600000);
+    h.kernel.setGoal("Another independent objective");
+    assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root), ended);
+    h.advance(5000);
+    await h.kernel.tick();
+    assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root), ended);
+  }));
+
+test("accepted root clocks retain their exact end time across repeated ticks, close, reload and a new root", () =>
+  using(async (h) => {
+    const root = h.kernel.store.mission().id;
+    h.kernel.leadStarted();
+    h.advance(4000);
+    h.kernel.acceptGoal(
+      root,
+      h.kernel.store
+        .mission()
+        .criteria.map((_, i) => ({
+          criterion: i + 1,
+          source: "statement",
+          summary: "Verified isolated clock fixture result",
+        })),
+      0,
+    );
+    const ended = h.kernel.store.get("goalActivityClock:" + root);
+    assert.equal(ended.activeMs, 4000);
+    assert.equal(ended.state, "ended");
+    h.advance(5000);
+    await h.kernel.tick();
+    assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root), ended);
+    await h.restart(3600000);
+    assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root), ended);
+    h.kernel.setGoal("Next independent root");
+    assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root), ended);
+  }));
+
+test("stopped clocks exclude paused, dependency-wait, cooldown and offline tails", async () => {
+  for (const state of ["paused", "waiting", "cooldown", "offline"]) {
+    await using(async (h) => {
+      const root = h.kernel.store.mission().id;
+      h.kernel.leadStarted();
+      h.advance(1000);
+      h.kernel.leadSettled();
+      if (state === "paused") await h.kernel.userControl("pause");
+      if (state === "waiting")
+        h.kernel.waitExternal("Waiting for external producer", 10000000);
+      if (state === "cooldown") {
+        h.kernel.leadStarted();
+        h.kernel.leadMessage(true, 0, "temporary network failure");
+        h.kernel.leadSettled();
+      }
+      if (state === "offline") await h.restart(20000);
+      h.advance(10000);
+      await h.kernel.stopGoal(root, "Stop inactive interval");
+      const clock = h.kernel.store.get("goalActivityClock:" + root);
+      assert.equal(clock.activeMs, 1000, state);
+      assert.equal(clock.state, "ended", state);
+    });
+  }
+});
+
 test("teammate execution keeps the activity clock running while the lead is recovering", () =>
   using(async (h) => {
     const member = h.kernel.addMember({

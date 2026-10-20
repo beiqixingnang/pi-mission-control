@@ -337,10 +337,13 @@ def main():
         wait(lambda: len(compactions()) > before_windows, "notes rollover installed a new context without a summary-model request")
         assert note_marker in compactions()[-1]["summary"]
         assert compactions()[-1].get("details", {}).get("contextMode") == "notes"
+        assert compactions()[-1]["details"]["injectedNotes"]["index"]["revision"] == dict(versions)["index"]
+        checks.append("native notes checkpoint retained the exact injected index revision")
         tool("context_note", {"action": "write", "name": "handoff", "text": note_marker + ": latest tool-boundary handoff; continue decoder.py line 173; unaccepted."})
         before_windows = len(compactions())
         tool("context_rollover", {})
         wait(lambda: len(compactions()) > before_windows and compactions()[-1].get("details", {}).get("boundary"), "model tool rollover committed at the current boundary and continued in the same Pi process")
+        assert compactions()[-1]["details"]["injectedNotes"]["index"]["revision"] == dict(versions)["index"]
         reload("notes context survived literal /reload in the same Pi process")
         assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)]
         assert 40000 in local_budget()
@@ -369,6 +372,69 @@ def main():
         quiet(.5)
         line("/context mode summary")
         wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)], "same conversation switched back to summary mode")
+        def latest_tool(name):
+            session_file = next(sessions.glob("*_" + config["id"] + ".jsonl"))
+            for row in reversed(session_file.read_text().splitlines()):
+                entry = json.loads(row)
+                message = entry.get("message", {})
+                if message.get("role") == "toolResult" and message.get("toolName") == name:
+                    return entry
+
+        def call_tool(name, args):
+            previous = latest_tool(name)
+            tool(name, args)
+            wait(lambda: latest_tool(name) and latest_tool(name)["id"] != (previous or {}).get("id"), "model tool completed: " + name)
+            quiet(.4)
+            message = latest_tool(name)["message"]
+            text = "".join(block.get("text", "") for block in message["content"])
+            return message.get("isError", False), text
+
+        line("/mission resume")
+        wait(lambda: not mission()["humanPaused"], "test mission resumed for root-identity regression")
+        selected = mission()["id"]
+        marker = "Unselected root identity regression " + uuid.uuid4().hex[:8]
+        failed, text = call_tool("goal_plan", {"goals": [{"objective": marker, "criteria": ["Evidence belongs to this exact root"]}]})
+        assert not failed
+        unselected = next(node for node in query("goal_nodes") if node["objective"] == marker)
+        before_roots = [node for node in query("goal_nodes") if node["id"] in [selected, unselected["id"]]]
+        failed, text = call_tool("goal_accept", {"goalId": unselected["id"], "revision": 0,
+            "evidence": [{"criterion": 1, "source": "statement", "summary": "Evidence for the unselected fixture root only"}]})
+        assert failed and "identity" in text.lower()
+        assert mission()["id"] == selected
+        assert [node for node in query("goal_nodes") if node["id"] in [selected, unselected["id"]]] == before_roots
+        checks.append("unselected root acceptance was rejected without changing either root")
+
+        # The tool fixture JSON escapes these characters, so its control prompt
+        # cannot itself become another literal user-history search hit.
+        search_marker = "检索游标" + uuid.uuid4().hex[:8]
+        for i in range(5):
+            line("V2_TEST:" + json.dumps({"op": "answer", "text": search_marker + "中文🙂" * 300}, ensure_ascii=False))
+            quiet(.5)
+        cursor, seen = None, []
+        for page in range(10):
+            request = {"action": "search", "query": search_marker, "role": "user", "limit": 2}
+            if cursor:
+                request["cursor"] = cursor
+            failed, text = call_tool("context_history", {"action": "batch", "requests": [request], "budgetTokens": 256, "startRequest": 0})
+            assert not failed, text
+            result = json.loads(text)
+            assert result["results"][0]["matches"]
+            seen.extend(hit["id"] for hit in result["results"][0]["matches"])
+            cursor = result["results"][0].get("nextCursor")
+            if not cursor:
+                break
+            assert result["nextRequest"] == 0
+            if page == 0:
+                reload("search cursor survived literal /reload in the same Pi process")
+        assert len(seen) == len(set(seen)) == 5
+        checks.append("256-token Unicode search pages retained every user hit without duplicates")
+        failed, _ = call_tool("goal_stop", {"goalId": selected, "reason": "Isolated review regression completed"})
+        assert not failed and mission() is None
+        clock = query("meta", "key=?", ("goalActivityClock:" + selected,))[0]
+        assert clock["state"] == "ended"
+        reload("stopped goal activity remained ended through literal /reload")
+        assert query("meta", "key=?", ("goalActivityClock:" + selected,))[0] == clock
+        checks.append("stopped activity clock retained its exact receipt after reload")
         assert len(list(sessions.glob("*_" + config["id"] + ".jsonl"))) == 1
         assert not any(error in visible for error in ["UnhandledPromiseRejection", "Error loading extension"])
         config["sessionFile"] = str(next(sessions.glob("*_" + config["id"] + ".jsonl")))

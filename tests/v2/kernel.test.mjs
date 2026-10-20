@@ -262,6 +262,44 @@ test("lead process reconciliation is atomic, fenced by epochs and idempotent bef
     assert.equal(h.kernel.store.task(one.id).state, "failed");
   }));
 
+test("stop settles activity at user intent while delayed cancellation keeps unknown process evidence and usage", () =>
+  using(async (h) => {
+    const root = h.kernel.setGoal("Delayed cancellation accounting", [
+      "Retain process receipts",
+    ]);
+    h.add("reader");
+    h.kernel.leadStarted();
+    const task = h.kernel.dispatch("reader", "Synthetic cancellable work");
+    await flush();
+    let release;
+    const gate = new Promise((resolve) => (release = resolve));
+    h.workers[0].stop = async () => {
+      await gate;
+      h.workers[0].resolve({
+        ok: false,
+        text: "Retained partial output",
+        processState: "unknown",
+      });
+    };
+    h.advance(4000);
+    const stopping = h.kernel.stopGoal(root.id, "Explicit stop during work");
+    await flush();
+    const ended = h.kernel.store.get("goalActivityClock:" + root.id);
+    assert.equal(ended.state, "ended");
+    assert.equal(ended.activeMs, 4000);
+    assert.equal(h.kernel.goals.node(root.id).updatedAt, 104000);
+    h.advance(20000);
+    await h.kernel.tick();
+    release();
+    await stopping;
+    assert.equal(h.kernel.store.task(task.id).processState, "unknown");
+    assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root.id), ended);
+    assert.equal(h.kernel.store.task(task.id).goalId, task.goalId);
+    await h.restart();
+    assert.equal(h.kernel.store.task(task.id).processState, "unknown");
+    assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root.id), ended);
+  }));
+
 test("lead reconciliation rejects a live execution and cancellation cannot fake a stopped unknown process", () =>
   using(async (h) => {
     h.idle(false);

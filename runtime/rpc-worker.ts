@@ -9,7 +9,11 @@ import type {
   WorkerFactory,
   WorkerOutcome,
 } from "./types.ts";
-import { rpcRecords } from "./rpc-records.ts";
+import {
+  rpcRecords,
+  RpcRecordError,
+  type RpcRecordDiagnostic,
+} from "./rpc-records.ts";
 import { readTime } from "./time.ts";
 
 const ENV_ALLOW = [
@@ -304,6 +308,7 @@ export function createWorkerFactory(
       sessionFile: string | undefined,
       stderr = "",
       unknown = false;
+    let protocolDiagnostic: RpcRecordDiagnostic | undefined;
     let resolveResult!: (r: WorkerOutcome) => void;
     const result = new Promise<WorkerOutcome>((resolve) => {
       resolveResult = resolve;
@@ -386,6 +391,7 @@ export function createWorkerFactory(
         outputTokens,
         sessionFile,
         cleanSettlement,
+        protocolDiagnostic,
         processState: unknown ? "unknown" : "stopped",
       });
     };
@@ -479,6 +485,8 @@ export function createWorkerFactory(
       try {
         for await (const line of rpcRecords(child.stdout)) receive(line);
       } catch (error) {
+        if (error instanceof RpcRecordError)
+          protocolDiagnostic = error.diagnostic;
         lastError = String(error);
         await finish(false);
       }

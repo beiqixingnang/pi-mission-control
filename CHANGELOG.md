@@ -1,3 +1,12 @@
+# 2.5.1 — exact acceptance, closed clocks and resumable history (2026-10-21)
+
+- Validate the requested root identity and revision in the acceptance transaction. Reject unselected roots before any writes; return the original receipt for an accepted revision.
+- Settle activity at stop intent before awaiting process cancellation. Preserve unknown process receipts, root timestamps and ended clocks across archive, reload and subsequent goals.
+- Keep search hit identities when excerpts exceed a history batch budget. Add signed, branch-bound search cursors and exact batch continuation through cursor/offset and startRequest.
+- Retain bounded canonical RPC failure diagnostics in task receipts: event type, actual byte limit, observed lower bound and LF record index. Never include record bodies or arbitrary type names.
+- Record injected note revisions and sources in both compaction paths. Suppress the duplicate index hint only when the exact version is already projected in the current checkpoint; preserve new revisions, first injection and legacy compatibility.
+- Extend isolated Windows/WSL and same-process TUI reload coverage. See the review fix index and machine-readable receipt under docs/design/mission-control-v2.
+
 # 2.5.0 — long RPC runs, bounded notes and cache-friendly context (2026-10-20)
 
 - Drain duplicate agent_end/turn_end RPC snapshots without retaining their unbounded accumulated message arrays. Keep canonical records bounded, preserve LF framing and settle only on agent_settled; a transport retry no longer kills a long member merely because its accumulated snapshot exceeded 8 MiB.

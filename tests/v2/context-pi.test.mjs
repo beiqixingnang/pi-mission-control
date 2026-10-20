@@ -111,6 +111,29 @@ const until = async (fn) => {
   throw Error("Timed out waiting for notes fixture");
 };
 
+test("offline provider selects the new command in a batched wake and does not replay healthy faults on maintenance", () =>
+  harness(async (h) => {
+    const trace = path.join(h.cwd, "batched-fixture.jsonl");
+    const old =
+      "V2_TEST:" +
+      JSON.stringify({ op: "answer", text: "OLD_ALREADY_HANDLED" });
+    const next =
+      "V2_TEST:" +
+      JSON.stringify({
+        op: "flaky",
+        key: "batch",
+        failures: 0,
+        traceFile: trace,
+      });
+    await h.session.prompt("Mission Control updates.\n" + old + "\n\n" + next);
+    assert.equal(h.session.getLastAssistantText(), "RECOVERED_REQUEST_1");
+    await h.session.prompt(
+      "Mission Control updates.\nContinue the next approved step.",
+    );
+    assert.equal(h.session.getLastAssistantText(), "FIXTURE_UPDATES_OBSERVED");
+    assert.equal(fs.readFileSync(trace, "utf8").trim().split("\n").length, 1);
+  }));
+
 test(
   "real Pi keeps the stable source prefix across live index updates and handoff hints",
   { timeout: 20000 },
@@ -144,6 +167,153 @@ test(
         if (before === undefined) delete process.env.MC_FIXTURE_CACHE_TRACE;
         else process.env.MC_FIXTURE_CACHE_TRACE = before;
       }
+    }),
+);
+
+test(
+  "real Pi injects a checkpoint index once, preserves newer revisions and reloads both compaction paths",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const trace = path.join(h.cwd, "index-projection.jsonl"),
+        oldTrace = process.env.MC_FIXTURE_CACHE_TRACE,
+        oldMarker = process.env.MC_FIXTURE_INDEX_MARKER;
+      process.env.MC_FIXTURE_CACHE_TRACE = trace;
+      const first = "EXACT_INDEX_ONE_63fc",
+        second = "EXACT_INDEX_TWO_42ae";
+      const count = () =>
+        JSON.parse(fs.readFileSync(trace, "utf8").trim().split("\n").at(-1))
+          .markerOccurrences;
+      const probe = () =>
+        h.session.prompt('V2_TEST:{"op":"answer","text":"projection probe"}');
+      try {
+        h.session.settingsManager.applyOverrides({
+          compaction: { keepRecentTokens: 128 },
+        });
+        await h.tool("context_mode", { mode: "notes" });
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "answer",
+              text: "Synthetic source for a native cut point. ".repeat(500),
+            }),
+        );
+        await h.tool("context_note", {
+          action: "write",
+          notes: [
+            { name: "index", text: first },
+            { name: "handoff", text: "Continue from the saved position" },
+          ],
+        });
+        process.env.MC_FIXTURE_INDEX_MARKER = first;
+        await probe();
+        assert.equal(
+          count(),
+          1,
+          "first-time index must be visible in the hint",
+        );
+        await h.tool("context_note", {
+          action: "write",
+          name: "handoff",
+          text: "Updated coverage before native compact",
+        });
+        await h.session.compact();
+        assert.equal(
+          h.windows().at(-1).details.injectedNotes.index.revision,
+          1,
+        );
+        await probe();
+        assert.equal(
+          count(),
+          1,
+          "native checkpoint must not duplicate the index in the hint",
+        );
+        await h.session.reload();
+        await probe();
+        assert.equal(
+          count(),
+          1,
+          "reload preserves the exact checkpoint metadata",
+        );
+        await h.tool("context_note", {
+          action: "write",
+          name: "index",
+          text: second,
+        });
+        process.env.MC_FIXTURE_INDEX_MARKER = second;
+        await probe();
+        assert.equal(
+          count(),
+          1,
+          "newer index must be visible before another rollover",
+        );
+        await h.session.reload();
+        await probe();
+        assert.equal(count(), 1, "newer note survives reload");
+        await h.tool("context_note", {
+          action: "write",
+          name: "handoff",
+          text: "Fresh tool boundary handoff",
+        });
+        await h.session.prompt(
+          'V2_TEST:{"op":"tool","name":"context_rollover","args":{}}',
+        );
+        assert.equal(h.windows().at(-1).details.boundary, true);
+        await probe();
+        assert.equal(
+          count(),
+          1,
+          "turn-boundary checkpoint must not duplicate the current index",
+        );
+      } finally {
+        if (oldTrace === undefined) delete process.env.MC_FIXTURE_CACHE_TRACE;
+        else process.env.MC_FIXTURE_CACHE_TRACE = oldTrace;
+        if (oldMarker === undefined) delete process.env.MC_FIXTURE_INDEX_MARKER;
+        else process.env.MC_FIXTURE_INDEX_MARKER = oldMarker;
+      }
+    }),
+);
+
+test(
+  "real Pi history tools resume a low-budget search with its public schema after reload",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      for (let i = 0; i < 5; i++)
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "answer",
+              text: "PUBLIC_CURSOR_TARGET " + "中文🙂".repeat(400),
+            }),
+        );
+      const seen = [];
+      let cursor;
+      for (let page = 0; page < 10; page++) {
+        const response = await h.tool("context_history", {
+          action: "batch",
+          requests: [
+            {
+              action: "search",
+              query: "PUBLIC_CURSOR_TARGET",
+              role: "user",
+              limit: 2,
+              cursor,
+            },
+          ],
+          budgetTokens: 256,
+          startRequest: 0,
+        });
+        const result = JSON.parse(response.content[0].text);
+        assert.ok(result.results[0].matches.length);
+        seen.push(...result.results[0].matches.map((hit) => hit.id));
+        cursor = result.results[0].nextCursor;
+        if (!cursor) break;
+        assert.equal(result.nextRequest, 0);
+        await h.session.reload();
+      }
+      assert.equal(seen.length, 5);
+      assert.equal(new Set(seen).size, 5);
     }),
 );
 

@@ -148,6 +148,94 @@ async function until(fn, timeout = 25000) {
 }
 
 test(
+  "real Pi goal_accept rejects an unselected root atomically and returns the original acceptance on repeats",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const plan = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                key: "a",
+                objective: "Selected public root",
+                criteria: ["Public fixture evidence"],
+              },
+              {
+                key: "b",
+                objective: "Unselected public root",
+                criteria: ["Other evidence"],
+              },
+            ],
+          })
+        ).content[0].text,
+      );
+      const a = plan.created.find((n) => n.key === "a"),
+        b = plan.created.find((n) => n.key === "b");
+      const lead = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      const db = new DatabaseSync(
+        path.join(
+          process.env.PI_CODING_AGENT_DIR,
+          "mission-control/v2",
+          h.session.sessionManager.getSessionId(),
+          "state.sqlite",
+        ),
+        { readOnly: true },
+      );
+      const snapshot = () =>
+        Object.fromEntries(
+          [
+            "meta",
+            "goal_nodes",
+            "goal_missions",
+            "goal_acceptances",
+            "lifecycle_archive",
+            "events",
+          ].map((table) => [table, db.prepare(`SELECT * FROM ${table}`).all()]),
+        );
+      const evidence = [
+        {
+          criterion: 1,
+          source: "statement",
+          summary: "Verified fixture evidence for the exact root",
+        },
+      ];
+      try {
+        const before = snapshot();
+        const rejected = await h.tool("goal_accept", {
+          goalId: b.id,
+          revision: 0,
+          evidence,
+        });
+        assert.equal(rejected.isError, true);
+        assert.match(rejected.content[0].text, /identity/);
+        assert.deepEqual(snapshot(), before);
+        const accepted = await h.tool("goal_accept", {
+          goalId: a.id,
+          revision: 0,
+          evidence,
+        });
+        assert.ok(!accepted.isError);
+        const receipt = JSON.parse(accepted.content[0].text);
+        assert.equal(receipt.goalId, a.id);
+        assert.equal(receipt.state, "accepted");
+        const committed = snapshot();
+        const again = JSON.parse(
+          (await h.tool("goal_accept", { goalId: a.id, revision: 0, evidence }))
+            .content[0].text,
+        );
+        assert.equal(again.id, receipt.id);
+        assert.deepEqual(snapshot(), committed);
+      } finally {
+        db.close();
+        await h.session.abort();
+        await lead;
+      }
+    }),
+);
+
+test(
   "new real Pi members inherit notes and a 300k budget while the lead retains summary mode",
   { timeout: 20000 },
   () =>

@@ -49,6 +49,144 @@ const claim = (criterion = 1) => ({
   source: "statement",
   summary: "Concrete fixture result recorded for this criterion",
 });
+
+test("root acceptance is atomic for the requested identity and same-revision repeats return its original receipt", () =>
+  using((h) => {
+    const [a, b] = h.kernel.planGoals([
+      { objective: "Selected main A", criteria: ["Evidence for A"] },
+      { objective: "Unselected main B", criteria: ["Evidence for B"] },
+    ]);
+    const dump = () =>
+      Object.fromEntries(
+        [
+          "meta",
+          "goal_nodes",
+          "goal_missions",
+          "goal_acceptances",
+          "lifecycle_archive",
+          "events",
+        ].map((t) => [
+          t,
+          h.kernel.store.db.prepare(`SELECT * FROM ${t}`).all(),
+        ]),
+      );
+    const before = dump();
+    assert.throws(
+      () =>
+        h.kernel.acceptGoal(
+          b.id,
+          [{ ...claim(), summary: "Evidence for inactive B only" }],
+          0,
+        ),
+      /identity|active main goal/i,
+    );
+    assert.deepEqual(dump(), before);
+    assert.throws(
+      () =>
+        h.kernel.complete(
+          [{ criterion: 1, evidence: "Evidence for inactive B only" }],
+          undefined,
+          0,
+          b.id,
+        ),
+      /identity/i,
+    );
+    assert.deepEqual(dump(), before);
+    assert.throws(() => h.kernel.acceptGoal(a.id, [claim()], 1), /revision/);
+    assert.deepEqual(dump(), before);
+    const receipt = h.kernel.acceptGoal(a.id, [claim()], 0);
+    assert.equal(receipt.goalId, a.id);
+    assert.equal(h.kernel.store.mission().status, "complete");
+    const committed = dump();
+    assert.equal(
+      h.kernel.acceptGoal(
+        a.id,
+        [{ ...claim(), summary: "Must not replace earlier evidence" }],
+        0,
+      ).id,
+      receipt.id,
+    );
+    assert.deepEqual(dump(), committed);
+    assert.equal(h.kernel.goals.node(b.id).state, "planned");
+  }));
+test("root acceptance retains active-work, unknown-process, undelivered-result and hold guards without partial writes", async () => {
+  for (const fault of [
+    "running",
+    "unknown",
+    "result",
+    "pause",
+    "workspace",
+    "decision",
+    "mission-revision",
+  ])
+    await using(async (h) => {
+      const [root] = h.kernel.planGoals([
+        { objective: "Guarded root", criteria: ["Verified fixture result"] },
+      ]);
+      if (["running", "unknown"].includes(fault))
+        h.kernel.store.putTask({
+          id: "guard-task",
+          missionId: root.id,
+          memberId: "reader",
+          member: "reader",
+          rootId: "guard-task",
+          state: fault === "running" ? "running" : "completed",
+          epoch: 1,
+          phase: "work",
+          inputPath: "unused",
+          createdAt: 100000,
+          updatedAt: 100000,
+          timeoutMs: 0,
+          processState: fault === "running" ? "running" : "unknown",
+          reviewDeliveryIds: [],
+        });
+      if (fault === "result")
+        h.kernel.store.putDelivery({
+          id: "guard-result",
+          key: "guard-result",
+          missionId: root.id,
+          from: "reader",
+          to: "lead",
+          kind: "result",
+          summary: "Must be observed",
+          state: "pending",
+          createdAt: 100000,
+          attempts: 0,
+          nextAttemptAt: 100000,
+        });
+      if (fault === "pause") await h.kernel.userControl("pause");
+      if (fault === "workspace") h.kernel.store.set("relocationHold", true);
+      if (fault === "decision")
+        h.kernel.requireDecision("Which scope is approved?");
+      if (fault === "mission-revision") {
+        const mission = h.kernel.store.mission();
+        mission.revision = 1;
+        h.kernel.store.set("mission", mission);
+      }
+      const snapshot = () =>
+        Object.fromEntries(
+          [
+            "meta",
+            "goal_nodes",
+            "goal_missions",
+            "goal_acceptances",
+            "lifecycle_archive",
+            "events",
+          ].map((table) => [
+            table,
+            h.kernel.store.db.prepare(`SELECT * FROM ${table}`).all(),
+          ]),
+        );
+      const before = snapshot();
+      assert.throws(
+        () => h.kernel.acceptGoal(root.id, [claim()], 0),
+        /running|unknown|Undelivered|holds|active mission|revision/i,
+        fault,
+      );
+      assert.deepEqual(snapshot(), before, fault);
+    });
+});
+
 test("explicit scope survives reload/export and revising it invalidates affected acceptance without breaking legacy goals", () =>
   using(async (h) => {
     const nodes = h.kernel.planGoals([

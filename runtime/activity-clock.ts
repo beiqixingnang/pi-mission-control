@@ -16,7 +16,8 @@ export class MissionActivityClock {
     this.lastAt = this.savedAt = now();
     this.restoredMissionId = store.mission()?.id;
     const saved = store.get<ActivityClock>("missionActivityClock");
-    if (saved)
+    if (saved?.state === "ended") this.value = { ...saved };
+    else if (saved)
       this.value = {
         ...saved,
         state: "offline",
@@ -34,6 +35,15 @@ export class MissionActivityClock {
     const at = this.now();
     if (!m) {
       this.liveMissionId = undefined;
+      this.lastAt = at;
+      return;
+    }
+    if (
+      this.value?.missionId === m.id &&
+      this.value.state === "ended" &&
+      state === "ended"
+    ) {
+      this.liveMissionId = m.id;
       this.lastAt = at;
       return;
     }

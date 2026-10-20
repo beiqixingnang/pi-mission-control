@@ -1541,9 +1541,12 @@ export default function (pi: ExtensionAPI) {
       evidence: goalEvidence,
     }),
     (args) => {
-      current().acceptGoal(args.goalId, args.evidence, args.revision);
-      const node = current().goals.node(args.goalId),
-        record = current().store.acceptance(node.acceptanceId!)!;
+      const record = current().acceptGoal(
+          args.goalId,
+          args.evidence,
+          args.revision,
+        ),
+        node = current().goals.node(record.goalId);
       return {
         id: record.id,
         goalId: node.id,

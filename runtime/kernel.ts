@@ -179,12 +179,12 @@ export class MissionKernel {
     const fault = this.recovery.current();
     let state: import("./types.ts").ActivityClock["state"] = "idle",
       reason = "No work is currently executing";
-    if (this.closing) {
-      state = "offline";
-      reason = "Runtime stopped";
-    } else if (m && ["complete", "stopped"].includes(m.status)) {
+    if (m && ["complete", "stopped"].includes(m.status)) {
       state = "ended";
       reason = "Goal closed";
+    } else if (this.closing) {
+      state = "offline";
+      reason = "Runtime stopped";
     } else if (
       this.userHold ||
       m?.humanPaused ||
@@ -461,6 +461,14 @@ export class MissionKernel {
     retainClosed = false,
   ) {
     mission.updatedAt = this.now();
+    // Close the activity interval while the owning mission still exists.
+    this.activityClock.observe(
+      mission,
+      "ended",
+      mission.reason ?? `Goal ${reason}`,
+      this.settings.maxMissionMs,
+      true,
+    );
     const archived = this.store.archiveMission(mission, this.now(), reason);
     if (retainClosed) this.store.set("mission", archived);
     this.cleanTemporaryMembers(reason);
@@ -727,22 +735,30 @@ export class MissionKernel {
     return node;
   }
   acceptGoal(id: string, evidence: GoalEvidence[], revision: number) {
-    const node = this.goals.node(id);
-    if (node.revision !== revision) throw new Error("Goal revision changed");
-    if (node.state === "accepted" && node.acceptanceId)
-      return this.store.acceptance(node.acceptanceId)!;
-    if (!node.parentId)
-      return this.complete(
-        evidence.map((e) => ({ criterion: e.criterion, evidence: e.summary })),
-        evidence,
-        revision,
-      );
-    if (this.userHold || this.store.get("relocationHold"))
-      throw new Error("Resolve user or workspace holds before acceptance");
-    const record = this.goals.accept(id, evidence, revision);
-    this.turnActed = true;
-    this.changed();
-    return record;
+    return this.store.transaction(() => {
+      const node = this.goals.node(id);
+      if (node.revision !== revision) throw new Error("Goal revision changed");
+      if (node.state === "accepted" && node.acceptanceId)
+        return this.store.acceptance(node.acceptanceId)!;
+      if (!node.parentId) {
+        this.complete(
+          evidence.map((e) => ({
+            criterion: e.criterion,
+            evidence: e.summary,
+          })),
+          evidence,
+          revision,
+          id,
+        );
+        return this.store.acceptance(this.goals.node(id).acceptanceId!)!;
+      }
+      if (this.userHold || this.store.get("relocationHold"))
+        throw new Error("Resolve user or workspace holds before acceptance");
+      const record = this.goals.accept(id, evidence, revision);
+      this.turnActed = true;
+      this.changed();
+      return record;
+    });
   }
   async stopGoal(goalId?: string, reason = "Stopped by the lead") {
     const m = this.store.mission();
@@ -752,15 +768,21 @@ export class MissionKernel {
     m.status = "stopped";
     m.humanPaused = true;
     m.reason = cleanText(reason, 2000);
+    m.updatedAt = this.now();
     const goal = this.store.goal(m.id);
     if (goal) {
       goal.state = "cancelled";
       goal.reason = m.reason;
+      goal.updatedAt = m.updatedAt;
       this.store.putGoal(goal);
     }
     this.generation++;
     this.userHold = true;
     this.reservation = undefined;
+    // Stop intent takes effect before asynchronous process cancellation; its
+    // waiting interval is not productive execution and unknown receipts remain.
+    this.store.set("mission", m);
+    this.syncActivity(true);
     const roots = this.store
       .tasks(true)
       .filter((task) => !task.parentId && task.missionId === m.id);
@@ -778,53 +800,60 @@ export class MissionKernel {
     evidence: Array<{ criterion: number; evidence: string }>,
     structured?: GoalEvidence[],
     revision?: number,
+    expectedGoalId?: string,
   ) {
-    const m = this.store.mission();
-    if (!m || m.status !== "active")
-      throw new Error("No active mission to complete");
-    if (this.userHold || m.humanPaused || this.store.get("relocationHold"))
-      throw new Error("Resolve user or workspace holds before completion");
-    if (this.goals.children(m.id).length && revision === undefined)
-      throw new Error(
-        "Use goal_accept or supply the exact main-goal revision when completing a planned goal tree",
-      );
-    if (this.store.tasks(true).length || this.live.size)
-      throw new Error(
-        "Work is still running, queued, waiting or being stopped. Collect results before completion.",
-      );
-    if (
-      this.store
-        .missionTasks(m.id)
-        .some((task) => task.processState === "unknown")
-    )
-      throw new Error(
-        "A completed task still has unknown process state. Reconcile it before accepting completion.",
-      );
-    if (
-      this.store
-        .deliveries("lead")
-        .some(
-          (d) =>
-            d.missionId === m.id &&
-            ["result", "failure", "recovery", "decision"].includes(d.kind) &&
-            ["pending", "leased", "quarantined"].includes(d.state),
-        )
-    )
-      throw new Error(
-        "Undelivered task results remain. Read the runtime updates before accepting completion.",
-      );
-    if (
-      m.criteria.some(
-        (_, i) =>
-          !evidence.some(
-            (e) => e.criterion === i + 1 && e.evidence.trim().length >= 8,
-          ),
-      )
-    )
-      throw new Error(
-        "Verified evidence is required for every acceptance criterion.",
-      );
     return this.store.transaction(() => {
+      const m = this.store.mission();
+      if (expectedGoalId !== undefined && m?.id !== expectedGoalId)
+        throw new Error(
+          "Goal identity changed; only the selected main goal can be completed",
+        );
+      if (!m || m.status !== "active")
+        throw new Error("No active mission to complete");
+      if (revision !== undefined && (m.revision ?? 0) !== revision)
+        throw new Error("Goal revision changed");
+      if (this.userHold || m.humanPaused || this.store.get("relocationHold"))
+        throw new Error("Resolve user or workspace holds before completion");
+      if (this.goals.children(m.id).length && revision === undefined)
+        throw new Error(
+          "Use goal_accept or supply the exact main-goal revision when completing a planned goal tree",
+        );
+      if (this.store.tasks(true).length || this.live.size)
+        throw new Error(
+          "Work is still running, queued, waiting or being stopped. Collect results before completion.",
+        );
+      if (
+        this.store
+          .missionTasks(m.id)
+          .some((task) => task.processState === "unknown")
+      )
+        throw new Error(
+          "A completed task still has unknown process state. Reconcile it before accepting completion.",
+        );
+      if (
+        this.store
+          .deliveries("lead")
+          .some(
+            (d) =>
+              d.missionId === m.id &&
+              ["result", "failure", "recovery", "decision"].includes(d.kind) &&
+              ["pending", "leased", "quarantined"].includes(d.state),
+          )
+      )
+        throw new Error(
+          "Undelivered task results remain. Read the runtime updates before accepting completion.",
+        );
+      if (
+        m.criteria.some(
+          (_, i) =>
+            !evidence.some(
+              (e) => e.criterion === i + 1 && e.evidence.trim().length >= 8,
+            ),
+        )
+      )
+        throw new Error(
+          "Verified evidence is required for every acceptance criterion.",
+        );
       const root = this.goals.node(m.id);
       this.goals.accept(
         m.id,
@@ -2843,6 +2872,7 @@ export class MissionKernel {
     task.state = outcome.ok ? "completed" : "failed";
     task.finishedAt = this.now();
     task.error = outcome.error;
+    task.protocolDiagnostic = outcome.protocolDiagnostic;
     task.summary = cleanText(
       outcome.text || outcome.error || "(no public response)",
       2000,

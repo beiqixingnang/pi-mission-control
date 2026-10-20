@@ -10,6 +10,7 @@ import {
   recentUserContext,
   NOTE_LIMITS,
   appendContextHint,
+  indexAlreadyIncluded,
 } from "../../runtime/context-memory.ts";
 import {
   summarizeChunks,
@@ -34,6 +35,215 @@ const entry = (id, text, role = "user") => ({
   type: "message",
   message: { role, content: [{ type: "text", text }] },
 });
+
+test("256-token search batches page all long Unicode hits without duplicates, false empties or budget overruns", () =>
+  usingMemory((m) => {
+    const entries = Array.from({ length: 5 }, (_, i) =>
+      entry("source-" + i, "TARGET " + "中文🙂".repeat(500)),
+    );
+    m.sync(entries);
+    let cursor;
+    const seen = [];
+    for (let page = 0; page < 10; page++) {
+      const result = m.historyBatch(
+        [{ action: "search", query: "TARGET", role: "user", limit: 5, cursor }],
+        256,
+      );
+      assert.ok(estimateSummaryTokens(JSON.stringify(result)) <= 256);
+      assert.ok(
+        result.results[0].matches.length > 0,
+        "budget must not erase all real hits",
+      );
+      seen.push(...result.results[0].matches.map((v) => v.id));
+      cursor = result.results[0].nextCursor;
+      if (!cursor) {
+        assert.equal(result.nextRequest, undefined);
+        break;
+      }
+      assert.equal(result.nextRequest, 0);
+      assert.equal(result.truncated, true);
+      m.sync([...entries, entry("append-" + page, "new unrelated input")]);
+    }
+    assert.deepEqual(seen, [
+      "source-4",
+      "source-3",
+      "source-2",
+      "source-1",
+      "source-0",
+    ]);
+    const empty = m.historyBatch(
+      [{ action: "search", query: "NOT-PRESENT" }],
+      256,
+    );
+    assert.deepEqual(empty.results[0].matches, []);
+    assert.equal(empty.truncated, false);
+    const first = m.search("TARGET", 1, "user");
+    assert.ok(first.nextCursor);
+    assert.throws(
+      () => m.search("OTHER", 1, "user", first.nextCursor),
+      /cursor/i,
+    );
+    assert.throws(
+      () => m.search("TARGET", 1, "assistant", first.nextCursor),
+      /cursor/i,
+    );
+    assert.throws(() => m.search("TARGET", 1, "user", "malformed"), /cursor/i);
+    m.sync([entry("another-branch", "TARGET other branch")]);
+    assert.throws(
+      () => m.search("TARGET", 1, "user", first.nextCursor),
+      /cursor|branch/i,
+    );
+  }));
+
+test("budget-sheared search pages expose a cursor for every dropped hit after shrinking Unicode excerpts", () =>
+  usingMemory((m) => {
+    m.sync(
+      Array.from({ length: 20 }, (_, i) =>
+        entry("budget-hit-" + i, "TARGET 中文🙂".repeat(500)),
+      ),
+    );
+    let cursor,
+      pages = 0;
+    const seen = [];
+    do {
+      const result = m.historyBatch(
+        [{ action: "search", query: "TARGET", limit: 20, cursor }],
+        256,
+      );
+      assert.ok(estimateSummaryTokens(JSON.stringify(result)) <= 256);
+      assert.ok(result.results[0].matches.length > 0);
+      seen.push(...result.results[0].matches.map((hit) => hit.id));
+      cursor = result.results[0].nextCursor;
+      if (cursor) assert.equal(result.nextRequest, 0);
+      assert.ok(++pages < 30);
+    } while (cursor);
+    assert.ok(pages > 1);
+    assert.deepEqual(
+      seen,
+      Array.from({ length: 20 }, (_, i) => "budget-hit-" + (19 - i)),
+    );
+  }));
+
+test("mixed search/read batches resume the exact incomplete request and preserve Unicode offsets through reload", () =>
+  usingMemory((m, directory) => {
+    const original = "TARGET 中文🙂".repeat(100);
+    const entries = Array.from({ length: 5 }, (_, i) =>
+      entry("mixed-" + i, original),
+    );
+    m.sync(entries);
+    const requests = [
+      { action: "search", query: "TARGET", role: "user", limit: 2 },
+      { action: "read", id: "mixed-0", offset: 0, limit: 6000 },
+      { action: "search", query: "truly absent" },
+    ];
+    let startRequest = 0,
+      collected = "",
+      hits = [];
+    for (let page = 0; page < 100; page++) {
+      const result = m.historyBatch(requests, 256, startRequest);
+      assert.ok(estimateSummaryTokens(JSON.stringify(result)) <= 256);
+      assert.ok(result.results.length);
+      for (const row of result.results) {
+        if (row.requestIndex === 0) {
+          hits.push(...row.matches.map((hit) => hit.id));
+          requests[0].cursor = row.nextCursor;
+        } else if (row.requestIndex === 1) {
+          assert.equal(row.offset, Array.from(collected).length);
+          collected += row.text;
+          requests[1].offset = row.nextOffset;
+        } else assert.deepEqual(row.matches, []);
+      }
+      if (result.nextRequest === undefined) break;
+      startRequest = result.nextRequest;
+    }
+    assert.deepEqual(hits, [
+      "mixed-4",
+      "mixed-3",
+      "mixed-2",
+      "mixed-1",
+      "mixed-0",
+    ]);
+    assert.equal(collected, original);
+    const cursor = m.search("TARGET", 1, "user").nextCursor;
+    const restored = new ContextMemory(directory, "test");
+    try {
+      assert.equal(
+        restored.search("TARGET", 1, "user", cursor).matches[0].id,
+        "mixed-3",
+      );
+      usingMemory((other) => {
+        other.sync(entries);
+        assert.throws(
+          () => other.search("TARGET", 1, "user", cursor),
+          /cursor/,
+        );
+      });
+      assert.throws(
+        () =>
+          restored.search(
+            "TARGET",
+            1,
+            "user",
+            cursor.slice(0, -1) + (cursor.endsWith("A") ? "B" : "A"),
+          ),
+        /cursor/,
+      );
+    } finally {
+      restored.close();
+    }
+  }));
+
+test("index suppression requires branch checkpoint metadata and its exact projected summary, never just matching text", () =>
+  usingMemory((m) => {
+    const entries = [entry("a", "start"), entry("b", "recent")];
+    m.write("index", "UNIQUE_INDEX_MARKER", "a");
+    m.write("handoff", "resume b", "a");
+    const prepared = m.prepare(entries, "b");
+    const checkpoint = {
+      ...prepared,
+      type: "compaction",
+      id: "cp",
+      timestamp: new Date().toISOString(),
+    };
+    const projected = {
+      role: "compactionSummary",
+      summary: prepared.summary,
+      timestamp: Date.parse(checkpoint.timestamp),
+    };
+    const note = m.note("index");
+    assert.equal(
+      indexAlreadyIncluded(note, [...entries, checkpoint], [projected]),
+      true,
+    );
+    for (const messages of [
+      [],
+      [{ ...projected, role: "user" }],
+      [{ ...projected, summary: "different" }],
+      [{ ...projected, timestamp: 0 }],
+    ])
+      assert.equal(
+        indexAlreadyIncluded(note, [...entries, checkpoint], messages),
+        false,
+      );
+    assert.equal(
+      indexAlreadyIncluded(
+        note,
+        [...entries, { ...checkpoint, details: { contextMode: "notes" } }],
+        [projected],
+      ),
+      false,
+    );
+    assert.equal(indexAlreadyIncluded(note, entries, [projected]), false);
+    m.write("index", "NEW_INDEX_MARKER", "b");
+    assert.equal(
+      indexAlreadyIncluded(
+        m.note("index"),
+        [...entries, checkpoint],
+        [projected],
+      ),
+      false,
+    );
+  }));
 
 test("batched note writes are atomic, preserve unchanged versions and refresh explicit handoff coverage", () =>
   usingMemory((m) => {

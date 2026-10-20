@@ -70,6 +70,7 @@ export interface Task {
   resultPath?: string;
   summary?: string;
   error?: string;
+  protocolDiagnostic?: import("./rpc-records.ts").RpcRecordDiagnostic;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -383,6 +384,7 @@ export interface WorkerOutcome {
   ok: boolean;
   text: string;
   error?: string;
+  protocolDiagnostic?: import("./rpc-records.ts").RpcRecordDiagnostic;
   outputTokens?: number;
   sessionFile?: string;
   processState: "stopped" | "unknown";

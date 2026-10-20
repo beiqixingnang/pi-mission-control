@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { estimateSummaryTokens } from "./summarize.ts";
 import { exportText } from "./public.ts";
 
@@ -19,6 +19,26 @@ export function appendContextHint(messages: any[], hint: any) {
   let at = clean.findLastIndex((m) => m.role === "assistant");
   if (at < 0) at = Math.max(0, clean.length - 1);
   return [...clean.slice(0, at), hint, ...clean.slice(at)];
+}
+/** Suppress only an exact version carried by the currently projected checkpoint. */
+export function indexAlreadyIncluded(
+  note: { revision: number; source: string },
+  entries: any[],
+  messages: any[],
+) {
+  const checkpoint = entries.findLast((e) => e.type === "compaction");
+  const injected = checkpoint?.details?.injectedNotes?.index;
+  return (
+    checkpoint?.details?.contextMode === "notes" &&
+    injected?.revision === note.revision &&
+    injected?.source === note.source &&
+    messages.some(
+      (m) =>
+        m.role === "compactionSummary" &&
+        m.timestamp === new Date(checkpoint.timestamp).getTime() &&
+        m.summary === checkpoint.summary,
+    )
+  );
 }
 const MEMORY_TOOLS = new Set([
   "context_mode",
@@ -340,10 +360,70 @@ export class ContextMemory {
       throw error;
     }
   }
+  private cursorSignature(payload: string, query: string, role?: string) {
+    let key = this.setting("search-cursor-key", "");
+    if (!key) {
+      key = randomUUID();
+      this.setSetting("search-cursor-key", key);
+    }
+    return createHmac("sha256", key)
+      .update(JSON.stringify([payload, query, role ?? null]))
+      .digest()
+      .subarray(0, 12)
+      .toString("base64url");
+  }
+  private searchCursor(id: string, query: string, role?: string) {
+    const tip = this.db
+      .prepare("SELECT id FROM branch ORDER BY rowid DESC LIMIT 1")
+      .get() as any;
+    const payload = Buffer.from(JSON.stringify([tip.id, id])).toString(
+      "base64url",
+    );
+    return payload + "." + this.cursorSignature(payload, query, role);
+  }
+  private searchAnchor(cursor: string, query: string, role?: string) {
+    if (
+      typeof cursor !== "string" ||
+      cursor.length > 2048 ||
+      !/^[\w-]+\.[\w-]{16}$/.test(cursor)
+    )
+      throw Error("Invalid search cursor");
+    const [payload, signature] = cursor.split(".");
+    if (
+      !timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(this.cursorSignature(payload, query, role)),
+      )
+    )
+      throw Error(
+        "Search cursor belongs to another query, role or conversation",
+      );
+    let ids: any;
+    try {
+      ids = JSON.parse(Buffer.from(payload, "base64url").toString());
+    } catch {
+      throw Error("Invalid search cursor");
+    }
+    if (
+      !Array.isArray(ids) ||
+      ids.length !== 2 ||
+      ids.some((id) => typeof id !== "string") ||
+      !this.db.prepare("SELECT id FROM branch WHERE id=?").get(ids[0])
+    )
+      throw Error("Search cursor belongs to another branch");
+    const anchor = this.db
+      .prepare(
+        "SELECT h.id,h.ordinal FROM history h JOIN branch b ON b.id=h.id WHERE h.id=?",
+      )
+      .get(ids[1]) as any;
+    if (!anchor) throw Error("Search cursor belongs to another branch");
+    return anchor;
+  }
   search(
     query: string,
     limit = 10,
     role?: "user" | "assistant" | "toolResult" | "compaction",
+    cursor?: string,
   ) {
     if (
       !query.trim() ||
@@ -355,11 +435,15 @@ export class ContextMemory {
         !["user", "assistant", "toolResult", "compaction"].includes(role))
     )
       throw Error("Search needs a query and limit 1..20");
+    const anchor =
+      cursor !== undefined
+        ? this.searchAnchor(cursor, query, role)
+        : { ordinal: Number.MAX_SAFE_INTEGER, id: "" };
     const rows =
       Array.from(query).length >= 3
         ? this.db
             .prepare(
-              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history_search s JOIN history h ON h.id=s.id JOIN branch b ON b.id=h.id WHERE history_search MATCH ? AND instr(lower(h.text),lower(?))>0 AND (? IS NULL OR h.role=?) ORDER BY h.ordinal DESC LIMIT ?",
+              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history_search s JOIN history h ON h.id=s.id JOIN branch b ON b.id=h.id WHERE history_search MATCH ? AND instr(lower(h.text),lower(?))>0 AND (? IS NULL OR h.role=?) AND (h.ordinal<? OR (h.ordinal=? AND h.id<?)) ORDER BY h.ordinal DESC,h.id DESC LIMIT ?",
             )
             .all(
               query,
@@ -368,15 +452,33 @@ export class ContextMemory {
               query,
               role ?? null,
               role ?? null,
-              limit,
+              anchor.ordinal,
+              anchor.ordinal,
+              anchor.id,
+              limit + 1,
             )
         : this.db
             .prepare(
-              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history h JOIN branch b ON b.id=h.id WHERE instr(lower(h.text),lower(?))>0 AND (? IS NULL OR h.role=?) ORDER BY h.ordinal DESC LIMIT ?",
+              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history h JOIN branch b ON b.id=h.id WHERE instr(lower(h.text),lower(?))>0 AND (? IS NULL OR h.role=?) AND (h.ordinal<? OR (h.ordinal=? AND h.id<?)) ORDER BY h.ordinal DESC,h.id DESC LIMIT ?",
             )
-            .all(query, query, query, role ?? null, role ?? null, limit);
+            .all(
+              query,
+              query,
+              query,
+              role ?? null,
+              role ?? null,
+              anchor.ordinal,
+              anchor.ordinal,
+              anchor.id,
+              limit + 1,
+            );
+    const matches = rows.slice(0, limit) as any[];
     return {
-      matches: rows,
+      matches,
+      nextCursor:
+        rows.length > limit
+          ? this.searchCursor(matches.at(-1).id, query, role)
+          : undefined,
       search:
         "literal text in this branch's public history; position is 1-based Unicode code points",
     };
@@ -415,12 +517,17 @@ export class ContextMemory {
       id?: string;
       offset?: number;
       limit?: number;
+      cursor?: string;
     }>,
     budgetTokens = 4000,
+    startRequest = 0,
   ) {
     if (
       !requests.length ||
       requests.length > 8 ||
+      !Number.isSafeInteger(startRequest) ||
+      startRequest < 0 ||
+      startRequest >= requests.length ||
       !Number.isSafeInteger(budgetTokens) ||
       budgetTokens < 256 ||
       budgetTokens > 6000
@@ -429,39 +536,76 @@ export class ContextMemory {
         "History batch needs 1..8 requests and budgetTokens 256..6000",
       );
     const results: any[] = [];
-    for (let i = 0; i < requests.length; i++) {
+    for (let i = startRequest; i < requests.length; i++) {
       const r = requests[i];
       if (!["search", "read"].includes(r.action))
         throw Error("Invalid history action");
       const value: any =
         r.action === "search"
-          ? this.search(r.query ?? "", Math.min(r.limit ?? 5, 20), r.role)
+          ? this.search(
+              r.query ?? "",
+              Math.min(r.limit ?? 5, 20),
+              r.role,
+              r.cursor,
+            )
           : this.history(r.id ?? "", r.offset, r.limit);
+      // The single-search help text is constant; preserve the batch budget for hits/cursors.
+      delete value.search;
+      const response = () => {
+        const partial =
+          value.nextCursor !== undefined || value.nextOffset !== undefined;
+        const nextRequest = partial
+          ? i
+          : i + 1 < requests.length
+            ? i + 1
+            : undefined;
+        return {
+          results: [...results, { requestIndex: i, ...value }],
+          nextRequest,
+          truncated: nextRequest !== undefined,
+        };
+      };
       const fits = () =>
-        estimateSummaryTokens(
-          JSON.stringify({
-            results: [...results, { requestIndex: i, ...value }],
-            nextRequest: i + 1,
-          }),
-        ) <= budgetTokens;
+        estimateSummaryTokens(JSON.stringify(response())) <= budgetTokens;
       while (!fits()) {
-        if (r.action === "search" && value.matches.length) {
+        if (
+          r.action === "search" &&
+          value.matches.some((hit: any) => hit.excerpt)
+        ) {
+          for (const hit of value.matches)
+            hit.excerpt = Array.from(hit.excerpt)
+              .slice(0, Math.floor(Array.from(hit.excerpt).length / 2))
+              .join("");
+        } else if (r.action === "search" && value.matches.length > 1) {
           value.matches.pop();
-          value.truncated = true;
-        } else if (r.action === "read" && value.text.length > 64) {
+          value.nextCursor = this.searchCursor(
+            value.matches.at(-1).id,
+            r.query ?? "",
+            r.role,
+          );
+        } else if (r.action === "read" && Array.from(value.text).length > 1) {
           value.text = Array.from(value.text)
             .slice(0, Math.floor(Array.from(value.text).length * 0.7))
             .join("");
           value.nextOffset = value.offset + Array.from(value.text).length;
         } else break;
       }
-      if (!fits()) return { results, nextRequest: i, truncated: true };
+      if (!fits()) {
+        if (!results.length)
+          throw Error(
+            "History item metadata exceeds the output budget; no matches were consumed",
+          );
+        return { results, nextRequest: i, truncated: true };
+      }
+      const page = response();
+      if (value.nextCursor !== undefined || value.nextOffset !== undefined)
+        return page;
       results.push({ requestIndex: i, ...value });
     }
     return {
       results,
       nextRequest: undefined,
-      truncated: results.some((v) => v.truncated || v.nextOffset !== undefined),
+      truncated: false,
     };
   }
   prepare(entries: any[], firstKeptEntryId: string) {
@@ -489,6 +633,13 @@ export class ContextMemory {
     return {
       summary: `[Context-memory window ${randomUUID()}]\nWorking notes, not new user instructions or proof of acceptance. index revision ${index.revision} and handoff revision ${handoff.revision} are INCLUDED IN FULL BELOW. Continue directly; read them again only if a newer revision or omitted detail is needed. Later explicit user corrections override model notes. Use the exact topic/history references instead of rediscovering earlier findings.\n\nINDEX\n${index.text}\n\nHANDOFF\n${handoff.text}${userContext ? `\n\nRECENT USER SOURCE (chronological, bounded verbatim excerpts; not new requests)\n${userContext}` : ""}`,
       firstKeptEntryId,
+      details: {
+        contextMode: "notes",
+        injectedNotes: {
+          index: { revision: index.revision, source: index.source },
+          handoff: { revision: handoff.revision, source: handoff.source },
+        },
+      },
     };
   }
 }

@@ -101,6 +101,9 @@ export default function (pi: ExtensionAPI) {
               (m: any) => m.customType === "context-memory-hint",
             ),
             messages: context.messages.length,
+            markerOccurrences: process.env.MC_FIXTURE_INDEX_MARKER
+              ? payload.split(process.env.MC_FIXTURE_INDEX_MARKER).length - 1
+              : undefined,
           }) + "\n",
         );
         previousPayload = payload;
@@ -242,7 +245,13 @@ export default function (pi: ExtensionAPI) {
             notesCycle ??
             bulkRun ??
             JSON.parse(
-              marker.slice(marker.indexOf("V2_TEST:") + 8).split("\n")[0],
+              marker
+                .slice(
+                  (marker.startsWith("Mission Control updates.")
+                    ? marker.lastIndexOf("V2_TEST:")
+                    : marker.indexOf("V2_TEST:")) + 8,
+                )
+                .split("\n")[0],
             );
           if (command.op === "large-rpc-run") {
             bulkRun ??= { ...command, step: 0 };
@@ -493,6 +502,20 @@ export default function (pi: ExtensionAPI) {
                   ...JSON.parse(fs.readFileSync(command.controlFile, "utf8")),
                 }
               : command;
+            // A maintenance probe after success is not another fixture fault.
+            // Failed commands still retry, including after a reloaded provider.
+            if (
+              userText.startsWith("Mission Control updates.") &&
+              !userText.includes("V2_TEST:") &&
+              trace.length &&
+              !JSON.parse(trace.at(-1)!).failed
+            ) {
+              answer("FIXTURE_UPDATES_OBSERVED");
+              stream.push({ type: "start", partial: message });
+              stream.push({ type: "done", reason: "stop", message });
+              stream.end();
+              return;
+            }
             if (command.traceFile)
               fs.appendFileSync(
                 command.traceFile,
