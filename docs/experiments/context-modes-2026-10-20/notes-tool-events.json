@@ -1,0 +1,317 @@
+[
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 853
+    },
+    "result": {
+      "name": "index",
+      "revision": 1,
+      "estimatedTokens": 285,
+      "source": "ed86375e-0a0a-4cbf-8602-3edac198d5ca",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1608
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 1,
+      "estimatedTokens": 536,
+      "source": "d984f24e-f3fe-475d-9c2a-10e98d27c5ee",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 807
+    },
+    "result": {
+      "name": "index",
+      "revision": 2,
+      "estimatedTokens": 269,
+      "source": "f95a9243-3a03-4a13-bc02-d9fff470106a",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 2185
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 2,
+      "estimatedTokens": 729,
+      "source": "8caa2e45-61e2-494e-bb59-7e6de058c300",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 2642
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 3,
+      "estimatedTokens": 881,
+      "source": "2a43d75b-ae14-474c-b30b-c9ebc943158c",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 975
+    },
+    "result": {
+      "name": "index",
+      "revision": 3,
+      "estimatedTokens": 325,
+      "source": "20821c76-2fab-433d-ae4e-91217d9b00e0",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1745
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 4,
+      "estimatedTokens": 584,
+      "source": "3c7888b6-d36c-4953-a744-11a01fa0d8ad",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 944
+    },
+    "result": {
+      "name": "index",
+      "revision": 4,
+      "estimatedTokens": 317,
+      "source": "14fe41f9-3f5c-4fcf-ad81-fa3e21fc589e",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1265
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 5,
+      "estimatedTokens": 424,
+      "source": "4dd06e9e-bad0-4261-8709-40604310f98e",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 928
+    },
+    "result": {
+      "name": "index",
+      "revision": 5,
+      "estimatedTokens": 311,
+      "source": "f6e307d5-e691-4f0d-a2a8-959e4e02838e",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1218
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 6,
+      "estimatedTokens": 408,
+      "source": "17a4b8f8-d3c0-4480-938c-007ed288351c",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 942
+    },
+    "result": {
+      "name": "index",
+      "revision": 6,
+      "estimatedTokens": 316,
+      "source": "4dccb2bf-ce39-4bac-898e-974dcf5ff978",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1218
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 7,
+      "estimatedTokens": 408,
+      "source": "176e2232-6506-47e3-8278-25ba9342e7ef",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 873
+    },
+    "result": {
+      "name": "index",
+      "revision": 7,
+      "estimatedTokens": 293,
+      "source": "c0f10124-344c-428d-bb88-8277ba97ecda",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1361
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 8,
+      "estimatedTokens": 456,
+      "source": "c3fbc624-afcf-44d8-b1fe-929eb861cab4",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 962
+    },
+    "result": {
+      "name": "index",
+      "revision": 8,
+      "estimatedTokens": 323,
+      "source": "c12262ad-d98e-41ba-a8af-8301f9ed02ad",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_history",
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "production hardware Pi conversation do not run tests reload stop"
+    },
+    "result": {
+      "matches": [],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    }
+  },
+  {
+    "tool": "context_history",
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "e2dbb408-9ea9-469b-9832-b1a6b0e69339"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "bd4b2fac-38c7-4d25-887a-d8fc9fce50b5",
+          "role": "user",
+          "ordinal": 26,
+          "position": 300023,
+          "excerpt": " === 26270) result = (result + 718) ^ ((index >>> 0) & 116); // branch 4_43_74\n  return result;\n}\n\nUSER CORRECTION: use e2dbb408-9ea9-469b-9832-b1a6b0e69339, revision 1; the earlier 4698 spelling was wrong.\n\nReview this batch and update concise working notes. Reply briefly when ready for the next batch."
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    }
+  },
+  {
+    "tool": "context_history",
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "src/stage_7/decoder_7.ts line 173"
+    },
+    "result": {
+      "matches": [],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    }
+  }
+]

@@ -1,0 +1,372 @@
+[
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1082
+    },
+    "result": {
+      "name": "index",
+      "revision": 1,
+      "estimatedTokens": 361,
+      "source": "aa4ba3a7-3b0c-4bab-9017-06f6e8e36a0f",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1123
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 1,
+      "estimatedTokens": 375,
+      "source": "4ef6aac1-13e7-4aed-8350-e706af84f533",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1267
+    },
+    "result": {
+      "name": "index",
+      "revision": 2,
+      "estimatedTokens": 423,
+      "source": "5d9e16d3-a8ba-4d38-a2e1-f7c198417752",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1283
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 2,
+      "estimatedTokens": 428,
+      "source": "e6836eb9-5450-41cf-84f2-540d3bdc531c",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1506
+    },
+    "result": {
+      "name": "index",
+      "revision": 3,
+      "estimatedTokens": 502,
+      "source": "f4aefde4-2aca-421e-b712-c826205b2e91",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1025
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 3,
+      "estimatedTokens": 342,
+      "source": "bc2fd4a1-f82d-4671-9d01-8030e321fb0f",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1349
+    },
+    "result": {
+      "name": "index",
+      "revision": 4,
+      "estimatedTokens": 450,
+      "source": "cb33ca76-32be-46a3-91f7-100a537d1ae5",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1023
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 4,
+      "estimatedTokens": 341,
+      "source": "51301f0b-19f4-433c-a752-23a05b020f01",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1247
+    },
+    "result": {
+      "name": "index",
+      "revision": 5,
+      "estimatedTokens": 416,
+      "source": "260d7011-2bf7-415f-9e65-43a984b47377",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1157
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 5,
+      "estimatedTokens": 386,
+      "source": "e09f066e-305c-465b-8cf9-34d4fd472d4e",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1278
+    },
+    "result": {
+      "name": "index",
+      "revision": 6,
+      "estimatedTokens": 426,
+      "source": "9183362b-f9d9-46b5-b64c-43c61e168cd0",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1093
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 6,
+      "estimatedTokens": 365,
+      "source": "32132ddf-feef-492d-9061-b44969b6d052",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "read",
+      "name": "index",
+      "chars": 0
+    },
+    "result": {
+      "name": "index",
+      "revision": 6,
+      "text": "Synthetic code-review benchmark. Review each supplied batch; preserve concrete findings, exact tickets, active corrections, continuation, and unverified status. No audit accepted.\n\nBatch 0 AUDIT-0-fd076222: 44 stage_0 decoders, range 1..90; all use `index <= values.length` despite comment equality invalid, yielding undefined at equality. Recommend `<`; other index validation contract-dependent.\nBatch 1 AUDIT-1-35dde772: same across 44 stage_1 modules.\nBatch 2 AUDIT-2-7c9220c2: same across 44 stage_2 modules.\nBatch 3 AUDIT-3-20e90e12: same across 44 stage_3 modules; no independent arithmetic defect established.\nBatch 4 AUDIT-4-49e7af62: same across 44 stage_4 modules; decode_4_1..44.\nBatch 5 AUDIT-5-45d304b2: supplied `src/stage_5/decoder_0.ts`..`decoder_43.ts`, range 1..90, exports decode_5_1..decode_5_44. Same boundary defect in every module: guard `index <= values.length` admits equality contrary to comment, then indexed read returns undefined. Recommend strict `<`. Negative/fractional index behavior depends on contract. No additional arithmetic finding established; no code edits/tests. Unaccepted.\n\nActive user correction: use e2dbb408-9ea9-469b-9832-b1a6b0e69339, revision 1; earlier 4698 spelling wrong. Only supplied excerpts inspected; no audit accepted.",
+      "offset": 0,
+      "total": 1278
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "read",
+      "name": "handoff",
+      "chars": 0
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 6,
+      "text": "Continuation after Batch 5: ticket AUDIT-5-45d304b2. Reviewed 44 supplied files `src/stage_5/decoder_0.ts` through `decoder_43.ts`, range 1..90, exports decode_5_1 through decode_5_44. Every module documents `index === values.length` invalid but the mode-specific fast path checks `index <= values.length` and returns `values[index]`; with equality and matching mode JavaScript returns undefined. Recommend `<`. Additional validation for negatives/fractions depends on index contract. No arithmetic defect independently established without spec. No code edits/tests. Finding unaccepted.\n\nEarlier tickets preserved: AUDIT-0-fd076222 stage_0; AUDIT-1-35dde772 stage_1; AUDIT-2-7c9220c2 stage_2; AUDIT-3-20e90e12 stage_3; AUDIT-4-49e7af62 stage_4. Each records same boundary mismatch in 44 supplied modules, unaccepted, no edits/tests.\n\nActive correction: use e2dbb408-9ea9-469b-9832-b1a6b0e69339, revision 1; earlier 4698 spelling was wrong. Coverage is excerpts supplied in chat only; never imply unseen repository review or accepted audit. User requested rollover now; index and handoff saved.",
+      "offset": 0,
+      "total": 1093
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1359
+    },
+    "result": {
+      "name": "index",
+      "revision": 7,
+      "estimatedTokens": 453,
+      "source": "d7a13bf8-3ae8-495f-816e-0edc05516bf5",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 971
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 7,
+      "estimatedTokens": 324,
+      "source": "0fe60fc7-eb18-41ce-9b04-0fc437fc7e68",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "read",
+      "name": "index",
+      "chars": 0
+    },
+    "result": {
+      "name": "index",
+      "revision": 7,
+      "text": "Synthetic source-code review benchmark. Review supplied batches fully; keep exact ticket, concrete findings, corrections, continuation, and unaccepted status. No audit accepted.\n\nBatch 0 AUDIT-0-fd076222: 44 stage_0 decoders, range 1..90; index <= values.length contradicts comment that equality is invalid; equality fast path returns undefined. Recommend <; negatives/fractions contract-dependent.\nBatch 1 AUDIT-1-35dde772: same across 44 stage_1 modules.\nBatch 2 AUDIT-2-7c9220c2: same across 44 stage_2 modules.\nBatch 3 AUDIT-3-20e90e12: same across 44 stage_3 modules; no independent arithmetic defect.\nBatch 4 AUDIT-4-49e7af62: same across 44 stage_4 modules.\nBatch 5 AUDIT-5-45d304b2: same across 44 stage_5 modules.\nBatch 6 AUDIT-6-da300e02: supplied `src/stage_6/decoder_0.ts`..`decoder_43.ts`, range 1..90, exports decode_6_1..decode_6_44. All 44 repeat equality boundary mismatch: comment says index === values.length invalid, condition `index <= values.length && mode === ...` admits equality and returns `values[index]` (undefined). Recommend `<`. Other input validation depends on contract. No additional arithmetic defect established. No edits/tests. Unaccepted.\n\nActive correction: use e2dbb408-9ea9-469b-9832-b1a6b0e69339, revision 1; previous 4698 typo. Only supplied excerpts reviewed; never imply unseen repository review or accepted audit.",
+      "offset": 0,
+      "total": 1359
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "index",
+      "chars": 1368
+    },
+    "result": {
+      "name": "index",
+      "revision": 8,
+      "estimatedTokens": 456,
+      "source": "4ddc5666-774f-4564-a2ec-392eb59981f4",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "write",
+      "name": "handoff",
+      "chars": 1223
+    },
+    "result": {
+      "name": "handoff",
+      "revision": 8,
+      "estimatedTokens": 408,
+      "source": "cd964283-44f1-42d1-b4e3-4b0d64714444",
+      "saved": true
+    }
+  },
+  {
+    "tool": "context_rollover",
+    "args": {},
+    "result": {
+      "queued": true
+    }
+  },
+  {
+    "tool": "context_note",
+    "args": {
+      "action": "read",
+      "name": "index",
+      "chars": 0
+    },
+    "result": {
+      "name": "index",
+      "revision": 8,
+      "text": "Synthetic source-code review benchmark. Review supplied batches; preserve concrete findings, exact tickets, corrections, continuation, and unaccepted status. No audit accepted.\n\nBatches 0-6 tickets: AUDIT-0-fd076222, AUDIT-1-35dde772, AUDIT-2-7c9220c2, AUDIT-3-20e90e12, AUDIT-4-49e7af62, AUDIT-5-45d304b2, AUDIT-6-da300e02. Each batch supplied 44 decoders for respective stage 0..6, range 1..90; all have `index <= values.length` fast-path despite comment equality invalid, returning undefined at equality. Recommend `<`; negatives/fractions contract-dependent. No independent arithmetic issue, edits/tests; unaccepted.\n\nBatch 7 AUDIT-7-93c3cb52: supplied `src/stage_7/decoder_0.ts`..`decoder_43.ts`, exports decode_7_1..decode_7_44, range 1..90. All 44 have same concrete defect: comment says `index === values.length` invalid, but mode-specific fast path condition `index <= values.length` admits equality and returns `values[index]` (undefined). Recommend `<`. No independent arithmetic defect established. No tests/edit; unaccepted.\n\nActive correction: use e2dbb408-9ea9-469b-9832-b1a6b0e69339 revision 1; earlier 4698 typo. Only excerpts supplied reviewed; do not imply unseen source or accepted audit. Active next continuation explicitly says inspect `src/stage_7/decoder_7.ts` at line 173; do not run tests, reload, or stop production hardware Pi conversation.",
+      "offset": 0,
+      "total": 1368
+    }
+  },
+  {
+    "tool": "context_history",
+    "args": {
+      "action": "search",
+      "id": "e2dbb408-9ea9-469b-9832-b1a6b0e69339",
+      "offset": 0,
+      "query": "decoder_7.ts line 173 production hardware Pi"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "b75b0bb1-a202-417d-9c79-403dd80532f6",
+          "role": "assistant",
+          "ordinal": 61,
+          "position": 221,
+          "excerpt": "cec819696d3dbca7bf4f557\",\"arguments\":{\"action\":\"search\",\"id\":\"e2dbb408-9ea9-469b-9832-b1a6b0e69339\",\"offset\":0,\"query\":\"decoder_7.ts line 173 production hardware Pi\"}}"
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    }
+  },
+  {
+    "tool": "context_history",
+    "args": {
+      "action": "search",
+      "id": "e2dbb408-9ea9-469b-9832-b1a6b0e69339",
+      "offset": 0,
+      "query": "AUDIT-0-fd076222 AUDIT-7-93c3cb52 correction revision 1"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "f4f3592b-4b2e-45ab-a33e-f8965bf74bb4",
+          "role": "assistant",
+          "ordinal": 63,
+          "position": 221,
+          "excerpt": "f348190a6f43798cb7cdcb8\",\"arguments\":{\"action\":\"search\",\"id\":\"e2dbb408-9ea9-469b-9832-b1a6b0e69339\",\"offset\":0,\"query\":\"AUDIT-0-fd076222 AUDIT-7-93c3cb52 correction revision 1\"}}"
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    }
+  }
+]

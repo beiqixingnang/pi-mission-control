@@ -155,8 +155,10 @@ test("summary budgets leave reasoning room and respect an explicit output cap", 
   const model = { contextWindow: 1000000, maxTokens: 384000, reasoning: true };
   assert.deepEqual(summaryBudgets(model, {}), {
     maxTokens: 16384,
-    maxInputChars: 24000,
+    maxInputChars: 192000,
     maxOutputChars: 8192,
+    maxInputTokens: 64000,
+    intermediateOutputChars: 3000,
   });
   assert.equal(
     summaryBudgets({ ...model, reasoning: false }, {}).maxTokens,

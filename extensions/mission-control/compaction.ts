@@ -15,11 +15,16 @@ import {
   completeSummaryWithBudget,
   SUMMARY_SYSTEM_PROMPT,
 } from "../../runtime/summarize.ts";
+import { installContextMemory } from "./context-memory.ts";
 
 interface Config {
   model?: string;
   maxTokens?: number;
   maxInputChars?: number;
+  maxInputTokens?: number;
+  maxOutputChars?: number;
+  intermediateOutputChars?: number;
+  reasoningEffort?: "minimal" | "low" | "medium" | "high";
   disabled?: boolean;
   maxRetries?: number;
   requestTimeoutMs?: number;
@@ -30,6 +35,7 @@ interface MemberRuntime {
 }
 type Target = "lead" | "member";
 export default function (pi: ExtensionAPI) {
+  const memory = installContextMemory(pi);
   let generation = 0,
     lifecycle = new AbortController();
   let activeSummaryContext: any;
@@ -116,6 +122,22 @@ export default function (pi: ExtensionAPI) {
         throw new Error("Invalid compaction maxInputChars");
       if (value.disabled !== undefined && typeof value.disabled !== "boolean")
         throw new Error("Invalid compaction disabled flag");
+      for (const key of [
+        "maxInputTokens",
+        "maxOutputChars",
+        "intermediateOutputChars",
+      ] as const)
+        if (
+          value[key] !== undefined &&
+          (!Number.isSafeInteger(value[key]) ||
+            value[key] < (key === "maxInputTokens" ? 1024 : 128))
+        )
+          throw new Error("Invalid compaction " + key);
+      if (
+        value.reasoningEffort !== undefined &&
+        !["minimal", "low", "medium", "high"].includes(value.reasoningEffort)
+      )
+        throw new Error("Invalid summary reasoningEffort");
       if (
         value.maxRetries !== undefined &&
         (!Number.isSafeInteger(value.maxRetries) ||
@@ -217,6 +239,7 @@ export default function (pi: ExtensionAPI) {
           runId: randomUUID(),
           startedAt: at,
           model,
+          ...metadata,
           requests: 0,
           retries: 0,
         };
@@ -288,10 +311,13 @@ export default function (pi: ExtensionAPI) {
     );
     if (!model)
       throw new Error(`Configured summary model unavailable: ${spec}`);
-    const { maxTokens, maxInputChars, maxOutputChars } = summaryBudgets(
-      model,
-      config,
-    );
+    const {
+      maxTokens,
+      maxInputChars,
+      maxOutputChars,
+      maxInputTokens,
+      intermediateOutputChars,
+    } = summaryBudgets(model, config);
     const parts = function* () {
       if (instructions) yield `USER SUMMARY FOCUS:\n${instructions}\n\n`;
       if (previous) yield `PREVIOUS SUMMARY:\n${previous}\n\n`;
@@ -308,6 +334,9 @@ export default function (pi: ExtensionAPI) {
       ),
       maxInputChars,
       maxOutputChars,
+      maxInputTokens,
+      intermediateOutputChars,
+      cacheIdentity: config.reasoningEffort ?? "low",
       signal,
       requestTimeoutMs: config.requestTimeoutMs ?? 180000,
       retryBudget: { remaining: config.maxRetries ?? 2, used: 0 },
@@ -336,7 +365,7 @@ export default function (pi: ExtensionAPI) {
               : `摘要分块 ${event.completed ?? 0}/${event.chunks ?? "—"} · 缓存 ${event.cacheHits ?? 0}`,
         );
       },
-      complete: (prompt, requestSignal) =>
+      complete: (prompt, requestSignal, request) =>
         completeSummaryWithBudget(
           async (requestMaxTokens) => {
             const requestId = randomUUID(),
@@ -344,6 +373,7 @@ export default function (pi: ExtensionAPI) {
             debug(ctx, "summary:request", spec, {
               requestId,
               inputChars: prompt.length,
+              phase: request?.phase,
               maxTokens: requestMaxTokens,
               maxOutputChars,
             });
@@ -369,6 +399,7 @@ export default function (pi: ExtensionAPI) {
                   signal: requestSignal ?? signal,
                   cacheRetention: "none",
                   maxRetries: 0,
+                  reasoningEffort: config.reasoningEffort ?? "low",
                   sessionId: createHash("sha256")
                     .update(prompt)
                     .digest("hex")
@@ -384,6 +415,9 @@ export default function (pi: ExtensionAPI) {
                 inputChars: prompt.length,
                 maxTokens: requestMaxTokens,
                 outputTokens: response.usage?.output,
+                inputTokens: response.usage?.input,
+                cacheReadTokens: response.usage?.cacheRead,
+                totalTokens: response.usage?.totalTokens,
                 reasoningTokens: response.usage?.reasoning,
                 textChars: response.content
                   .filter((block: any) => block.type === "text")
@@ -440,6 +474,12 @@ export default function (pi: ExtensionAPI) {
       maxTokens: budgets?.maxTokens ?? r.config.maxTokens ?? 4096,
       maxInputChars: budgets?.maxInputChars ?? r.config.maxInputChars ?? 24000,
       maxOutputChars: budgets?.maxOutputChars,
+      maxInputTokens: budgets?.maxInputTokens,
+      inputTokenBudgetKind:
+        "heuristic estimate; provider usage is authoritative",
+      intermediateOutputChars: budgets?.intermediateOutputChars,
+      reasoningEffort: r.config.reasoningEffort ?? "low",
+      context: memory.status(ctx),
       maxRetries: r.config.maxRetries ?? 2,
       requestTimeoutMs: r.config.requestTimeoutMs ?? 180000,
       diagnostics: (() => {
@@ -485,6 +525,12 @@ export default function (pi: ExtensionAPI) {
       model?: string;
       maxRetries?: number;
       requestTimeoutMs?: number;
+      maxInputTokens?: number;
+      maxInputChars?: number;
+      maxTokens?: number;
+      maxOutputChars?: number;
+      intermediateOutputChars?: number;
+      reasoningEffort?: Config["reasoningEffort"];
     },
   ) {
     const target = args.target ?? (memberRuntime() ? "member" : "lead");
@@ -498,6 +544,29 @@ export default function (pi: ExtensionAPI) {
           }
         : summaryReport(ctx, target);
     const config = { ...resolveConfig(ctx, target).config };
+    for (const key of [
+      "maxInputTokens",
+      "maxInputChars",
+      "maxTokens",
+      "maxOutputChars",
+      "intermediateOutputChars",
+    ] as const) {
+      if (args[key] !== undefined) {
+        if (
+          !Number.isSafeInteger(args[key]) ||
+          args[key]! <
+            (key === "maxInputChars" || key === "maxInputTokens"
+              ? 1024
+              : key === "maxTokens"
+                ? 256
+                : 128)
+        )
+          throw new Error("Invalid summary " + key);
+        config[key] = args[key];
+      }
+    }
+    if (args.reasoningEffort !== undefined)
+      config.reasoningEffort = args.reasoningEffort;
     if (args.maxRetries !== undefined) {
       if (
         !Number.isSafeInteger(args.maxRetries) ||
@@ -520,7 +589,7 @@ export default function (pi: ExtensionAPI) {
       delete config.model;
       config.disabled = true;
     } else {
-      const value = args.model?.trim() ?? "",
+      const value = args.model?.trim() ?? config.model?.trim() ?? "",
         slash = value.indexOf("/");
       if (
         slash < 1 ||
@@ -563,6 +632,26 @@ export default function (pi: ExtensionAPI) {
           Type.Union([Type.Literal("lead"), Type.Literal("member")]),
         ),
         model: Type.Optional(Type.String({ minLength: 1 })),
+        maxInputTokens: Type.Optional(
+          Type.Integer({ minimum: 1024, maximum: 1000000 }),
+        ),
+        maxInputChars: Type.Optional(
+          Type.Integer({ minimum: 1024, maximum: 8000000 }),
+        ),
+        maxTokens: Type.Optional(
+          Type.Integer({ minimum: 256, maximum: 128000 }),
+        ),
+        maxOutputChars: Type.Optional(
+          Type.Integer({ minimum: 128, maximum: 32000 }),
+        ),
+        intermediateOutputChars: Type.Optional(
+          Type.Integer({ minimum: 128, maximum: 16000 }),
+        ),
+        reasoningEffort: Type.Optional(
+          Type.Union(
+            ["minimal", "low", "medium", "high"].map((x) => Type.Literal(x)),
+          ),
+        ),
         maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 5 })),
         requestTimeoutMs: Type.Optional(
           Type.Integer({ minimum: 1000, maximum: 600000 }),
@@ -639,9 +728,16 @@ export default function (pi: ExtensionAPI) {
         runId,
         scope: memberRuntime() ? "member" : "lead",
       });
-    debug(activeCtx, "compact:start");
+    debug(activeCtx, "compact:start", undefined, {
+      tokensBefore: event.preparation.tokensBefore,
+    });
     reportState("started");
     try {
+      const noteResult = memory.prepare(event, ctx);
+      if (noteResult) {
+        debug(activeCtx, "compact:success");
+        return noteResult;
+      }
       const spec = specOf(activeCtx);
       if (!spec) {
         debug(

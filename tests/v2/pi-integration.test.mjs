@@ -117,7 +117,8 @@ async function harness(fn, mode = "rpc") {
             tools: events
               .filter((e) => e.type === "tool_execution_end")
               .map((e) => ({ name: e.toolName, result: e.result })),
-            settled: events.filter((e) => e.type === "agent_settled").length,
+            settled: events.filter((e) => e.type === "agent_settled"),
+            compactions: events.filter((e) => e.type.startsWith("compaction")),
           },
           null,
           2,
@@ -145,6 +146,57 @@ async function until(fn, timeout = 25000) {
   }
   throw new Error("Timed out waiting for real Pi integration");
 }
+
+test(
+  "real Pi notes rollover automatically resumes the same conversation and keeps searchable public history",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const sessionId = h.session.sessionManager.getSessionId();
+      h.settings.applyOverrides({ compaction: { keepRecentTokens: 1024 } });
+      await h.tool("context_mode", { mode: "notes" });
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "context_note",
+            args: {
+              action: "write",
+              name: "topic/warmup",
+              text: "Older synthetic evidence for native compaction. ".repeat(
+                200,
+              ),
+            },
+          }),
+      );
+      await h.session.prompt(
+        'V2_TEST:{"op":"tool","name":"context_note","args":{"action":"write","name":"index","text":"Review the synthetic decoder; no acceptance yet."}}',
+      );
+      await h.session.prompt(
+        'V2_TEST:{"op":"tool","name":"context_note","args":{"action":"write","name":"handoff","text":"Continue decoder.py at line 173. HISTORY_NEEDLE_173 remains unverified."}}',
+      );
+      await h.session.prompt(
+        'V2_TEST:{"op":"tool","name":"context_rollover","args":{}}',
+      );
+      await until(() =>
+        h.session.getLastAssistantText()?.includes("CONTEXT_WINDOW_RESUMED"),
+      );
+      assert.equal(h.session.sessionManager.getSessionId(), sessionId);
+      const result = JSON.parse(
+        (
+          await h.tool("context_history", {
+            action: "search",
+            query: "HISTORY_NEEDLE_173",
+          })
+        ).content[0].text,
+      );
+      assert.ok(result.matches.length > 0);
+      await h.session.reload();
+      const status = JSON.parse((await h.tool("context_mode")).content[0].text);
+      assert.equal(status.mode, "notes");
+      await h.tool("context_mode", { mode: "summary" });
+    }),
+);
 
 test(
   "real Pi role labels do not narrow development tools; explicit tool/workspace limits remain effective",
@@ -2263,7 +2315,7 @@ test(
       const catalog = JSON.parse(
         (await h.tool("mission_capabilities")).content[0].text,
       );
-      assert.equal(catalog.tools.length, 51);
+      assert.equal(catalog.tools.length, 55);
       assert.ok(catalog.tools.every((t) => t.active));
       h.session.setActiveToolsByName(["read"]);
       await h.session.reload();
@@ -2982,6 +3034,17 @@ test(
       assert.equal(JSON.parse(h.session.getLastAssistantText()).isError, false);
       const lead = JSON.parse(
         (await h.tool("compaction_model", { target: "lead" })).content[0].text,
+      );
+      const budgetOnly = await h.tool("compaction_model", {
+        action: "set",
+        target: "lead",
+        maxInputTokens: 32000,
+        intermediateOutputChars: 2000,
+      });
+      assert.ok(!budgetOnly.isError);
+      assert.equal(
+        JSON.parse(budgetOnly.content[0].text).maxInputTokens,
+        32000,
       );
       await h.tool("compaction_model", {
         action: "set",

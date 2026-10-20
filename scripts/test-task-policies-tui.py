@@ -174,6 +174,38 @@ def main():
         wait(lambda: "Reloaded keybindings" in visible[marker:], "second /reload preserved test goal, scope and acceptance")
         retained = next(n for n in query("goal_nodes") if n["id"] == leaf["id"])
         assert retained["state"] == "accepted" and retained["scope"] == leaf["scope"]
+        memory_file = agent / "context-memory" / config["id"] / "memory.sqlite"
+
+        def memory_rows(sql, args=()):
+            if not memory_file.exists():
+                return []
+            with sqlite3.connect(f"file:{memory_file}?mode=ro", uri=True) as db:
+                return db.execute(sql, args).fetchall()
+
+        def compactions():
+            session_file = next(sessions.glob("*_" + config["id"] + ".jsonl"))
+            return [row for row in map(json.loads, session_file.read_text().splitlines()) if row.get("type") == "compaction"]
+
+        line("/context mode notes")
+        wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)], "notes mode selected in the existing Pi conversation")
+        note_marker = "resume-decoder-" + uuid.uuid4().hex[:8]
+        tool("context_note", {"action": "write", "name": "index", "text": "Dedicated context-memory regression; exact continuation in handoff."})
+        wait(lambda: bool(memory_rows("SELECT name FROM notes WHERE name='index'")), "short memory index saved")
+        tool("context_note", {"action": "write", "name": "handoff", "text": note_marker + ": inspect decoder.py line 120 next; this note does not accept any goal."})
+        wait(lambda: any(note_marker in row[0] for row in memory_rows("SELECT text FROM notes WHERE name='handoff'")), "fresh handoff saved by a real model tool call")
+        before_windows = len(compactions())
+        line("/context rollover")
+        wait(lambda: len(compactions()) > before_windows, "notes rollover installed a new context without a summary-model request")
+        assert note_marker in compactions()[-1]["summary"]
+        assert compactions()[-1].get("details", {}).get("contextMode") == "notes"
+        marker = len(visible)
+        line("/reload")
+        wait(lambda: "Reloaded keybindings" in visible[marker:], "notes context survived literal /reload in the same Pi process")
+        assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)]
+        tool("context_history", {"action": "search", "query": note_marker})
+        wait(lambda: bool(memory_rows("SELECT id FROM history WHERE instr(text,?)>0", (note_marker,))), "earlier public history remains searchable after rollover and reload")
+        line("/context mode summary")
+        wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)], "same conversation switched back to summary mode")
         assert len(list(sessions.glob("*_" + config["id"] + ".jsonl"))) == 1
         assert not any(error in visible for error in ["UnhandledPromiseRejection", "Error loading extension"])
         config["sessionFile"] = str(next(sessions.glob("*_" + config["id"] + ".jsonl")))

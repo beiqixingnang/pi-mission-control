@@ -1,3 +1,10 @@
+# Unreleased — context modes candidate
+
+- Add a standalone, per-conversation notes mode with bounded working notes, public-history lookup, persisted mode selection and safe rollover/resume through existing Pi compaction hooks.
+- Separate summary input, intermediate and final budgets; retain explicit legacy character limits, completed chunk caches, failure recovery and strict summary routing. Preserve corrected identifiers and continuation details in summary prompts.
+- Require a complete goal inventory before execution; discuss execution-time scope changes with the user, reserving rolling planning for approved exploratory work with unclear requirements.
+- Extend Windows/WSL regression coverage and same-process TUI reload checks. Add an opt-in synthetic live-model benchmark; this candidate is not installed automatically.
+
 # 2.3.1 — canonical skill paths on Windows runners (2026-10-19)
 
 - Canonicalize isolated test agent directories and the configured worker agent directory before resource discovery, so Windows 8.3 TEMP aliases such as RUNNER~1 do not leak into advertised skill paths.

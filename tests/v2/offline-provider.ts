@@ -83,6 +83,17 @@ export default function (pi: ExtensionAPI) {
         };
         try {
           if (
+            textOf(
+              context.messages.filter((m: any) => m.role === "user").at(-1),
+            ).startsWith("The notes context window has been refreshed.")
+          ) {
+            answer("CONTEXT_WINDOW_RESUMED");
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: "stop", message });
+            stream.end();
+            return;
+          }
+          if (
             context.messages.at(-1)?.role === "user" &&
             textOf(context.messages.at(-1)).startsWith(
               "Summarize this coding-session excerpt",

@@ -1,0 +1,28 @@
+[
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-0 AUDIT-1 AUDIT-2 AUDIT-3 AUDIT-4 AUDIT-5 AUDIT-6 AUDIT-7 corrected goal ID production hardware Pi"
+    },
+    "result": {
+      "matches": [],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "e2dbb408-9ea9-469b-9832-b1a6b0e69339 revision 1 AUDIT-7-93c3cb52"
+    },
+    "result": {
+      "matches": [],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  }
+]

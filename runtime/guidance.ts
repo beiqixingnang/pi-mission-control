@@ -1,4 +1,15 @@
 export const goalPlanningGuidance =
+  "Before execution, inventory the full approved scope and register the complete stage and leaf checklist upfront, " +
+  "including all known files/modules, acceptance criteria and dependencies. Do not create only the next few goals, " +
+  "finish them, then append another batch: that makes progress denominators drift (1/4 becomes 3/8). " +
+  "If the tool's 100-goal batch limit requires several calls, complete those registration calls as one planning phase " +
+  "before starting implementation or the planned audit. Many files alone are not a reason for rolling planning. " +
+  "When the full inventory is unknown, first finish a bounded inventory phase; do not present a partial execution list " +
+  "as the complete plan. Changes to the planned work or adding scope during execution are discouraged; " +
+  "discuss a genuinely necessary scope/plan revision with the user first and explain the changed denominator. " +
+  "Rolling additions or adjustments are recommended only for exploratory work starting from zero, or when the final " +
+  "form and requirements are genuinely unclear, and must be discussed and decided with the user before changing the plan. " +
+  "Updating status, evidence, blockers or a next step within the existing scope does not require repeated approval. " +
   "Use level 1 for the outcome and level 2 for execution stages or acceptance batches. " +
   "For code work, level 3 and deeper leaf goals must name concrete files or an explicitly listed file/module batch, " +
   "the specific change or check, its deliverable and acceptance criteria. 'Read all code' or 'rewrite the whole subsystem' " +
