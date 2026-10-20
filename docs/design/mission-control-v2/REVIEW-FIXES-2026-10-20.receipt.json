@@ -1,0 +1,276 @@
+{
+  "schema": "pi-mission-control-review-fixes-v1",
+  "recordedAt": "2026-10-20T16:10:24.701Z",
+  "candidate": {
+    "version": "2.5.1",
+    "baseCommit": "9de5a976f87de78111ace8900803ba03699544a3",
+    "sourceCommit": "1c3226a3ec1814dd790bac6be35e6500d36b8d1c",
+    "branch": "codex/review-contract-fixes",
+    "sourceFiles": {
+      "CHANGELOG.md": "2a908f35e5634e05d9f9d5004f89d95e6f9ad93058f392ef0a5feb208ea2ed72",
+      "README.md": "7904d2b05d9eb2d60f1eb62c70c1f4f478449eb5e2f2dfb019b251563258a2ff",
+      "docs/design/mission-control-v2/REVIEW-FIXES-2026-10-20.md": "584e99c7ca5928ccd256223f74b6c615f1385ac5675974545ff390341d59853d",
+      "extensions/mission-control/context-memory.ts": "e0c59dad044282f7ea47429dc7342aa1fcd0031eda1c11d1000b8c4493b9c109",
+      "extensions/mission-control/index.ts": "e8938ee1bf4523369955c49b571dff6020a72f2c750037beb34e600ae4ff0e84",
+      "package-lock.json": "489d8edb996504e22c7cebbd118a34bbbb80b8505bc90dd9d5810b6cd515e238",
+      "package.json": "6d0c188742af966695da80c951bcd929ddceb9290210ba4c91b629d9b966a476",
+      "runtime/activity-clock.ts": "78e9f43684cbd2bb5c152c5c378721dc9e1732559b6120070e29d04236e29e79",
+      "runtime/context-memory.ts": "61cc1f2e5a6483e5e0870a9d0804001c66d5ebe2fe418b8a24a6f04223f1b4bb",
+      "runtime/kernel.ts": "564e5c06caa512ad88803257400af5e3bf77e158df09a7941202a3a4bc99f68e",
+      "runtime/rpc-records.ts": "a59eeb01a0437a5ddcbc982030a2c1a9919bd5c0d7e9330f4806cc43e11b97f8",
+      "runtime/rpc-worker.ts": "84b4aa8b5c1ecbbeb81c0bd7f4092b42174ed9efa4236ec339028a268317066e",
+      "runtime/types.ts": "711f8b0f0c983bb20c9ca4985c82669756a89e80bbe28354f40f80f2fc9cccdd",
+      "scripts/test-task-policies-tui.py": "2ef74380ac48bcde3097d281a692fe5db60ed2e12fd6ceebd1d816e469e9f64a",
+      "tests/v2/activity-clock.test.mjs": "7648b3817e5b91e07f052207019b4591cc8382f173f69ba7a30fae5855dbc08c",
+      "tests/v2/context-memory.test.mjs": "060fccf4968ad8edce6183e9500e4ed99f8e7ba8a4546e6649eb9eeeb50c61dd",
+      "tests/v2/context-pi.test.mjs": "97d7806d06cb310be0d81aecf210fee9b113dfc531f08d198eb42939894282e9",
+      "tests/v2/goals.test.mjs": "8820efed4b5cd42746c8f713f45813c77cc163e90fdeeb42cd82ba7310eadaee",
+      "tests/v2/kernel.test.mjs": "e9bf7ebafd46d4b8d3fa916dd1c273702b4a07b90783f531ba1fcc751bd0d8e7",
+      "tests/v2/offline-provider.ts": "8b0180164fe6decade24f5b4f60b0cc37606d7fd5eeea8745eda150eeeb74ae1",
+      "tests/v2/pi-integration.test.mjs": "5a7b3d053080398295aa5475308d27ba48199f04baabb8dc5bd6dd8a57909fc0",
+      "tests/v2/rpc-records.test.mjs": "38117aede620f4694cd60865332ac6e6cda61d326ff7a09911336ad04e047ac7"
+    },
+    "sourceHashEncoding": "UTF-8 text with CRLF normalized to LF"
+  },
+  "checks": {
+    "windows": {
+      "pi": "1.3.0",
+      "load": {
+        "command": "node scripts/check.mjs",
+        "exitCode": 0,
+        "node": "v24.16.0",
+        "platform": "win32",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      },
+      "typecheck": {
+        "command": "node scripts/typecheck-v2.mjs",
+        "exitCode": 0,
+        "sourceFiles": 38
+      },
+      "suite": {
+        "command": "node scripts/test-v2.mjs",
+        "exitCode": 0,
+        "tests": 287,
+        "pass": 283,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 4
+      }
+    },
+    "wsl": {
+      "distribution": "Debian",
+      "pi": "1.3.0",
+      "nodeRuntime": "Isolated Node 24.16.0 under the dedicated test home; global runtime unchanged",
+      "load": {
+        "command": "node scripts/check.mjs",
+        "exitCode": 0,
+        "node": "v24.16.0",
+        "platform": "linux",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      },
+      "typecheck": {
+        "command": "node scripts/typecheck-v2.mjs",
+        "exitCode": 0,
+        "sourceFiles": 38
+      },
+      "suite": {
+        "command": "node scripts/test-v2.mjs",
+        "exitCode": 0,
+        "tests": 287,
+        "pass": 283,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 4
+      }
+    },
+    "tui": {
+      "command": "python3 scripts/test-task-policies-tui.py BASELINE CANDIDATE TEST_HOME",
+      "baselineVersion": "2.5.0",
+      "candidateVersion": "2.5.1",
+      "exitCode": 0,
+      "passed": true,
+      "sameProcess": true,
+      "checkCount": 60,
+      "checks": [
+        "dedicated test conversation opened and TUI input is ready",
+        "baseline goal recorded",
+        "baseline paused",
+        "candidate loaded through literal /reload in the same Pi process",
+        "same goal explicitly resumed",
+        "scope registered through the real model tool",
+        "concrete leaf focused",
+        "member created with task-appropriate default development capabilities",
+        "unlimited managed task queried its exact acceptance criteria",
+        "isolated evidence artifact written",
+        "scope and evidence accepted once",
+        "test goal paused for retention",
+        "second /reload preserved test goal, scope and acceptance",
+        "fault-test settings loaded through /reload while paused",
+        "test mission resumed for automatic recovery fault injection",
+        "separate unaccepted goal registered for fault-injection evidence",
+        "fault injection bound to the unaccepted file batch",
+        "injected upstream outage exhausted one bounded failure burst",
+        "literal /reload retained the outage in the same Pi process",
+        "upstream outage recovered automatically after cooldown and reload without a human continue",
+        "provider-side aborted response reconnected without becoming a user Escape hold",
+        "24 real tool calls continued after one aborted request without exhausting the failure allowance",
+        "second injected outage reached persisted cooldown",
+        "user pause remained authoritative during an outage",
+        "paused recovery and accepted evidence survived literal /reload",
+        "cooldown retries did not bypass a user pause, including after reload",
+        "explicit user resume continued the retained task after the provider was repaired",
+        "test mission paused after fault regressions",
+        "test mission resumed for a long RPC lifecycle",
+        "real TUI member completed four notes windows, 160 source reads and a stream retry despite an oversized cumulative RPC snapshot",
+        "long RPC regression paused without changing prior acceptance",
+        "notes mode selected in the existing Pi conversation",
+        "model-specific conservative input budget selected through the TUI command",
+        "short memory index saved",
+        "fresh handoff saved by a real model tool call",
+        "index and handoff saved in one atomic model tool call",
+        "unchanged note batches retained their versions",
+        "notes rollover installed a new context without a summary-model request",
+        "native notes checkpoint retained the exact injected index revision",
+        "model tool rollover committed at the current boundary and continued in the same Pi process",
+        "notes context survived literal /reload in the same Pi process",
+        "reload preserved the model-specific input budget",
+        "earlier public history remains searchable after rollover and reload",
+        "batched history lookup returned bounded results through the TUI",
+        "explicit input override reset without changing Pi model settings",
+        "300k notes budget selected for the wide test model",
+        "a burst beyond the 300k window handoff reserve still produced two safe windows and continued",
+        "same conversation switched back to summary mode",
+        "test mission resumed for root-identity regression",
+        "model tool completed: goal_plan",
+        "model tool completed: goal_accept",
+        "unselected root acceptance was rejected without changing either root",
+        "model tool completed: context_history",
+        "search cursor survived literal /reload in the same Pi process",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "256-token Unicode search pages retained every user hit without duplicates",
+        "model tool completed: goal_stop",
+        "stopped goal activity remained ended through literal /reload",
+        "stopped activity clock retained its exact receipt after reload"
+      ]
+    }
+  },
+  "fixes": [
+    {
+      "id": "PLUGIN-01",
+      "files": [
+        "runtime/kernel.ts",
+        "extensions/mission-control/index.ts"
+      ],
+      "tests": [
+        "tests/v2/goals.test.mjs",
+        "tests/v2/pi-integration.test.mjs"
+      ],
+      "contract": "Exact root identity and mission/goal revisions checked in the acceptance transaction; inactive-root errors make no partial commit; accepted revision is idempotent."
+    },
+    {
+      "id": "PLUGIN-02",
+      "files": [
+        "runtime/kernel.ts",
+        "runtime/activity-clock.ts"
+      ],
+      "tests": [
+        "tests/v2/activity-clock.test.mjs",
+        "tests/v2/kernel.test.mjs"
+      ],
+      "contract": "Stop intent settles the activity tail before asynchronous cancellation; unknown process evidence remains unknown; ended clocks survive close/reload/new goal without double counting."
+    },
+    {
+      "id": "PLUGIN-03",
+      "files": [
+        "runtime/context-memory.ts",
+        "extensions/mission-control/context-memory.ts"
+      ],
+      "tests": [
+        "tests/v2/context-memory.test.mjs",
+        "tests/v2/context-pi.test.mjs",
+        "scripts/test-task-policies-tui.py"
+      ],
+      "contract": "Budgeted searches shrink Unicode excerpts before dropping hits and preserve branch/query/role/session-bound continuation; nextRequest does not skip incomplete requests."
+    },
+    {
+      "id": "PLUGIN-04",
+      "files": [
+        "runtime/rpc-records.ts",
+        "runtime/rpc-worker.ts",
+        "runtime/types.ts",
+        "runtime/kernel.ts"
+      ],
+      "tests": [
+        "tests/v2/rpc-records.test.mjs",
+        "tests/v2/pi-integration.test.mjs",
+        "scripts/test-task-policies-tui.py"
+      ],
+      "contract": "Bounded non-sensitive protocolDiagnostic persists on failed tasks, including actual byte limit/type/observed lower bound/LF record index; canonical data and settlement cannot be discarded to claim success."
+    },
+    {
+      "id": "PLUGIN-05",
+      "optional": true,
+      "files": [
+        "runtime/context-memory.ts",
+        "extensions/mission-control/context-memory.ts"
+      ],
+      "tests": [
+        "tests/v2/context-memory.test.mjs",
+        "tests/v2/context-pi.test.mjs"
+      ],
+      "contract": "Exact injected index version/source metadata and current projected checkpoint allow suppression of one redundant hint; first/new/legacy/other-branch indexes remain visible."
+    }
+  ],
+  "reproduction": {
+    "before": {
+      "command": "node scripts/test-v2.mjs tests/v2/goals.test.mjs tests/v2/activity-clock.test.mjs tests/v2/context-memory.test.mjs tests/v2/rpc-records.test.mjs",
+      "tests": 41,
+      "pass": 36,
+      "expectedFailures": 5
+    },
+    "fixtureRepair": "Batched reminder fixture selected an old command. Preserve the failing trace; select the latest batched command and avoid replaying healthy faults. Original retry-count and recovery-state assertions retained."
+  },
+  "evidence": {
+    "logDirectory": "Local ignored .reference/review-2.5.1 directory in the installed checkout",
+    "logSha256": {
+      "review-reproduction-before.log": "14435e271b12ed81d61a377f33372c6aa7849a16d78256a82ec85d8d3b645a83",
+      "review-expanded.log": "0a93fb65d5b2c93094f020cf4a48e6f33a04441d6e6016cd123bcf9ffc9483a5",
+      "review-goals-final.log": "45fe9b2e29013292bed3d5b38fc959212cef81091aa49dfeb9ef107914bf4d4d",
+      "review-pagination-final.log": "9217d41ef81d16aaaf420483d1a5441efe86cd0cc417942326000a76b6bc33b8",
+      "review-full-windows.log": "8f88345ac67d57dc68f9ab68d698e2e1508bdc4bfda9e15da523b5f98a59c7c2",
+      "review-full-wsl.log": "cd68f279600e576f6ec1baa697d28761051d3695482e4eec57921b0ea43d54c4",
+      "review-typecheck-windows.log": "73c46a97fed3316ca787a5b4aa3360834ce366c73dd7fed6e39ba434c6ff951e",
+      "review-typecheck-wsl.log": "17e85010a1d10657a5e43bc4643879944f4925992c839d9ba2c7284d5df9c5e1",
+      "review-load-windows.json": "e4adbc4605572230fdf17328eaaf6872846d2d882aeec909ead39c97311d9166",
+      "review-load-wsl.json": "2f94c0d17bcd3fc84aa93dc0fcd76b15ed7f11b1548448e3caaac0c7ed192c10",
+      "review-tui-wsl.log": "a8ea6734d5cc84335e83b1d23d9d60435db3369cd94a20de23fe3cd2e19aac27",
+      "review-tui-wsl-failed-fixture.log": "09543cec102df6e08c8e404e100b7a7b7b9488128d2ba508e2697009aea6aa50",
+      "review-tui-failed-fixture.ansi": "5cbe3784b10ec592deb96cef320ba27c95aca279c91c19fb7dbc635a18b198a2"
+    }
+  },
+  "boundaries": {
+    "actualPiSdk": true,
+    "actualRpcChildProcesses": true,
+    "actualTui": true,
+    "modelProvider": "deterministic offline fixture",
+    "liveProviderRequests": false,
+    "productionSessionControl": false,
+    "hardwareOrQoderModified": false,
+    "containers": "Four opt-in image-dependent tests skipped on both platforms",
+    "unverified": [
+      "actual model gateways and prompt-cache hit rates",
+      "macOS",
+      "hardware source-reading semantics",
+      "container execution in this revision"
+    ]
+  },
+  "deployment": {
+    "method": "Fast-forward the authorized local installed checkout after successful isolated validation",
+    "existingConversation": "User may apply /reload when ready; no production session is reloaded by this task"
+  }
+}
