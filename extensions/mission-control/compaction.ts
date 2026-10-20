@@ -320,7 +320,6 @@ export default function (pi: ExtensionAPI) {
     } = summaryBudgets(model, config);
     const parts = function* () {
       if (instructions) yield `USER SUMMARY FOCUS:\n${instructions}\n\n`;
-      if (previous) yield `PREVIOUS SUMMARY:\n${previous}\n\n`;
       for (const message of convertToLlm(messages))
         yield serializeConversation([message]) + "\n\n";
     };
@@ -336,6 +335,7 @@ export default function (pi: ExtensionAPI) {
       maxOutputChars,
       maxInputTokens,
       intermediateOutputChars,
+      previousSummary: previous,
       cacheIdentity: config.reasoningEffort ?? "low",
       signal,
       requestTimeoutMs: config.requestTimeoutMs ?? 180000,

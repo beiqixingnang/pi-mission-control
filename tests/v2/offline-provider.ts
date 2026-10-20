@@ -11,6 +11,7 @@ const textOf = (m: any) =>
         .join("\n");
 let summaryCalls = 0;
 const requestAttempts = new Map<string, number>();
+let notesCycle: any;
 export default function (pi: ExtensionAPI) {
   pi.registerProvider("mission-fixture", {
     baseUrl: "http://127.0.0.1/unused",
@@ -83,6 +84,7 @@ export default function (pi: ExtensionAPI) {
         };
         try {
           if (
+            !notesCycle &&
             textOf(
               context.messages.filter((m: any) => m.role === "user").at(-1),
             ).startsWith("The notes context window has been refreshed.")
@@ -108,6 +110,9 @@ export default function (pi: ExtensionAPI) {
                   model: model.id,
                   mode: summaryMode,
                   inputChars: textOf(context.messages.at(-1)).length,
+                  previousCheckpoint: textOf(context.messages.at(-1)).includes(
+                    "PREVIOUS CHECKPOINT (carry required facts forward",
+                  ),
                 }) + "\n",
               );
             if (
@@ -165,9 +170,102 @@ export default function (pi: ExtensionAPI) {
               .map(textOf)
               .filter((t) => t.includes("V2_TEST:"))
               .at(-1) ?? "";
-          const command = JSON.parse(
-            marker.slice(marker.indexOf("V2_TEST:") + 8).split("\n")[0],
-          );
+          const command =
+            notesCycle ??
+            JSON.parse(
+              marker.slice(marker.indexOf("V2_TEST:") + 8).split("\n")[0],
+            );
+          if (command.op === "notes-cycle") {
+            notesCycle ??= { ...command, step: 0 };
+            const sequence: any[] = [
+              { name: "context_mode", args: { mode: "notes" } },
+            ];
+            for (let cycle = 0; cycle < (command.windows ?? 2); cycle++) {
+              if (command.auto)
+                sequence.push({
+                  name: "read",
+                  args: { path: command.file },
+                  highUsage: true,
+                });
+              sequence.push(
+                {
+                  name: "context_note",
+                  args: {
+                    action: "write",
+                    name: "index",
+                    text: `Synthetic review cycle ${cycle}; preserve corrected identifiers.`,
+                  },
+                },
+                {
+                  name: "context_note",
+                  args: {
+                    action: "write",
+                    name: "handoff",
+                    text: `Cycle ${cycle}; continue decoder.py line 173; not accepted. HISTORY_CYCLE_${cycle}`,
+                  },
+                },
+                { name: "context_rollover", args: {} },
+              );
+            }
+            const step = ++notesCycle.step;
+            if (command.ignorePreparation && step >= 3) {
+              if (command.ignorePreparation === "claim")
+                answer("Ready, but I did not save notes or call rollover.");
+              else tool("read", { path: command.file });
+              stream.push({ type: "start", partial: message });
+              stream.push({
+                type: "done",
+                reason: message.stopReason,
+                message,
+              });
+              stream.end();
+              return;
+            }
+            if (command.failAt === step) {
+              notesCycle = undefined;
+              message.stopReason = "error";
+              message.errorMessage =
+                "429 Too many requests; synthetic preparation failure";
+              stream.push({ type: "start", partial: message });
+              stream.push({ type: "error", reason: "error", error: message });
+              stream.end();
+              return;
+            }
+            if (command.hangAt === step) {
+              stream.push({ type: "start", partial: message });
+              const abort = () => {
+                notesCycle = undefined;
+                message.stopReason = "aborted";
+                stream.push({
+                  type: "error",
+                  reason: "aborted",
+                  error: message,
+                });
+                stream.end();
+              };
+              if (options?.signal?.aborted) abort();
+              else
+                options?.signal?.addEventListener("abort", abort, {
+                  once: true,
+                });
+              return;
+            }
+            const current = sequence[step - 1];
+            if (current) {
+              tool(current.name, current.args);
+              if (current.highUsage) {
+                message.usage.input = 43000;
+                message.usage.totalTokens = 43001;
+              }
+            } else {
+              notesCycle = undefined;
+              answer("NOTES_CYCLES_COMPLETE");
+            }
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: message.stopReason, message });
+            stream.end();
+            return;
+          }
           const last = context.messages.at(-1),
             lastText = textOf(last),
             latestUser = context.messages

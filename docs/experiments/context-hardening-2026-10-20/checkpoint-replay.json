@@ -1,0 +1,120 @@
+{
+  "networkRequests": 0,
+  "budgets": {
+    "maxTokens": 16384,
+    "maxInputChars": 192000,
+    "maxOutputChars": 8192,
+    "maxInputTokens": 64000,
+    "intermediateOutputChars": 3000
+  },
+  "stages": [
+    {
+      "afterBatch": 1,
+      "chars": 1338,
+      "oldCheckpointPreserved": true,
+      "tickets": [
+        {
+          "ticket": "AUDIT-0-fd076222",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-1-35dde772",
+          "present": true
+        }
+      ]
+    },
+    {
+      "afterBatch": 3,
+      "chars": 2880,
+      "oldCheckpointPreserved": true,
+      "tickets": [
+        {
+          "ticket": "AUDIT-0-fd076222",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-1-35dde772",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-2-7c9220c2",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-3-20e90e12",
+          "present": true
+        }
+      ]
+    },
+    {
+      "afterBatch": 5,
+      "chars": 4163,
+      "oldCheckpointPreserved": true,
+      "tickets": [
+        {
+          "ticket": "AUDIT-0-fd076222",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-1-35dde772",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-2-7c9220c2",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-3-20e90e12",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-4-49e7af62",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-5-45d304b2",
+          "present": true
+        }
+      ]
+    },
+    {
+      "afterBatch": 7,
+      "chars": 5206,
+      "oldCheckpointPreserved": true,
+      "tickets": [
+        {
+          "ticket": "AUDIT-0-fd076222",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-1-35dde772",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-2-7c9220c2",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-3-20e90e12",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-4-49e7af62",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-5-45d304b2",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-6-da300e02",
+          "present": true
+        },
+        {
+          "ticket": "AUDIT-7-93c3cb52",
+          "present": true
+        }
+      ]
+    }
+  ]
+}

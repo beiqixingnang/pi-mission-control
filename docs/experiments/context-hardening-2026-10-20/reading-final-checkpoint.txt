@@ -1,0 +1,35 @@
+PREVIOUS CHECKPOINT (carry required facts forward unless later explicitly superseded):
+PREVIOUS CHECKPOINT (carry required facts forward unless later explicitly superseded):
+PREVIOUS CHECKPOINT (carry required facts forward unless later explicitly superseded):
+Checkpoint: Inspect all supplied modules and preserve audit tickets, corrections, exact continuation points, and unverified status. No findings have been accepted.
+
+- **Batch 0 — `AUDIT-0-fd076222`:** `src/stage_0/decoder_0.ts` through `decoder_27.ts` were supplied for review, each with reviewed range `1..90`. The excerpt ends partway through `src/stage_0/decoder_28.ts`, at branch `0_28_28`; that module is incomplete. The shown decoders use `index <= values.length` although their comments say `index === values.length` is invalid. This is an apparent boundary issue to assess; no review results or verification are recorded. Continue when the user provides the rest of `decoder_28.ts`.
+- **Batch 1 — `AUDIT-1-35dde772`:** `src/stage_1/decoder_0.ts` through `decoder_43.ts` were reviewed, covering `decode_1_1`–`decode_1_43`. All 44 decoders use `index <= values.length`, potentially returning `undefined` at `index === values.length`, contrary to the adjacent comment. Findings remain unaccepted; no corrections or verification were recorded.
+
+A prior excerpt noted `decode_1_40` was truncated at branch `1_40_6`, with the last visible file marker `src/stage_1/decoder_39.ts`; the later batch record says stage 1 was reviewed through `decoder_43.ts`. Preserve both records; no explicit resolution of that earlier truncation is given.
+
+NEW WORK (later explicit corrections supersede the earlier checkpoint):
+- **Objective:** Review every supplied decoder module and preserve audit status, ticket IDs, corrections, and continuation details.
+- **Batch 1 — `AUDIT-1-35dde772`:** Reviewed `src/stage_1/decoder_0.ts`–`decoder_43.ts` (44 modules). Finding: each uses `index <= values.length` before returning `values[index]`, allowing an out-of-bounds read at `index === values.length`, contrary to the nearby comment. No acceptance or corrections recorded.
+- **Batch 2 — `AUDIT-2-7c9220c2`:** The excerpt gives conflicting coverage: one checkpoint says only `decoder_0.ts`–`decoder_27.ts` were supplied, ending mid-file at `decoder_27.ts` after `if (mode`; a later checkpoint reports review of `decoder_0.ts`–`decoder_43.ts` (`decode_2_1`–`decode_2_44`, range 1–90). Reported finding: the same `<=` boundary error in every module. Findings explicitly not accepted; no corrections recorded.
+- **Batch 3 — `AUDIT-3-20e90e12`:** Reviewed `src/stage_3/decoder_0.ts`–`decoder_43.ts` (`decode_3_1`–`decode_3_44`, range 1–90). Finding: all 44 have the same out-of-bounds boundary error. No other concrete findings identified; no acceptance or revisions provided. Earlier excerpts were partial, including `decoder_11.ts` and `decoder_39.ts`, but the later checkpoint reports the full batch reviewed.
+
+No implementation, tests, or verification were stated. No team identity or corrections were provided.
+
+NEW WORK (later explicit corrections supersede the earlier checkpoint):
+Synthetic code review objective: inspect every listed module. Findings remain unaccepted; no code corrections, revisions, or verification results were provided.
+
+- Batch 3, `AUDIT-3-20e90e12`: reviewed `src/stage_3/decoder_0.ts`–`decoder_43.ts` (`decode_3_1`–`decode_3_44`, range 1–90). Reported that all 44 decoders use `index <= values.length` before `values[index]`, allowing an out-of-bounds lookup when `index === values.length`. No other concrete findings.
+- Batch 4, `AUDIT-4-49e7af62`: reviewed `src/stage_4/decoder_0.ts`–`decoder_43.ts` (`decode_4_1`–`decode_4_44`, range 1–90). Reported the same boundary issue in all 44 decoders, contrary to the comments. No other concrete findings.
+- Batch 5, `AUDIT-5-45d304b2`: reviewed `src/stage_5/decoder_0.ts`–`decoder_43.ts` (`decode_5_1`–`decode_5_44`, range 1–90). Reported the same boundary issue in all 44 decoders, contrary to the comments. No other concrete findings.
+
+Correction to preserve: `e2dbb408-9ea9-469b-9832-b1a6b0e69339`, revision 1; the earlier `4698` spelling was wrong.
+
+Continuation: inspect every remaining listed module and any further batches. ⟂
+
+NEW WORK (later explicit corrections supersede the earlier checkpoint):
+Batch 7, ticket `AUDIT-7-93c3cb52`: reviewed `src/stage_7/decoder_0.ts` through `decoder_43.ts`, range 1–90 (`decode_7_1`–`decode_7_44`). Finding: all modules use `index <= values.length` before returning `values[index]`, allowing an out-of-bounds lookup at `index === values.length`. No other concrete findings were identified. Findings remain unaccepted; verification was not reported.
+
+Correction `e2dbb408-9ea9-469b-9832-b1a6b0e69339`, revision 1. **Continue at `src/stage_7/decoder_7.ts:173`.** Do not run tests, reload, or stop the production hardware Pi conversation.
+
+Earlier records to preserve: Batch 5 ticket `AUDIT-5-45d304b2` covers `src/stage_5/decoder_0.ts`–`decoder_43.ts` with the same bounds finding, unaccepted and unverified. Batch 6 ticket `AUDIT-6-da300e02` remains incomplete, truncated in `src/stage_6/decoder_27.ts` (`decode_6_28`); findings are unaccepted.

@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "sameProcess": true,
+  "session": {
+    "id": "85289420-ef5b-472a-82ca-5387b6998102",
+    "name": "插件回归测试（WSL）",
+    "sessionFile": "/home/lishuo/pi-mission-control-test/agent/sessions/2026-10-19T07-59-05-486Z_85289420-ef5b-472a-82ca-5387b6998102.jsonl",
+    "workspace": "/home/lishuo/pi-mission-control-test/workspace",
+    "agentDir": "/home/lishuo/pi-mission-control-test/agent"
+  },
+  "checks": [
+    "dedicated test conversation opened and TUI input is ready",
+    "previous isolated test goal explicitly stopped before a new regression",
+    "baseline goal recorded",
+    "baseline paused",
+    "candidate loaded through literal /reload in the same Pi process",
+    "same goal explicitly resumed",
+    "scope registered through the real model tool",
+    "concrete leaf focused",
+    "member created with task-appropriate default development capabilities",
+    "unlimited managed task queried its exact acceptance criteria",
+    "isolated evidence artifact written",
+    "scope and evidence accepted once",
+    "test goal paused for retention",
+    "second /reload preserved test goal, scope and acceptance",
+    "notes mode selected in the existing Pi conversation",
+    "model-specific conservative input budget selected through the TUI command",
+    "short memory index saved",
+    "fresh handoff saved by a real model tool call",
+    "notes rollover installed a new context without a summary-model request",
+    "model tool rollover committed at the current boundary and continued in the same Pi process",
+    "notes context survived literal /reload in the same Pi process",
+    "reload preserved the model-specific input budget",
+    "earlier public history remains searchable after rollover and reload",
+    "explicit input override reset without changing Pi model settings",
+    "same conversation switched back to summary mode"
+  ],
+  "candidateVersion": "2.3.1"
+}

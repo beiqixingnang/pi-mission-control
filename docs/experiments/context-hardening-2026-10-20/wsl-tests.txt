@@ -1,0 +1,1486 @@
+
+> pi-mission-control@2.3.1 test
+> node scripts/test-v2.mjs
+
+TAP version 13
+# (node:800) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: teammate execution keeps the activity clock running while the lead is recovering
+ok 1 - teammate execution keeps the activity clock running while the lead is recovering
+  ---
+  duration_ms: 11.174054
+  type: 'test'
+  ...
+# Subtest: default goals have no hidden time, turn or output deadline
+ok 2 - default goals have no hidden time, turn or output deadline
+  ---
+  duration_ms: 4.792597
+  type: 'test'
+  ...
+# Subtest: cooldown, external waits and idle intervals do not consume active time
+ok 3 - cooldown, external waits and idle intervals do not consume active time
+  ---
+  duration_ms: 7.576801
+  type: 'test'
+  ...
+# Subtest: an explicitly configured time cap charges actual activity and survives offline restore
+ok 4 - an explicitly configured time cap charges actual activity and survives offline restore
+  ---
+  duration_ms: 5.715535
+  type: 'test'
+  ...
+# Subtest: a closed process interval never becomes active usage after a clean restart
+ok 5 - a closed process interval never becomes active usage after a clean restart
+  ---
+  duration_ms: 3.95652
+  type: 'test'
+  ...
+# Subtest: a user pause stops the clock and renewal preserves lifetime activity
+ok 6 - a user pause stops the clock and renewal preserves lifetime activity
+  ---
+  duration_ms: 4.170155
+  type: 'test'
+  ...
+# Subtest: the old default budget hold clears on reload without resetting recorded turn or token usage
+ok 7 - the old default budget hold clears on reload without resetting recorded turn or token usage
+  ---
+  duration_ms: 3.652284
+  type: 'test'
+  ...
+# Subtest: an explicit exhausted output cap and a user pause remain authoritative after reload
+ok 8 - an explicit exhausted output cap and a user pause remain authoritative after reload
+  ---
+  duration_ms: 4.087093
+  type: 'test'
+  ...
+# Subtest: waiting for a business decision excludes elapsed time instead of exhausting an active-time cap
+ok 9 - waiting for a business decision excludes elapsed time instead of exhausting an active-time cap
+  ---
+  duration_ms: 4.143606
+  type: 'test'
+  ...
+# (node:824) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: archive captures main, member, goals and every receipt without acquiring the running owner lock
+ok 10 - archive captures main, member, goals and every receipt without acquiring the running owner lock
+  ---
+  duration_ms: 247.569949
+  type: 'test'
+  ...
+# Subtest: archive retains all recorded branches and embeds image bytes without executing their content
+ok 11 - archive retains all recorded branches and embeds image bytes without executing their content
+  ---
+  duration_ms: 71.400247
+  type: 'test'
+  ...
+# Subtest: archive preserves long public text and complete arguments while filtering structural private fields
+ok 12 - archive preserves long public text and complete arguments while filtering structural private fields
+  ---
+  duration_ms: 116.261895
+  type: 'test'
+  ...
+# Subtest: archive freezes complete LF prefixes and does not chase appends or half-written records
+ok 13 - archive freezes complete LF prefixes and does not chase appends or half-written records
+  ---
+  duration_ms: 63.344021
+  type: 'test'
+  ...
+# Subtest: archive fails visibly on malformed middle records and never overwrites an existing destination
+ok 14 - archive fails visibly on malformed middle records and never overwrites an existing destination
+  ---
+  duration_ms: 5.943355
+  type: 'test'
+  ...
+# Subtest: archive cancellation leaves a partial receipt, and missing sources or checksum damage are explicit
+ok 15 - archive cancellation leaves a partial receipt, and missing sources or checksum damage are explicit
+  ---
+  duration_ms: 81.238819
+  type: 'test'
+  ...
+# Subtest: empty optional arrays/null never hide a supplied task, parallel list or chain
+ok 16 - empty optional arrays/null never hide a supplied task, parallel list or chain
+  ---
+  duration_ms: 2.044891
+  type: 'test'
+  ...
+# Subtest: empty sandbox profiles are placeholders, meaningful capability conflicts still reject
+ok 17 - empty sandbox profiles are placeholders, meaningful capability conflicts still reject
+  ---
+  duration_ms: 0.71529
+  type: 'test'
+  ...
+# Subtest: probe rejects an unconfigured engine without invoking a host fallback
+ok 18 - probe rejects an unconfigured engine without invoking a host fallback
+  ---
+  duration_ms: 0.915032
+  type: 'test'
+  ...
+# Subtest: run validation rejects disabled execution, unsafe resources, and cwd escapes
+ok 19 - run validation rejects disabled execution, unsafe resources, and cwd escapes
+  ---
+  duration_ms: 7.910162
+  type: 'test'
+  ...
+# Subtest: root, reference, and cwd links are rejected before Podman starts
+ok 20 - root, reference, and cwd links are rejected before Podman starts
+  ---
+  duration_ms: 4.455063
+  type: 'test'
+  ...
+# Subtest: export path validation protects metadata and Windows aliases
+ok 21 - export path validation protects metadata and Windows aliases
+  ---
+  duration_ms: 1.271174
+  type: 'test'
+  ...
+# Subtest: status helper rejects arbitrary IDs and ignores forged workspace receipts
+ok 22 - status helper rejects arbitrary IDs and ignores forged workspace receipts
+  ---
+  duration_ms: 4.567432
+  type: 'test'
+  ...
+# Subtest: malformed sandbox configuration reports unavailable without downloading
+ok 23 - malformed sandbox configuration reports unavailable without downloading
+  ---
+  duration_ms: 0.226591
+  type: 'test'
+  ...
+# Subtest: local Podman executes Python in isolation, exports artifacts and keeps reference data read-only
+ok 24 - local Podman executes Python in isolation, exports artifacts and keeps reference data read-only # SKIP
+  ---
+  duration_ms: 0.191729
+  type: 'test'
+  ...
+# Subtest: local hardware image runs Yosys and Verilator on a generated minimal module
+ok 25 - local hardware image runs Yosys and Verilator on a generated minimal module # SKIP
+  ---
+  duration_ms: 0.068389
+  type: 'test'
+  ...
+# Subtest: local Podman process timeout stops its container and leaves a receipt and partial log
+ok 26 - local Podman process timeout stops its container and leaves a receipt and partial log # SKIP
+  ---
+  duration_ms: 0.266437
+  type: 'test'
+  ...
+# Subtest: local Podman cancellation stops only this run and retains recovery metadata
+ok 27 - local Podman cancellation stops only this run and retains recovery metadata # SKIP
+  ---
+  duration_ms: 0.29709
+  type: 'test'
+  ...
+# (node:1242) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: context budgets reserve output and handoff room, honor lower ceilings and never infer an exact provider limit
+ok 28 - context budgets reserve output and handoff room, honor lower ceilings and never infer an exact provider limit
+  ---
+  duration_ms: 1.06175
+  type: 'test'
+  ...
+# Subtest: model-specific local budgets survive reload, learn only context failures and do not change on 429
+ok 29 - model-specific local budgets survive reload, learn only context failures and do not change on 429
+  ---
+  duration_ms: 622.398759
+  type: 'test'
+  ...
+# Subtest: automatic handoff is bounded, deduplicated across reload and pauses on cancellation
+ok 30 - automatic handoff is bounded, deduplicated across reload and pauses on cancellation
+  ---
+  duration_ms: 114.888806
+  type: 'test'
+  ...
+# Subtest: notes rollover is committed at the tool boundary with no intermediate task settlement and retains full tool pairs
+ok 31 - notes rollover is committed at the tool boundary with no intermediate task settlement and retains full tool pairs
+  ---
+  duration_ms: 152.473425
+  type: 'test'
+  ...
+# Subtest: failed native notes compaction requests one safe repair; manual cancellation and overflow never replay a giant window
+ok 32 - failed native notes compaction requests one safe repair; manual cancellation and overflow never replay a giant window
+  ---
+  duration_ms: 109.180532
+  type: 'test'
+  ...
+# Subtest: missing-note retries and an uncooperative final response have a finite repair allowance
+ok 33 - missing-note retries and an uncooperative final response have a finite repair allowance
+  ---
+  duration_ms: 109.600885
+  type: 'test'
+  ...
+# (node:1250) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: bounded user excerpts retain literal latest corrections separately from erroneous working notes
+ok 34 - bounded user excerpts retain literal latest corrections separately from erroneous working notes
+  ---
+  duration_ms: 18.802621
+  type: 'test'
+  ...
+# Subtest: history role filters find actual user corrections instead of newer repeated model claims
+ok 35 - history role filters find actual user corrections instead of newer repeated model claims
+  ---
+  duration_ms: 2.640369
+  type: 'test'
+  ...
+# Subtest: notes persist only the latest handoff, bound reads and reject stale revisions without truncation
+ok 36 - notes persist only the latest handoff, bound reads and reject stale revisions without truncation
+  ---
+  duration_ms: 3.160854
+  type: 'test'
+  ...
+# Subtest: history search stays in the current branch, redacts private blocks and preserves public evidence
+ok 37 - history search stays in the current branch, redacts private blocks and preserves public evidence
+  ---
+  duration_ms: 2.742505
+  type: 'test'
+  ...
+# Subtest: notes rollover requires a current handoff, preserves history and excludes topic notes and obsolete versions
+ok 38 - notes rollover requires a current handoff, preserves history and excludes topic notes and obsolete versions
+  ---
+  duration_ms: 2.269592
+  type: 'test'
+  ...
+# Subtest: large mixed Unicode summaries use bounded inputs, short intermediate summaries and a separate final budget
+ok 39 - large mixed Unicode summaries use bounded inputs, short intermediate summaries and a separate final budget
+  ---
+  duration_ms: 18.581072
+  type: 'test'
+  ...
+# Subtest: rolling summaries keep the previous checkpoint outside lossy source chunks and merge it after new code is reduced
+ok 40 - rolling summaries keep the previous checkpoint outside lossy source chunks and merge it after new code is reduced
+  ---
+  duration_ms: 6.540491
+  type: 'test'
+  ...
+# Subtest: changing only a prior checkpoint reuses source chunks without reusing an obsolete merged checkpoint
+ok 41 - changing only a prior checkpoint reuses source chunks without reusing an obsolete merged checkpoint
+  ---
+  duration_ms: 2.91776
+  type: 'test'
+  ...
+# Subtest: rolling checkpoint consolidation runs only under actual output pressure and stays inside request/output budgets
+ok 42 - rolling checkpoint consolidation runs only under actual output pressure and stays inside request/output budgets
+  ---
+  duration_ms: 1.973344
+  type: 'test'
+  ...
+# Subtest: standalone memory extension handles unknown usage, reload and cancelled rollover without a task plugin
+ok 43 - standalone memory extension handles unknown usage, reload and cancelled rollover without a task plugin
+  ---
+  duration_ms: 651.832189
+  type: 'test'
+  ...
+# (node:1262) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: real Pi stops uncooperative read handoff as a local error without claiming task completion
+ok 44 - real Pi stops uncooperative read handoff as a local error without claiming task completion
+  ---
+  duration_ms: 397.081717
+  type: 'test'
+  ...
+# Subtest: real Pi stops uncooperative claim handoff as a local error without claiming task completion
+ok 45 - real Pi stops uncooperative claim handoff as a local error without claiming task completion
+  ---
+  duration_ms: 162.708399
+  type: 'test'
+  ...
+# Subtest: real Pi rolling summary preserves the previous checkpoint literally while the bounded output has room
+ok 46 - real Pi rolling summary preserves the previous checkpoint literally while the bounded output has room
+  ---
+  duration_ms: 174.076745
+  type: 'test'
+  ...
+# Subtest: standalone real Pi automatically prepares five windows and settles only after the full reading task
+ok 47 - standalone real Pi automatically prepares five windows and settles only after the full reading task
+  ---
+  duration_ms: 362.848739
+  type: 'test'
+  ...
+# Subtest: Escape during real Pi handoff stops without changing windows, and an explicit new run repairs it
+ok 48 - Escape during real Pi handoff stops without changing windows, and an explicit new run repairs it
+  ---
+  duration_ms: 168.263261
+  type: 'test'
+  ...
+# Subtest: 429 during real Pi handoff does not fall back, shrink a context budget or spin in a maintenance loop
+ok 49 - 429 during real Pi handoff does not fall back, shrink a context budget or spin in a maintenance loop
+  ---
+  duration_ms: 148.022523
+  type: 'test'
+  ...
+# (node:1274) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: explicit scope survives reload/export and revising it invalidates affected acceptance without breaking legacy goals
+ok 50 - explicit scope survives reload/export and revising it invalidates affected acceptance without breaking legacy goals
+  ---
+  duration_ms: 12.225971
+  type: 'test'
+  ...
+# Subtest: three-level plans register atomically, survive reload and gate phases through ancestors
+ok 51 - three-level plans register atomically, survive reload and gate phases through ancestors
+  ---
+  duration_ms: 6.262147
+  type: 'test'
+  ...
+# Subtest: missing parents, cycles, cross-main dependencies and default fourth levels leave no partial plan
+ok 52 - missing parents, cycles, cross-main dependencies and default fourth levels leave no partial plan
+  ---
+  duration_ms: 3.531117
+  type: 'test'
+  ...
+# Subtest: acceptance checks criterion coverage, real artifacts and exact revisions without repeated reviews
+ok 53 - acceptance checks criterion coverage, real artifacts and exact revisions without repeated reviews
+  ---
+  duration_ms: 6.771151
+  type: 'test'
+  ...
+# Subtest: parent acceptance references children and reopening invalidates only affected acceptances, retaining history
+ok 54 - parent acceptance references children and reopening invalidates only affected acceptances, retaining history
+  ---
+  duration_ms: 7.831064
+  type: 'test'
+  ...
+# Subtest: main-goal switching preserves independent usage and measured activity through reload
+ok 55 - main-goal switching preserves independent usage and measured activity through reload
+  ---
+  duration_ms: 8.065675
+  type: 'test'
+  ...
+# Subtest: planning, selection and editing cannot bypass user, decision, workspace or budget holds
+ok 56 - planning, selection and editing cannot bypass user, decision, workspace or budget holds
+  ---
+  duration_ms: 7.001199
+  type: 'test'
+  ...
+# Subtest: exclusions require a direct user action and remain visible without counting as acceptance
+ok 57 - exclusions require a direct user action and remain visible without counting as acceptance
+  ---
+  duration_ms: 2.947523
+  type: 'test'
+  ...
+# Subtest: tool and task evidence uses runtime receipts and cannot borrow another goal's success
+ok 58 - tool and task evidence uses runtime receipts and cannot borrow another goal's success
+  ---
+  duration_ms: 6.151803
+  type: 'test'
+  ...
+# Subtest: assigned work must bind a ready leaf and blocks switching or revising its prerequisites
+ok 59 - assigned work must bind a ready leaf and blocks switching or revising its prerequisites
+  ---
+  duration_ms: 8.121109
+  type: 'test'
+  ...
+# Subtest: on-demand export is consistent, retains acceptance history and never overwrites a file
+ok 60 - on-demand export is consistent, retains acceptance history and never overwrites a file
+  ---
+  duration_ms: 4.044459
+  type: 'test'
+  ...
+# Subtest: legacy v2 SQLite upgrades in place without losing identity, evidence, holds or counters
+ok 61 - legacy v2 SQLite upgrades in place without losing identity, evidence, holds or counters
+  ---
+  duration_ms: 5.50501
+  type: 'test'
+  ...
+# (node:1281) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: recovery guidance leads large status and prompt views without assuming unknown executions stopped
+ok 62 - recovery guidance leads large status and prompt views without assuming unknown executions stopped
+  ---
+  duration_ms: 18.799852
+  type: 'test'
+  ...
+# Subtest: current recovery instructions expose exact revisions but preserve user, budget and unknown holds
+ok 63 - current recovery instructions expose exact revisions but preserve user, budget and unknown holds
+  ---
+  duration_ms: 4.075644
+  type: 'test'
+  ...
+# Subtest: reconciliation guidance stays bounded while reporting older unknown executions outside the ordinary task view
+ok 64 - reconciliation guidance stays bounded while reporting older unknown executions outside the ordinary task view
+  ---
+  duration_ms: 27.595046
+  type: 'test'
+  ...
+# Subtest: lead process reconciliation is atomic, fenced by epochs and idempotent before an explicit retry
+ok 65 - lead process reconciliation is atomic, fenced by epochs and idempotent before an explicit retry
+  ---
+  duration_ms: 12.885638
+  type: 'test'
+  ...
+# Subtest: lead reconciliation rejects a live execution and cancellation cannot fake a stopped unknown process
+ok 66 - lead reconciliation rejects a live execution and cancellation cannot fake a stopped unknown process
+  ---
+  duration_ms: 4.902467
+  type: 'test'
+  ...
+# Subtest: lead no-progress recovery preserves budgets and cannot override user or decision holds
+ok 67 - lead no-progress recovery preserves budgets and cannot override user or decision holds
+  ---
+  duration_ms: 3.186273
+  type: 'test'
+  ...
+# Subtest: model-requested compaction waits for idle and runs only once without inventing a user pause
+ok 68 - model-requested compaction waits for idle and runs only once without inventing a user pause
+  ---
+  duration_ms: 4.512735
+  type: 'test'
+  ...
+# Subtest: dispatch alone enrolls the mission and completion wakes without Goal or supervisor setup
+ok 69 - dispatch alone enrolls the mission and completion wakes without Goal or supervisor setup
+  ---
+  duration_ms: 7.282364
+  type: 'test'
+  ...
+# Subtest: busy lead leaves results durable and does not build Pi follow-up queues
+ok 70 - busy lead leaves results durable and does not build Pi follow-up queues
+  ---
+  duration_ms: 4.802698
+  type: 'test'
+  ...
+# Subtest: answering an intermediate question neither stops the mission nor changes the report schedule
+ok 71 - answering an intermediate question neither stops the mission nor changes the report schedule
+  ---
+  duration_ms: 5.732676
+  type: 'test'
+  ...
+# Subtest: peer dispatch does not bypass the configured thirty-minute progress interval
+ok 72 - peer dispatch does not bypass the configured thirty-minute progress interval
+  ---
+  duration_ms: 7.978665
+  type: 'test'
+  ...
+# Subtest: routine member progress is coalesced and never wakes the lead by itself
+ok 73 - routine member progress is coalesced and never wakes the lead by itself
+  ---
+  duration_ms: 6.902433
+  type: 'test'
+  ...
+# Subtest: supervisor waits without a live process and resumes its same task for descendant review
+ok 74 - supervisor waits without a live process and resumes its same task for descendant review
+  ---
+  duration_ms: 8.651011
+  type: 'test'
+  ...
+# Subtest: directed communication, ancestor-cycle checks and stale execution tokens reject unauthorized work
+ok 75 - directed communication, ancestor-cycle checks and stale execution tokens reject unauthorized work
+  ---
+  duration_ms: 4.473937
+  type: 'test'
+  ...
+# Subtest: user stop fences late results, retains identity and never resumes through a normal question
+ok 76 - user stop fences late results, retains identity and never resumes through a normal question
+  ---
+  duration_ms: 5.214564
+  type: 'test'
+  ...
+# Subtest: restart records interrupted work and delivers recovery instead of replaying commands
+ok 77 - restart records interrupted work and delivers recovery instead of replaying commands
+  ---
+  duration_ms: 5.134131
+  type: 'test'
+  ...
+# Subtest: failed wakes cool down and quarantine unread results after bounded recovery without pausing the goal
+ok 78 - failed wakes cool down and quarantine unread results after bounded recovery without pausing the goal
+  ---
+  duration_ms: 10.493665
+  type: 'test'
+  ...
+# Subtest: reminder occurrence and outbox commit together; missed intervals do not accumulate old reminders
+ok 79 - reminder occurrence and outbox commit together; missed intervals do not accumulate old reminders
+  ---
+  duration_ms: 3.509561
+  type: 'test'
+  ...
+# Subtest: complete cannot hide outstanding work; owner lock prevents two runtime controllers
+ok 80 - complete cannot hide outstanding work; owner lock prevents two runtime controllers
+  ---
+  duration_ms: 3.976943
+  type: 'test'
+  ...
+# Subtest: explicitly collected results are confirmed only after a successful model response
+ok 81 - explicitly collected results are confirmed only after a successful model response
+  ---
+  duration_ms: 6.367878
+  type: 'test'
+  ...
+# Subtest: user report timing persists across restart and an exhausted old mission cannot poison a new objective
+ok 82 - user report timing persists across restart and an exhausted old mission cannot poison a new objective
+  ---
+  duration_ms: 5.721075
+  type: 'test'
+  ...
+# Subtest: unknown execution cannot be retried until the user reconciles its process state
+ok 83 - unknown execution cannot be retried until the user reconciles its process state
+  ---
+  duration_ms: 5.53162
+  type: 'test'
+  ...
+# Subtest: notes to a running permitted peer are admitted through steering and confirmed on its successful response
+ok 84 - notes to a running permitted peer are admitted through steering and confirmed on its successful response
+  ---
+  duration_ms: 7.295881
+  type: 'test'
+  ...
+# Subtest: a decision needs an explicit resolution after a fresh human answer and never overrides a user pause
+ok 85 - a decision needs an explicit resolution after a fresh human answer and never overrides a user pause
+  ---
+  duration_ms: 2.82202
+  type: 'test'
+  ...
+# Subtest: goal update and stop have explicit lifecycle records
+ok 86 - goal update and stop have explicit lifecycle records
+  ---
+  duration_ms: 2.480299
+  type: 'test'
+  ...
+# Subtest: completed goals remain inspectable while temporary subagents leave the active roster
+ok 87 - completed goals remain inspectable while temporary subagents leave the active roster
+  ---
+  duration_ms: 8.140238
+  type: 'test'
+  ...
+# Subtest: reminders can be revised, paused and deleted without stale deliveries
+ok 88 - reminders can be revised, paused and deleted without stale deliveries
+  ---
+  duration_ms: 2.820883
+  type: 'test'
+  ...
+# Subtest: business-only autonomy policy keeps execution choices with the lead and reserves decisions for business boundaries
+ok 89 - business-only autonomy policy keeps execution choices with the lead and reserves decisions for business boundaries
+  ---
+  duration_ms: 3.460551
+  type: 'test'
+  ...
+# Subtest: a new natural-language human delegation resolves the exact decision without an option letter
+ok 90 - a new natural-language human delegation resolves the exact decision without an option letter
+  ---
+  duration_ms: 2.880057
+  type: 'test'
+  ...
+# (node:1288) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: pure plugin lead timeline reads bounded public pages, follows updates and copies without time metadata
+ok 91 - pure plugin lead timeline reads bounded public pages, follows updates and copies without time metadata
+  ---
+  duration_ms: 72.933619
+  type: 'test'
+  ...
+# Subtest: team shortcut opens live-only main history without taking over the main input or dispatching work
+ok 92 - team shortcut opens live-only main history without taking over the main input or dispatching work
+  ---
+  duration_ms: 4.19044
+  type: 'test'
+  ...
+# Subtest: withdrawn patch installer rejects apply against an isolated fake Pi installation
+ok 93 - withdrawn patch installer rejects apply against an isolated fake Pi installation
+  ---
+  duration_ms: 61.832819
+  type: 'test'
+  ...
+# (node:1306) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: real Pi notes rollover automatically resumes the same conversation and keeps searchable public history
+ok 94 - real Pi notes rollover automatically resumes the same conversation and keeps searchable public history
+  ---
+  duration_ms: 1390.36836
+  type: 'test'
+  ...
+# Subtest: managed Pi members survive three automatic notes windows without an early task completion
+ok 95 - managed Pi members survive three automatic notes windows without an early task completion
+  ---
+  duration_ms: 1597.694881
+  type: 'test'
+  ...
+# Subtest: a managed member that refuses a notes handoff fails instead of returning a successful empty task
+ok 96 - a managed member that refuses a notes handoff fails instead of returning a successful empty task
+  ---
+  duration_ms: 1298.987748
+  type: 'test'
+  ...
+# Subtest: real Pi role labels do not narrow development tools; explicit tool/workspace limits remain effective
+ok 97 - real Pi role labels do not narrow development tools; explicit tool/workspace limits remain effective
+  ---
+  duration_ms: 1862.69114
+  type: 'test'
+  ...
+# Subtest: real Pi members can use configured project tools and scoped goal criteria after reload
+ok 98 - real Pi members can use configured project tools and scoped goal criteria after reload
+  ---
+  duration_ms: 3377.881288
+  type: 'test'
+  ...
+# Subtest: real Pi members load project instructions and can read configured skill resources without broadening file writes
+ok 99 - real Pi members load project instructions and can read configured skill resources without broadening file writes
+  ---
+  duration_ms: 2586.959191
+  type: 'test'
+  ...
+# Subtest: all Pi delegation entrypoints accept independent task deadlines and keep malformed batches atomic
+ok 100 - all Pi delegation entrypoints accept independent task deadlines and keep malformed batches atomic
+  ---
+  duration_ms: 2501.125662
+  type: 'test'
+  ...
+# Subtest: real Pi reload exposes archive export and both tool and command preserve the same live session
+ok 101 - real Pi reload exposes archive export and both tool and command preserve the same live session
+  ---
+  duration_ms: 1644.281473
+  type: 'test'
+  ...
+# Subtest: real Pi keeps an explicit summary route across transient streams, rate limits and reload without a GPT fallback
+ok 102 - real Pi keeps an explicit summary route across transient streams, rate limits and reload without a GPT fallback
+  ---
+  duration_ms: 2285.628811
+  type: 'test'
+  ...
+# Subtest: real Pi recovers custom provider errors and exhausts exactly ten supplemental retries
+ok 103 - real Pi recovers custom provider errors and exhausts exactly ten supplemental retries
+  ---
+  duration_ms: 646.449525
+  type: 'test'
+  ...
+# Subtest: native Pi retry hands an exhausted 502 batch to the same bounded recovery path
+ok 104 - native Pi retry hands an exhausted 502 batch to the same bounded recovery path
+  ---
+  duration_ms: 644.021429
+  type: 'test'
+  ...
+# Subtest: real Pi never reconnects an unchanged request rejected for the screenshot's context overflow
+ok 105 - real Pi never reconnects an unchanged request rejected for the screenshot's context overflow
+  ---
+  duration_ms: 611.518429
+  type: 'test'
+  ...
+# Subtest: aborting a real Pi provider backoff prevents another request
+ok 106 - aborting a real Pi provider backoff prevents another request
+  ---
+  duration_ms: 924.406456
+  type: 'test'
+  ...
+# Subtest: member provider requests inherit the user's recovery policy and keep their session
+ok 107 - member provider requests inherit the user's recovery policy and keep their session
+  ---
+  duration_ms: 1346.915763
+  type: 'test'
+  ...
+# Subtest: real Pi: no Goal/supervisor setup, child performs a read, lead ends and wakes automatically
+ok 108 - real Pi: no Goal/supervisor setup, child performs a read, lead ends and wakes automatically
+  ---
+  duration_ms: 1269.721579
+  type: 'test'
+  ...
+# Subtest: real Pi reactivates newly added Mission Control tools when an old session is reloaded
+ok 109 - real Pi reactivates newly added Mission Control tools when an old session is reloaded
+  ---
+  duration_ms: 1258.642758
+  type: 'test'
+  ...
+# Subtest: real Pi tools: model cannot turn off maintenance, readonly host is rejected, native commands remain registered
+ok 110 - real Pi tools: model cannot turn off maintenance, readonly host is rejected, native commands remain registered
+  ---
+  duration_ms: 566.786424
+  type: 'test'
+  ...
+# Subtest: schedule ignores empty placeholders and resolves a meaningful one-shot selector
+ok 111 - schedule ignores empty placeholders and resolves a meaningful one-shot selector
+  ---
+  duration_ms: 604.547682
+  type: 'test'
+  ...
+# Subtest: real RPC teammate review closes downstream work before the parent delivery
+ok 112 - real RPC teammate review closes downstream work before the parent delivery
+  ---
+  duration_ms: 2549.834449
+  type: 'test'
+  ...
+# Subtest: host member executes commands but its file tools still deny paths outside its workspace
+ok 113 - host member executes commands but its file tools still deny paths outside its workspace
+  ---
+  duration_ms: 2100.622238
+  type: 'test'
+  ...
+# Subtest: cancelling a real host command terminates its managed grandchild process
+ok 114 - cancelling a real host command terminates its managed grandchild process
+  ---
+  duration_ms: 1324.95766
+  type: 'test'
+  ...
+# Subtest: many sidecar changes leave Pi native HTML export and public stream export intact
+ok 115 - many sidecar changes leave Pi native HTML export and public stream export intact
+  ---
+  duration_ms: 629.136199
+  type: 'test'
+  ...
+# Subtest: one-shot print mode joins its worker before returning instead of silently abandoning background work
+ok 116 - one-shot print mode joins its worker before returning instead of silently abandoning background work
+  ---
+  duration_ms: 1325.34033
+  type: 'test'
+  ...
+# Subtest: custom compression failure retains original history without issuing a default fallback request
+ok 117 - custom compression failure retains original history without issuing a default fallback request
+  ---
+  duration_ms: 596.42244
+  type: 'test'
+  ...
+# Subtest: custom chunked compression installs a usable checkpoint through the real Pi lifecycle
+ok 118 - custom chunked compression installs a usable checkpoint through the real Pi lifecycle
+  ---
+  duration_ms: 706.635934
+  type: 'test'
+  ...
+# Subtest: real Pi recovers gateway incomplete.length by subdividing the summary request
+ok 119 - real Pi recovers gateway incomplete.length by subdividing the summary request
+  ---
+  duration_ms: 660.883246
+  type: 'test'
+  ...
+# Subtest: real Pi condenses a completed overlong summary and saves a usable checkpoint
+ok 120 - real Pi condenses a completed overlong summary and saves a usable checkpoint
+  ---
+  duration_ms: 561.222123
+  type: 'test'
+  ...
+# Subtest: subagent chain enforces dependency order and uses distinct persistent sessions
+ok 121 - subagent chain enforces dependency order and uses distinct persistent sessions
+  ---
+  duration_ms: 1749.812949
+  type: 'test'
+  ...
+# Subtest: real model tool validation accepts optional placeholders without enabling a command backend
+ok 122 - real model tool validation accepts optional placeholders without enabling a command backend
+  ---
+  duration_ms: 1186.202892
+  type: 'test'
+  ...
+# Subtest: invalid or ambiguous delegation is rejected before creating any members or tasks
+ok 123 - invalid or ambiguous delegation is rejected before creating any members or tasks
+  ---
+  duration_ms: 581.505476
+  type: 'test'
+  ...
+# Subtest: real Pi dashboard opens live member history and returns without aborting the lead or changing work
+ok 124 - real Pi dashboard opens live member history and returns without aborting the lead or changing work
+  ---
+  duration_ms: 2861.087226
+  type: 'test'
+  ...
+# Subtest: real Pi reload retains member identity and user pause without replaying an interrupted worker
+ok 125 - real Pi reload retains member identity and user pause without replaying an interrupted worker
+  ---
+  duration_ms: 2560.163601
+  type: 'test'
+  ...
+# Subtest: real Pi opens the main public timeline during a live reply without modifying native Pi files
+ok 126 - real Pi opens the main public timeline during a live reply without modifying native Pi files
+  ---
+  duration_ms: 2242.488949
+  type: 'test'
+  ...
+# Subtest: real Pi reload migrates the screenshot's exhausted progress and can accept new approved work
+ok 127 - real Pi reload migrates the screenshot's exhausted progress and can accept new approved work
+  ---
+  duration_ms: 2840.835558
+  type: 'test'
+  ...
+# Subtest: real Pi automatically compacts overflow and schedules one idle recovery without renewing the goal budget
+ok 128 - real Pi automatically compacts overflow and schedules one idle recovery without renewing the goal budget
+  ---
+  duration_ms: 2960.358839
+  type: 'test'
+  ...
+# Subtest: real Pi native retries cannot exceed the shared automatic recovery request cap
+ok 129 - real Pi native retries cannot exceed the shared automatic recovery request cap
+  ---
+  duration_ms: 4446.736094
+  type: 'test'
+  ...
+# Subtest: a real provider-side abort remains a recoverable failure and never becomes a user Escape hold
+ok 130 - a real provider-side abort remains a recoverable failure and never becomes a user Escape hold
+  ---
+  duration_ms: 530.763641
+  type: 'test'
+  ...
+# Subtest: real Pi upgrades an already expired default wall-time hold without erasing prior usage
+ok 131 - real Pi upgrades an already expired default wall-time hold without erasing prior usage
+  ---
+  duration_ms: 1141.83826
+  type: 'test'
+  ...
+# Subtest: real Pi native member selection stays alive with four current members and many retired task identities
+ok 132 - real Pi native member selection stays alive with four current members and many retired task identities
+  ---
+  duration_ms: 679.793369
+  type: 'test'
+  ...
+# Subtest: real Pi provider cooldown does not keep charging the goal activity clock
+ok 133 - real Pi provider cooldown does not keep charging the goal activity clock
+  ---
+  duration_ms: 1722.85806
+  type: 'test'
+  ...
+# Subtest: one host registry directly exposes every plugin module and refreshes schemas after an old-tool reload
+ok 134 - one host registry directly exposes every plugin module and refreshes schemas after an old-tool reload
+  ---
+  duration_ms: 1044.592354
+  type: 'test'
+  ...
+# Subtest: real model tools reconcile the four stale executions then resume no-progress without a user slash command
+ok 135 - real model tools reconcile the four stale executions then resume no-progress without a user slash command
+  ---
+  duration_ms: 1306.74498
+  type: 'test'
+  ...
+# Subtest: the default policy can be applied by a real model tool without turning a pending decision into a human answer
+ok 136 - the default policy can be applied by a real model tool without turning a pending decision into a human answer
+  ---
+  duration_ms: 1191.683927
+  type: 'test'
+  ...
+# Subtest: real Pi model tools enforce staged goals, save native tool evidence and reload the same conversation
+ok 137 - real Pi model tools enforce staged goals, save native tool evidence and reload the same conversation
+  ---
+  duration_ms: 1219.014263
+  type: 'test'
+  ...
+# Subtest: real Pi reload upgrades old flat SQLite and exposes goal tools without a new session
+ok 138 - real Pi reload upgrades old flat SQLite and exposes goal tools without a new session
+  ---
+  duration_ms: 1092.24763
+  type: 'test'
+  ...
+# Subtest: real Pi worker results stay attached to their leaf and do not auto-accept it
+ok 139 - real Pi worker results stay attached to their leaf and do not auto-accept it
+  ---
+  duration_ms: 1292.892862
+  type: 'test'
+  ...
+# Subtest: real Pi depth authorization and multiple main goals survive reload without automatic selection
+ok 140 - real Pi depth authorization and multiple main goals survive reload without automatic selection
+  ---
+  duration_ms: 1059.361668
+  type: 'test'
+  ...
+# Subtest: portable /mnt/c package source discovers both plugin entrypoints from normal Pi settings
+ok 141 - portable /mnt/c package source discovers both plugin entrypoints from normal Pi settings
+  ---
+  duration_ms: 517.729852
+  type: 'test'
+  ...
+# Subtest: large goal definitions and evidence stay readable through bounded model tool pages
+ok 142 - large goal definitions and evidence stay readable through bounded model tool pages
+  ---
+  duration_ms: 542.64311
+  type: 'test'
+  ...
+# Subtest: model-visible settings, public history and export share their session command implementations
+ok 143 - model-visible settings, public history and export share their session command implementations
+  ---
+  duration_ms: 577.072529
+  type: 'test'
+  ...
+# Subtest: a real model compaction request settles before compacting and preserves native cancel semantics
+ok 144 - a real model compaction request settles before compacting and preserves native cancel semantics
+  ---
+  duration_ms: 1643.903809
+  type: 'test'
+  ...
+# Subtest: real Pi decisions reject extension-origin answers and preserve waiting across a status question
+ok 145 - real Pi decisions reject extension-origin answers and preserve waiting across a status question
+  ---
+  duration_ms: 558.802034
+  type: 'test'
+  ...
+# (node:1726) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v2 rename preserves main/member memory, state, permissions and receipt paths under a fresh runtime
+ok 146 - v2 rename preserves main/member memory, state, permissions and receipt paths under a fresh runtime
+  ---
+  duration_ms: 2728.264006
+  type: 'test'
+  ...
+# Subtest: switch changes main file tools while preserving members' original workspace permissions
+ok 147 - switch changes main file tools while preserving members' original workspace permissions
+  ---
+  duration_ms: 1216.135647
+  type: 'test'
+  ...
+# Subtest: a cancelled native switch rolls back rename and leaves the original runtime paused and usable
+ok 148 - a cancelled native switch rolls back rename and leaves the original runtime paused and usable
+  ---
+  duration_ms: 614.732363
+  type: 'test'
+  ...
+# Subtest: workspace grant is exact, revocable, one-use and applied after the model run settles
+ok 149 - workspace grant is exact, revocable, one-use and applied after the model run settles
+  ---
+  duration_ms: 1199.632015
+  type: 'test'
+  ...
+# Subtest: custom session storage inside a renamed project remains discoverable
+ok 150 - custom session storage inside a renamed project remains discoverable
+  ---
+  duration_ms: 1216.744522
+  type: 'test'
+  ...
+# Subtest: invalid rename never overwrites a destination or changes a live workspace
+ok 151 - invalid rename never overwrites a destination or changes a live workspace
+  ---
+  duration_ms: 612.346421
+  type: 'test'
+  ...
+# Subtest: rename stops a running member before moving its workspace and never replays its task
+ok 152 - rename stops a running member before moving its workspace and never replays its task
+  ---
+  duration_ms: 1855.748244
+  type: 'test'
+  ...
+# Subtest: expired workspace grants cannot be used or revived from their old visible messages
+ok 153 - expired workspace grants cannot be used or revived from their old visible messages
+  ---
+  duration_ms: 593.783268
+  type: 'test'
+  ...
+# Subtest: a new persistent conversation can switch workspace before its first model response
+ok 154 - a new persistent conversation can switch workspace before its first model response
+  ---
+  duration_ms: 1228.341067
+  type: 'test'
+  ...
+# Subtest: reconnect defaults are ten retries at a fixed five seconds; invalid settings fail closed
+ok 155 - reconnect defaults are ten retries at a fixed five seconds; invalid settings fail closed
+  ---
+  duration_ms: 1.379259
+  type: 'test'
+  ...
+# Subtest: custom gateway errors receive ten retries without a status-code whitelist
+ok 156 - custom gateway errors receive ten retries without a status-code whitelist
+  ---
+  duration_ms: 575.984342
+  type: 'test'
+  ...
+# Subtest: native 502/429 failures count toward the same consecutive failure budget
+ok 157 - native 502/429 failures count toward the same consecutive failure budget
+  ---
+  duration_ms: 44.060337
+  type: 'test'
+  ...
+# Subtest: abort, shutdown, user stop and pending user input cancel reconnect rather than replay work
+ok 158 - abort, shutdown, user stop and pending user input cancel reconnect rather than replay work
+  ---
+  duration_ms: 189.470482
+  type: 'test'
+  ...
+# Subtest: context overflow and tool failures are not mistaken for a network reconnect
+ok 159 - context overflow and tool failures are not mistaken for a network reconnect
+  ---
+  duration_ms: 40.421073
+  type: 'test'
+  ...
+# Subtest: fixed reconnect delay is cancellable without waiting five seconds
+ok 160 - fixed reconnect delay is cancellable without waiting five seconds
+  ---
+  duration_ms: 0.384859
+  type: 'test'
+  ...
+# (node:1782) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: collecting a result without a model response cannot mark it observed
+ok 161 - collecting a result without a model response cannot mark it observed
+  ---
+  duration_ms: 6.581964
+  type: 'test'
+  ...
+# Subtest: goal revisions fence old decision answers and external event tokens without removing their holds
+ok 162 - goal revisions fence old decision answers and external event tokens without removing their holds
+  ---
+  duration_ms: 5.547501
+  type: 'test'
+  ...
+# Subtest: goal edits rebase the fault revision while preserving its request allowance
+ok 163 - goal edits rebase the fault revision while preserving its request allowance
+  ---
+  duration_ms: 5.934961
+  type: 'test'
+  ...
+# Subtest: answering a business decision cannot renew a configured output budget
+ok 164 - answering a business decision cannot renew a configured output budget
+  ---
+  duration_ms: 2.514808
+  type: 'test'
+  ...
+# Subtest: legacy failed progress is superseded and one recovery wake preserves budgets and unread results
+ok 165 - legacy failed progress is superseded and one recovery wake preserves budgets and unread results
+  ---
+  duration_ms: 5.481661
+  type: 'test'
+  ...
+# Subtest: legacy no-progress and unknown holds are retained on reload
+ok 166 - legacy no-progress and unknown holds are retained on reload
+  ---
+  duration_ms: 3.84124
+  type: 'test'
+  ...
+# Subtest: failed requests and three successful reminders never count as no progress
+ok 167 - failed requests and three successful reminders never count as no progress
+  ---
+  duration_ms: 7.39114
+  type: 'test'
+  ...
+# Subtest: three successful continuation turns with no progress still require review
+ok 168 - three successful continuation turns with no progress still require review
+  ---
+  duration_ms: 5.54686
+  type: 'test'
+  ...
+# Subtest: overflow requests one compaction and resumes once after an idle, successful checkpoint
+ok 169 - overflow requests one compaction and resumes once after an idle, successful checkpoint
+  ---
+  duration_ms: 8.153996
+  type: 'test'
+  ...
+# Subtest: failed compaction retains the fault and does not launch an automatic compaction loop
+ok 170 - failed compaction retains the fault and does not launch an automatic compaction loop
+  ---
+  duration_ms: 7.574403
+  type: 'test'
+  ...
+# Subtest: a repeated compaction checkpoint cannot rearm an already failed recovery probe
+ok 171 - a repeated compaction checkpoint cannot rearm an already failed recovery probe
+  ---
+  duration_ms: 5.955615
+  type: 'test'
+  ...
+# Subtest: native and supplemental request admissions share a durable cap across reload
+ok 172 - native and supplemental request admissions share a durable cap across reload
+  ---
+  duration_ms: 6.903959
+  type: 'test'
+  ...
+# Subtest: cooldown survives a runtime restart and a new notification cannot reset it
+ok 173 - cooldown survives a runtime restart and a new notification cannot reset it
+  ---
+  duration_ms: 6.001196
+  type: 'test'
+  ...
+# Subtest: goal edits and recovery cannot clear user pause, Escape, relocation or budget holds
+ok 174 - goal edits and recovery cannot clear user pause, Escape, relocation or budget holds
+  ---
+  duration_ms: 9.738936
+  type: 'test'
+  ...
+# Subtest: independent reminders can be delivered while a goal budget is exhausted
+ok 175 - independent reminders can be delivered while a goal budget is exhausted
+  ---
+  duration_ms: 2.602923
+  type: 'test'
+  ...
+# Subtest: a runtime fault cannot be converted into a business decision or reset through the recovery tool
+ok 176 - a runtime fault cannot be converted into a business decision or reset through the recovery tool
+  ---
+  duration_ms: 3.205342
+  type: 'test'
+  ...
+# Subtest: business decisions require exact identity and a new quoted human answer
+ok 177 - business decisions require exact identity and a new quoted human answer
+  ---
+  duration_ms: 2.495512
+  type: 'test'
+  ...
+# Subtest: a task-scoped decision leaves unrelated queued work eligible
+ok 178 - a task-scoped decision leaves unrelated queued work eligible
+  ---
+  duration_ms: 19.662396
+  type: 'test'
+  ...
+# Subtest: external waits suppress no-op continuation and reports, then signal once
+ok 179 - external waits suppress no-op continuation and reports, then signal once
+  ---
+  duration_ms: 4.710872
+  type: 'test'
+  ...
+# Subtest: external wait expiry creates a single durable notification even during a user pause
+ok 180 - external wait expiry creates a single durable notification even during a user pause
+  ---
+  duration_ms: 3.472747
+  type: 'test'
+  ...
+# Subtest: old progress is superseded without observing it and newer occurrences coalesce
+ok 181 - old progress is superseded without observing it and newer occurrences coalesce
+  ---
+  duration_ms: 3.852519
+  type: 'test'
+  ...
+# (node:1789) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: workspace continuation copies LF bodies unchanged and rewrites only its new header
+ok 182 - workspace continuation copies LF bodies unchanged and rewrites only its new header
+  ---
+  duration_ms: 63.515848
+  type: 'test'
+  ...
+# Subtest: relocation hold survives restart and ordinary input; overdue reminders resume once without backlog
+ok 183 - relocation hold survives restart and ordinary input; overdue reminders resume once without backlog
+  ---
+  duration_ms: 6.065918
+  type: 'test'
+  ...
+# Subtest: summary retries distinguish rate limits and truncated transports from permanent errors
+ok 184 - summary retries distinguish rate limits and truncated transports from permanent errors
+  ---
+  duration_ms: 2.228059
+  type: 'test'
+  ...
+# Subtest: bounded transient retries share one allowance across summary requests and never accept partial output
+ok 185 - bounded transient retries share one allowance across summary requests and never accept partial output
+  ---
+  duration_ms: 1.476898
+  type: 'test'
+  ...
+# Subtest: a user cancellation immediately aborts summary backoff without another request
+ok 186 - a user cancellation immediately aborts summary backoff without another request
+  ---
+  duration_ms: 0.708778
+  type: 'test'
+  ...
+# Subtest: a server Retry-After longer than the automatic wait cap never causes an early retry
+ok 187 - a server Retry-After longer than the automatic wait cap never causes an early retry
+  ---
+  duration_ms: 0.352258
+  type: 'test'
+  ...
+# Subtest: a hung summary is cancelled by its own deadline and cannot hold the compaction forever
+ok 188 - a hung summary is cancelled by its own deadline and cannot hold the compaction forever
+  ---
+  duration_ms: 30.609515
+  type: 'test'
+  ...
+# Subtest: stream failure resumes cached chunks and retries only within the compaction-wide budget
+ok 189 - stream failure resumes cached chunks and retries only within the compaction-wide budget
+  ---
+  duration_ms: 10.23059
+  type: 'test'
+  ...
+# Subtest: summary input overflow is repaired with bounded subdivision instead of repeating an oversized request
+ok 190 - summary input overflow is repaired with bounded subdivision instead of repeating an oversized request
+  ---
+  duration_ms: 2.628949
+  type: 'test'
+  ...
+# Subtest: persistent transport failure shrinks only the failed block once and reuses completed chunk work
+ok 191 - persistent transport failure shrinks only the failed block once and reuses completed chunk work
+  ---
+  duration_ms: 3.17694
+  type: 'test'
+  ...
+# (node:1812) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: member compaction inherits the parent-scoped member summary model instead of the inference GPT
+ok 192 - member compaction inherits the parent-scoped member summary model instead of the inference GPT
+  ---
+  duration_ms: 645.355771
+  type: 'test'
+  ...
+# Subtest: reload cancels an old summary generation and ignores its late response
+ok 193 - reload cancels an old summary generation and ignores its late response
+  ---
+  duration_ms: 109.848618
+  type: 'test'
+  ...
+# Subtest: member budget overrides retain the configured shared summary route
+ok 194 - member budget overrides retain the configured shared summary route
+  ---
+  duration_ms: 105.173591
+  type: 'test'
+  ...
+# Subtest: unavailable summary models stop compaction rather than falling back to the main model
+ok 195 - unavailable summary models stop compaction rather than falling back to the main model
+  ---
+  duration_ms: 105.808891
+  type: 'test'
+  ...
+# Subtest: a lead-only custom summary cannot silently send a member summary to GPT
+ok 196 - a lead-only custom summary cannot silently send a member summary to GPT
+  ---
+  duration_ms: 96.632132
+  type: 'test'
+  ...
+# Subtest: real Pi member RPC compaction uses the shared independent route and recovers a truncated stream
+ok 197 - real Pi member RPC compaction uses the shared independent route and recovers a truncated stream
+  ---
+  duration_ms: 1376.240766
+  type: 'test'
+  ...
+# (node:1839) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: task deadlines are optional, accept long fixed durations and separate queue limits
+ok 198 - task deadlines are optional, accept long fixed durations and separate queue limits
+  ---
+  duration_ms: 1.049988
+  type: 'test'
+  ...
+# Subtest: an explicit deadline still cancels, while none and multi-day durations do not overflow into an immediate kill
+ok 199 - an explicit deadline still cancels, while none and multi-day durations do not overflow into an immediate kill
+  ---
+  duration_ms: 60.723375
+  type: 'test'
+  ...
+# Subtest: queue time never spends execution time; only an explicit queue timeout expires queued work
+ok 200 - queue time never spends execution time; only an explicit queue timeout expires queued work
+  ---
+  duration_ms: 16.891391
+  type: 'test'
+  ...
+# Subtest: members receive bounded goal context and can page full criteria without editing or accepting goals
+ok 201 - members receive bounded goal context and can page full criteria without editing or accepting goals
+  ---
+  duration_ms: 8.575597
+  type: 'test'
+  ...
+# (node:1846) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: real installed Pi themes render user quotes, emphasis, lists, links and tool blocks without unsupported tokens
+ok 202 - real installed Pi themes render user quotes, emphasis, lists, links and tool blocks without unsupported tokens
+  ---
+  duration_ms: 117.913213
+  type: 'test'
+  ...
+# Subtest: a rendering exception stays inside the workbench and Escape still returns without changing runtime state
+ok 203 - a rendering exception stays inside the workbench and Escape still returns without changing runtime state
+  ---
+  duration_ms: 9.564043
+  type: 'test'
+  ...
+# Subtest: completed missions hide expired progress checks and completed members retain their visible status
+ok 204 - completed missions hide expired progress checks and completed members retain their visible status
+  ---
+  duration_ms: 11.094807
+  type: 'test'
+  ...
+# Subtest: status table separates goal, schedules and members while retaining the input viewport
+ok 205 - status table separates goal, schedules and members while retaining the input viewport
+  ---
+  duration_ms: 39.303172
+  type: 'test'
+  ...
+# Subtest: native panel backgrounds distinguish actions and errors while assistant replies remain unpainted
+ok 206 - native panel backgrounds distinguish actions and errors while assistant replies remain unpainted
+  ---
+  duration_ms: 7.823521
+  type: 'test'
+  ...
+# Subtest: times use the saved local timestamp, include dates across days and never invent missing history
+ok 207 - times use the saved local timestamp, include dates across days and never invent missing history
+  ---
+  duration_ms: 0.675775
+  type: 'test'
+  ...
+# Subtest: public projection retains only timestamp and duration metadata without changing saved entry time
+ok 208 - public projection retains only timestamp and duration metadata without changing saved entry time
+  ---
+  duration_ms: 0.831431
+  type: 'test'
+  ...
+# Subtest: conversation call timing uses saved tool duration instead of model thinking time
+ok 209 - conversation call timing uses saved tool duration instead of model thinking time
+  ---
+  duration_ms: 0.473362
+  type: 'test'
+  ...
+# Subtest: live reply and command start timestamps stay fixed while RPC output grows
+ok 210 - live reply and command start timestamps stay fixed while RPC output grows
+  ---
+  duration_ms: 1.020339
+  type: 'test'
+  ...
+# Subtest: lead live timeline keeps public text and stable times without retaining private model blocks
+ok 211 - lead live timeline keeps public text and stable times without retaining private model blocks
+  ---
+  duration_ms: 0.923236
+  type: 'test'
+  ...
+# Subtest: repeated public messages retain separate saved timestamps in the pure plugin timeline
+ok 212 - repeated public messages retain separate saved timestamps in the pure plugin timeline
+  ---
+  duration_ms: 0.163627
+  type: 'test'
+  ...
+# Subtest: backward LF pages preserve boundaries, filter private blocks and ignore an incomplete tail
+ok 213 - backward LF pages preserve boundaries, filter private blocks and ignore an incomplete tail
+  ---
+  duration_ms: 11.58592
+  type: 'test'
+  ...
+# Subtest: large private/oversized records are scanned in bounded windows and paging makes progress
+ok 214 - large private/oversized records are scanned in bounded windows and paging makes progress
+  ---
+  duration_ms: 38.405621
+  type: 'test'
+  ...
+# Subtest: member history enumeration stays inside its member directory and ignores directories
+ok 215 - member history enumeration stays inside its member directory and ignores directories
+  ---
+  duration_ms: 3.805769
+  type: 'test'
+  ...
+# Subtest: live public projection never exposes reasoning, signatures, embedded dumps or tool secrets
+ok 216 - live public projection never exposes reasoning, signatures, embedded dumps or tool secrets
+  ---
+  duration_ms: 0.81416
+  type: 'test'
+  ...
+# Subtest: Pi RPC snapshot-free text deltas render live while reasoning deltas are never retained
+ok 217 - Pi RPC snapshot-free text deltas render live while reasoning deltas are never retained
+  ---
+  duration_ms: 0.327553
+  type: 'test'
+  ...
+# (node:1875) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: compact goal counts and the detailed keyboard board share the acceptance ledger
+ok 218 - compact goal counts and the detailed keyboard board share the acceptance ledger
+  ---
+  duration_ms: 28.574084
+  type: 'test'
+  ...
+# Subtest: missing or concurrently removed members return a visible panel message instead of rejecting Enter
+ok 219 - missing or concurrently removed members return a visible panel message instead of rejecting Enter
+  ---
+  duration_ms: 7.112888
+  type: 'test'
+  ...
+# Subtest: asynchronous member lookup failures are contained by the real keyboard route
+ok 220 - asynchronous member lookup failures are contained by the real keyboard route
+  ---
+  duration_ms: 6.888609
+  type: 'test'
+  ...
+# Subtest: archived member history remains readable without adding retired identities to the four-member roster
+ok 221 - archived member history remains readable without adding retired identities to the four-member roster
+  ---
+  duration_ms: 4.717782
+  type: 'test'
+  ...
+# Subtest: public widget layout remains bounded at narrow/wide CJK widths and has stable member order
+ok 222 - public widget layout remains bounded at narrow/wide CJK widths and has stable member order
+  ---
+  duration_ms: 15.857528
+  type: 'test'
+  ...
+# Subtest: member viewer supports selection, expansion, paging, follow pause, history and safe return
+ok 223 - member viewer supports selection, expansion, paging, follow pause, history and safe return
+  ---
+  duration_ms: 76.024961
+  type: 'test'
+  ...
+# Subtest: command and edit previews retain full logical arguments when copied
+ok 224 - command and edit previews retain full logical arguments when copied
+  ---
+  duration_ms: 8.497015
+  type: 'test'
+  ...
+# Subtest: member roster has one stable row per active member despite old tasks and removed identities
+ok 225 - member roster has one stable row per active member despite old tasks and removed identities
+  ---
+  duration_ms: 7.466978
+  type: 'test'
+  ...
+# Subtest: member conversation uses semantic markdown blocks and routes message/copy actions explicitly
+ok 226 - member conversation uses semantic markdown blocks and routes message/copy actions explicitly
+  ---
+  duration_ms: 27.86956
+  type: 'test'
+  ...
+# Subtest: large session export reads LF records, drops snapshots and private blocks, and preserves public tool evidence
+ok 227 - large session export reads LF records, drops snapshots and private blocks, and preserves public tool evidence
+  ---
+  duration_ms: 404.888156
+  type: 'test'
+  ...
+# Subtest: chunked summary caches successful work, resumes failures and never sends an oversized prompt
+ok 228 - chunked summary caches successful work, resumes failures and never sends an oversized prompt
+  ---
+  duration_ms: 8.597444
+  type: 'test'
+  ...
+# Subtest: length-truncated or empty summaries cannot replace history
+ok 229 - length-truncated or empty summaries cannot replace history
+  ---
+  duration_ms: 1.297476
+  type: 'test'
+  ...
+# Subtest: summary budgets leave reasoning room and respect an explicit output cap
+ok 230 - summary budgets leave reasoning room and respect an explicit output cap
+  ---
+  duration_ms: 0.774726
+  type: 'test'
+  ...
+# Subtest: reasoning-only truncation permits one larger default request but honors explicit caps
+ok 231 - reasoning-only truncation permits one larger default request but honors explicit caps
+  ---
+  duration_ms: 0.351948
+  type: 'test'
+  ...
+# Subtest: a complete overlong summary is condensed rather than discarded or sliced
+ok 232 - a complete overlong summary is condensed rather than discarded or sliced
+  ---
+  duration_ms: 2.193306
+  type: 'test'
+  ...
+# Subtest: a reasoning-only completion is retried for visible text with a bounded limit
+ok 233 - a reasoning-only completion is retried for visible text with a bounded limit
+  ---
+  duration_ms: 3.745293
+  type: 'test'
+  ...
+# Subtest: truncated chunks are subdivided and merged without persisting incomplete output
+ok 234 - truncated chunks are subdivided and merged without persisting incomplete output
+  ---
+  duration_ms: 7.843019
+  type: 'test'
+  ...
+# Subtest: permanent truncation is bounded and other provider errors do not trigger subdivision
+ok 235 - permanent truncation is bounded and other provider errors do not trigger subdivision
+  ---
+  duration_ms: 2.1218
+  type: 'test'
+  ...
+# Subtest: search sends only the query and returns explicit provider and source text
+ok 236 - search sends only the query and returns explicit provider and source text
+  ---
+  duration_ms: 2.846653
+  type: 'test'
+  ...
+# Subtest: network guard rejects private/mapped addresses and worker environments do not inherit arbitrary secrets
+ok 237 - network guard rejects private/mapped addresses and worker environments do not inherit arbitrary secrets
+  ---
+  duration_ms: 3.532959
+  type: 'test'
+  ...
+# Subtest: worker resource discovery canonicalizes a configured agent alias without relaxing ordinary path guards
+ok 238 - worker resource discovery canonicalizes a configured agent alias without relaxing ordinary path guards
+  ---
+  duration_ms: 0.457967
+  type: 'test'
+  ...
+# Subtest: web fetch rechecks redirects and rejects private destinations before connecting
+ok 239 - web fetch rechecks redirects and rejects private destinations before connecting
+  ---
+  duration_ms: 1.308485
+  type: 'test'
+  ...
+# Subtest: search handles MCP event-stream framing before data records
+ok 240 - search handles MCP event-stream framing before data records
+  ---
+  duration_ms: 0.382872
+  type: 'test'
+  ...
+1..240
+# tests 240
+# suites 0
+# pass 236
+# fail 0
+# cancelled 0
+# skipped 4
+# todo 0
+# duration_ms 102185.361051

@@ -69,6 +69,7 @@ def main():
     environment = {key: value for key, value in os.environ.items() if not any(secret in key.upper() for secret in ["API_KEY", "AUTH_TOKEN", "ACCESS_TOKEN"])}
     environment.update(PI_CODING_AGENT_DIR=str(agent), PI_OFFLINE="1", TERM="xterm-256color", COLUMNS="140", LINES="42")
     process = subprocess.Popen([shutil.which("pi"), "--offline", "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates",
+        "--tools", "*",
         "-e", str(fixture), "--provider", "mission-fixture", "--model", "model", "--thinking", "off", *arguments],
         cwd=workspace, env=environment, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
     os.close(slave)
@@ -188,6 +189,11 @@ def main():
 
         line("/context mode notes")
         wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)], "notes mode selected in the existing Pi conversation")
+        def local_budget():
+            return [json.loads(row[0]).get("inputLimitTokens") for row in memory_rows("SELECT value FROM settings WHERE key LIKE 'context-budget:%'")]
+
+        line("/context budget 40000")
+        wait(lambda: 40000 in local_budget(), "model-specific conservative input budget selected through the TUI command")
         note_marker = "resume-decoder-" + uuid.uuid4().hex[:8]
         tool("context_note", {"action": "write", "name": "index", "text": "Dedicated context-memory regression; exact continuation in handoff."})
         wait(lambda: bool(memory_rows("SELECT name FROM notes WHERE name='index'")), "short memory index saved")
@@ -198,12 +204,20 @@ def main():
         wait(lambda: len(compactions()) > before_windows, "notes rollover installed a new context without a summary-model request")
         assert note_marker in compactions()[-1]["summary"]
         assert compactions()[-1].get("details", {}).get("contextMode") == "notes"
+        tool("context_note", {"action": "write", "name": "handoff", "text": note_marker + ": latest tool-boundary handoff; continue decoder.py line 173; unaccepted."})
+        before_windows = len(compactions())
+        tool("context_rollover", {})
+        wait(lambda: len(compactions()) > before_windows and compactions()[-1].get("details", {}).get("boundary"), "model tool rollover committed at the current boundary and continued in the same Pi process")
         marker = len(visible)
         line("/reload")
         wait(lambda: "Reloaded keybindings" in visible[marker:], "notes context survived literal /reload in the same Pi process")
         assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)]
+        assert 40000 in local_budget()
+        checks.append("reload preserved the model-specific input budget")
         tool("context_history", {"action": "search", "query": note_marker})
         wait(lambda: bool(memory_rows("SELECT id FROM history WHERE instr(text,?)>0", (note_marker,))), "earlier public history remains searchable after rollover and reload")
+        line("/context budget auto")
+        wait(lambda: 40000 not in local_budget(), "explicit input override reset without changing Pi model settings")
         line("/context mode summary")
         wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)], "same conversation switched back to summary mode")
         assert len(list(sessions.glob("*_" + config["id"] + ".jsonl"))) == 1

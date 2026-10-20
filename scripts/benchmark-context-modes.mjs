@@ -209,6 +209,11 @@ function score(text) {
   };
 }
 const phase = args.phase ?? "all";
+if (phase === "reading" && report.readingComparison) {
+  (report.readingAttempts ??= []).push(report.readingComparison);
+  delete report.readingComparison;
+  save();
+}
 for (const round of [report.summary ?? [], ...(report.summaryAttempts ?? [])])
   for (const result of round)
     if (result.answer) result.score = score(result.answer);
@@ -302,7 +307,7 @@ if (["all", "summary"].includes(phase) && !report.summary) {
       report.summary.push({
         inputTokens,
         budgets,
-        success: true,
+        success: score(answer).passed === score(answer).total,
         elapsedMs: Date.now() - started,
         requests: report.requests.length - before,
         summaryChars: summary.length,
@@ -491,7 +496,7 @@ if (["all", "notes"].includes(phase) && !report.notes) {
     append(user(questions));
     const answer = await run("notes-recall");
     report.notes = {
-      success: rollovers >= 4,
+      success: rollovers >= 4 && score(answer).passed === score(answer).total,
       elapsedMs: Date.now() - started,
       requests: report.requests.length - before,
       rollovers,
@@ -532,7 +537,8 @@ if (
   const entries = [],
     events = [];
   let window = [],
-    checkpoints = 0;
+    checkpoints = 0,
+    previousCheckpoint;
   const append = (message) => {
     const entry = { id: randomUUID(), type: "message", message };
     entries.push(entry);
@@ -612,15 +618,18 @@ if (
       );
       await run(`reading-work-${i}`);
       if (i % 2 === 1) {
-        const source = window.map(
-          (message, j) =>
-            `${message.role}: ${historyText({ id: String(j), type: "message", message }) ?? ""}\n\n`,
-        );
+        const source = window
+          .filter((_message, index) => !previousCheckpoint || index !== 0)
+          .map(
+            (message, j) =>
+              `${message.role}: ${historyText({ id: String(j), type: "message", message }) ?? ""}\n\n`,
+          );
         const summary = await summarizeChunks(source, {
           ...budgets,
           model: report.model,
           directory: path.join(output, "reading-summary-cache"),
           cacheIdentity: "low",
+          previousSummary: previousCheckpoint,
           requestTimeoutMs: 300000,
           retryBudget: { remaining: 1, used: 0 },
           complete: (prompt, signal, options) =>
@@ -630,6 +639,7 @@ if (
               { signal, maxTokens: budgets.maxTokens },
             ),
         });
+        previousCheckpoint = summary;
         window = [
           user(
             "Working checkpoint from earlier batches; newer user corrections take precedence:\n" +
@@ -643,7 +653,7 @@ if (
     append(user(questions));
     const answer = await run("reading-recall");
     report.readingComparison = {
-      success: true,
+      success: score(answer).passed === score(answer).total,
       elapsedMs: Date.now() - started,
       requests: report.requests.length - before,
       checkpoints,
@@ -798,6 +808,7 @@ console.log(
       capacity: report.capacity,
       summary: report.summary,
       notes: report.notes,
+      readingComparison: report.readingComparison,
     },
     null,
     2,

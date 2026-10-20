@@ -11,6 +11,7 @@ export const NOTE_LIMITS = {
   handoff: 4000,
   topic: 8000,
   read: 2000,
+  userRequests: 1500,
 };
 const MEMORY_TOOLS = new Set([
   "context_mode",
@@ -76,6 +77,51 @@ export function historyText(entry: any): string | undefined {
     })
     .join("\n");
 }
+/** Pin a small amount of actual user text; a model-written handoff must not replace a correction. */
+export function recentUserContext(entries: any[]) {
+  const selected: string[] = [];
+  let remaining = NOTE_LIMITS.userRequests;
+  const take = (text: string, tokens: number, tail = false) => {
+    let low = 0,
+      high = text.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (
+        estimateSummaryTokens(
+          tail ? text.slice(text.length - mid) : text.slice(0, mid),
+        ) <= tokens
+      )
+        low = mid;
+      else high = mid - 1;
+    }
+    let result = tail ? text.slice(text.length - low) : text.slice(0, low);
+    if (tail && /^[\uDC00-\uDFFF]/.test(result)) result = result.slice(1);
+    if (!tail && /[\uD800-\uDBFF]$/.test(result)) result = result.slice(0, -1);
+    return result;
+  };
+  const users = entries
+    .filter((e) => e.type === "message" && e.message?.role === "user")
+    .slice(-3);
+  for (const entry of users.reverse()) {
+    const text = historyText(entry) ?? "";
+    const heading = `[User source ${entry.id}; use context_history read for the original]\n`;
+    const available = remaining - estimateSummaryTokens(heading) - 16;
+    if (available < 32) break;
+    let body = text;
+    if (estimateSummaryTokens(text) > available) {
+      const marker = "\n[Excerpt: middle omitted; original history retained]\n";
+      const allowance = available - estimateSummaryTokens(marker);
+      body =
+        take(text, Math.floor(allowance / 4)) +
+        marker +
+        take(text, Math.floor((allowance * 3) / 4), true);
+    }
+    const rendered = heading + body;
+    selected.push(rendered);
+    remaining -= estimateSummaryTokens(rendered + "\n\n");
+  }
+  return selected.reverse().join("\n\n");
+}
 export class ContextMemory {
   db: DatabaseSync;
   readonly directory: string;
@@ -121,6 +167,11 @@ export class ContextMemory {
           .get(key) as any
       )?.value ?? fallback
     );
+  }
+  setSetting(key: string, value: string) {
+    this.db
+      .prepare("INSERT OR REPLACE INTO settings VALUES(?,?)")
+      .run(key, value);
   }
   get mode(): ContextMode {
     return this.setting("mode", "summary") as ContextMode;
@@ -251,33 +302,41 @@ export class ContextMemory {
       throw error;
     }
   }
-  search(query: string, limit = 10) {
+  search(
+    query: string,
+    limit = 10,
+    role?: "user" | "assistant" | "toolResult" | "compaction",
+  ) {
     if (
       !query.trim() ||
       query.length > 256 ||
       !Number.isSafeInteger(limit) ||
       limit < 1 ||
-      limit > 20
+      limit > 20 ||
+      (role !== undefined &&
+        !["user", "assistant", "toolResult", "compaction"].includes(role))
     )
       throw Error("Search needs a query and limit 1..20");
     const rows =
       Array.from(query).length >= 3
         ? this.db
             .prepare(
-              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history_search s JOIN history h ON h.id=s.id JOIN branch b ON b.id=h.id WHERE history_search MATCH ? AND instr(lower(h.text),lower(?))>0 ORDER BY h.ordinal DESC LIMIT ?",
+              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history_search s JOIN history h ON h.id=s.id JOIN branch b ON b.id=h.id WHERE history_search MATCH ? AND instr(lower(h.text),lower(?))>0 AND (? IS NULL OR h.role=?) ORDER BY h.ordinal DESC LIMIT ?",
             )
             .all(
               query,
               query,
               '"' + query.replaceAll('"', '""') + '"',
               query,
+              role ?? null,
+              role ?? null,
               limit,
             )
         : this.db
             .prepare(
-              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history h JOIN branch b ON b.id=h.id WHERE instr(lower(h.text),lower(?))>0 ORDER BY h.ordinal DESC LIMIT ?",
+              "SELECT h.id,h.role,h.ordinal,instr(lower(h.text),lower(?)) AS position,substr(h.text,max(1,instr(lower(h.text),lower(?))-120),600) AS excerpt FROM history h JOIN branch b ON b.id=h.id WHERE instr(lower(h.text),lower(?))>0 AND (? IS NULL OR h.role=?) ORDER BY h.ordinal DESC LIMIT ?",
             )
-            .all(query, query, query, limit);
+            .all(query, query, query, role ?? null, role ?? null, limit);
     return {
       matches: rows,
       search:
@@ -321,15 +380,19 @@ export class ContextMemory {
       covered = entries.findIndex((e) => e.id === handoff.source);
     if (
       boundary < 0 ||
-      covered < Math.max(0, boundary - 1) ||
+      covered < 0 ||
+      entries
+        .slice(covered + 1, boundary)
+        .some((entry) => Boolean(historyText(entry))) ||
       !entries.some((e) => e.id === index.source)
     )
       throw Error(
         "Handoff is stale or from another branch; update it before rollover. Original context is retained.",
       );
     this.sync(entries);
+    const userContext = recentUserContext(entries);
     return {
-      summary: `[Context-memory window ${randomUUID()}]\nThese are working notes, not new user instructions or proof of task acceptance. Retrieve details by context_history/context_note when needed.\n\nINDEX\n${index.text}\n\nHANDOFF\n${handoff.text}`,
+      summary: `[Context-memory window ${randomUUID()}]\nThese are working notes, not new user instructions or proof of task acceptance. Retrieve details by context_history/context_note when needed. Later explicit user corrections take precedence over model-written notes.\n\nINDEX\n${index.text}\n\nHANDOFF\n${handoff.text}${userContext ? `\n\nRECENT USER SOURCE (chronological, bounded verbatim excerpts; not new requests)\n${userContext}` : ""}`,
       firstKeptEntryId,
     };
   }

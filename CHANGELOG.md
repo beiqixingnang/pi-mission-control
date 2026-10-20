@@ -4,6 +4,12 @@
 - Separate summary input, intermediate and final budgets; retain explicit legacy character limits, completed chunk caches, failure recovery and strict summary routing. Preserve corrected identifiers and continuation details in summary prompts.
 - Require a complete goal inventory before execution; discuss execution-time scope changes with the user, reserving rolling planning for approved exploratory work with unclear requirements.
 - Extend Windows/WSL regression coverage and same-process TUI reload checks. Add an opt-in synthetic live-model benchmark; this candidate is not installed automatically.
+- Refresh notes at Pi turn boundaries so managed members survive multiple windows before task settlement. Use native cut points and ignore mechanical memory-save receipts when checking handoff coverage.
+- Add per-route conservative notes input budgets, bounded automatic handoff preparation and context-rejection learning. Preserve repair allowances across reload; do not treat 429 as a context limit or silently change summary routes.
+- Exercise continuous standalone/member windows, cancellation and rate limits with real Pi; add an opt-in WSL 6luna test using native file reads in the dedicated test conversation.
+- Preserve bounded literal recent-user excerpts across notes windows and support user-only history lookup, so explicit corrections remain available when a working note is wrong. Report exhausted preparation as a local failure to RPC hosts.
+- Preserve user-required per-unit identifiers in summary inventories. Live benchmark success now requires every configured recall check, rather than merely finishing its API workflow.
+- Fix rolling-summary forgetting: keep the previous checkpoint outside new source chunks, preserve it literally while the output budget permits, and consolidate only under actual size pressure. Verify successive native Pi compactions, cache reuse across checkpoint revisions, cancellation and bounded consolidation; replay live cached checkpoints without network access.
 
 # 2.3.1 — canonical skill paths on Windows runners (2026-10-19)
 

@@ -199,6 +199,77 @@ test(
 );
 
 test(
+  "managed Pi members survive three automatic notes windows without an early task completion",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      const file = path.join(h.cwd, "cycle-decoder.ts");
+      await fs.writeFile(
+        file,
+        "export const readingPosition = 173; // synthetic review\n",
+      );
+      const accepted = await h.tool("subagent", {
+        task:
+          "V2_TEST:" +
+          JSON.stringify({ op: "notes-cycle", windows: 3, auto: true, file }),
+        timeoutPolicy: "none",
+      });
+      const id = JSON.parse(accepted.content[0].text).accepted[0].taskId;
+      await until(async () =>
+        ["completed", "failed"].includes(
+          (await h.snapshot()).tasks.find((t) => t.id === id)?.state,
+        ),
+      );
+      const task = (await h.snapshot()).tasks.find((t) => t.id === id);
+      assert.equal(task.state, "completed", task.error);
+      const result = JSON.parse(
+        (await h.tool("team_collect", { taskId: id })).content[0].text,
+      )[0].result;
+      assert.match(result, /NOTES_CYCLES_COMPLETE/);
+      const messages = (await fs.readFile(task.sessionFile, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const windows = messages.filter(
+        (e) => e.type === "compaction" && e.details?.contextMode === "notes",
+      );
+      assert.equal(windows.length, 3);
+      assert.ok(windows.every((e) => e.details.boundary === true));
+    }),
+);
+
+test(
+  "a managed member that refuses a notes handoff fails instead of returning a successful empty task",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      const file = path.join(h.cwd, "uncooperative-decoder.ts");
+      await fs.writeFile(file, "export const position = 173;\n");
+      const accepted = await h.tool("subagent", {
+        task:
+          "V2_TEST:" +
+          JSON.stringify({
+            op: "notes-cycle",
+            windows: 1,
+            auto: true,
+            file,
+            ignorePreparation: "claim",
+          }),
+      });
+      const id = JSON.parse(accepted.content[0].text).accepted[0].taskId;
+      await until(async () =>
+        ["completed", "failed"].includes(
+          (await h.snapshot()).tasks.find((t) => t.id === id)?.state,
+        ),
+      );
+      const task = (await h.snapshot()).tasks.find((t) => t.id === id);
+      assert.equal(task.state, "failed");
+      assert.match(task.error, /Context note preparation allowance exhausted/);
+      assert.equal(task.processState, "stopped");
+    }),
+);
+
+test(
   "real Pi role labels do not narrow development tools; explicit tool/workspace limits remain effective",
   { timeout: 30000 },
   () =>

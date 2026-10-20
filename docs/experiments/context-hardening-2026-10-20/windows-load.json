@@ -1,0 +1,86 @@
+{
+  "name": "pi-mission-control",
+  "version": "2.3.1",
+  "host": "C:\\Users\\lishuo\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent",
+  "node": "v24.16.0",
+  "platform": "win32",
+  "errors": [],
+  "resources": [
+    {
+      "file": "extensions\\mission-control\\index.ts",
+      "tools": [
+        "team_spawn",
+        "team_configure",
+        "team_disband",
+        "team_send",
+        "team_broadcast",
+        "team_list",
+        "team_tree",
+        "team_collect",
+        "team_cancel",
+        "team_resume",
+        "team_message",
+        "subagent",
+        "mission_wait",
+        "goal_wait",
+        "mission_status",
+        "goal_status",
+        "goal_start",
+        "goal_plan",
+        "goal_tree",
+        "goal_edit",
+        "goal_focus",
+        "goal_accept",
+        "goal_activate",
+        "goal_export",
+        "goal_update",
+        "goal_stop",
+        "mission_complete",
+        "goal_finish",
+        "mission_decision",
+        "mission_policy",
+        "mission_recover",
+        "mission_reconcile",
+        "mission_control",
+        "mission_report",
+        "mission_compact",
+        "mission_export",
+        "mission_history",
+        "mission_capabilities",
+        "mission_wait_external",
+        "mission_signal",
+        "lifecycle_history",
+        "supervisor_control",
+        "schedule",
+        "web_search",
+        "web_fetch",
+        "reconnect_config",
+        "project_status",
+        "project_resolve",
+        "project_apply",
+        "project_recover"
+      ],
+      "commands": [
+        "mission",
+        "agents",
+        "reconnect",
+        "project",
+        "stop"
+      ]
+    },
+    {
+      "file": "extensions\\mission-control\\compaction.ts",
+      "tools": [
+        "context_mode",
+        "context_note",
+        "context_history",
+        "context_rollover",
+        "compaction_model"
+      ],
+      "commands": [
+        "context",
+        "compaction-model"
+      ]
+    }
+  ]
+}

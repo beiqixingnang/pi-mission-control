@@ -1,0 +1,241 @@
+[
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "audit ticket corrected goal ID revision next file line production conversation do not touch eight audit tickets"
+    },
+    "result": {
+      "matches": [],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-1"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "5c82ee6d-8990-43bf-9c7e-6ae29f0d7ef6",
+          "role": "assistant",
+          "ordinal": 3,
+          "position": 38,
+          "excerpt": "Batch 1 reviewed under audit ticket `AUDIT-1-35dde772` (range 1–90). All 44 supplied decoder modules accept `index === values.length` in the `values[index]` fast path, returning `undefined` instead of the fallback result.\n\nNo audit has been accepted. Ready for the next batch."
+        },
+        {
+          "id": "969b9bc2-df26-4e74-a689-80ab19011c50",
+          "role": "user",
+          "ordinal": 2,
+          "position": 205,
+          "excerpt": "tions, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 1; audit ticket AUDIT-1-35dde772; findings are not accepted yet.\n// src/stage_1/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-1-35dde772\nexport function decode_1_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 1) return values[index];\n  let result = 256;\n  if (mode === 60276) result = (result + 835) ^ ((index >>> 22) & 65); // branch 1_1_0\n  if (mode === 23528) result = (result + "
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "Batch 2 audit ticket AUDIT-2"
+    },
+    "result": {
+      "matches": [],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-2-"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "2fc9d94c-e800-48c3-9f83-ea281e91af1e",
+          "role": "assistant",
+          "ordinal": 5,
+          "position": 25,
+          "excerpt": "Batch 2 reviewed under `AUDIT-2-7c9220c2`: all 44 supplied modules, `src/stage_2/decoder_0.ts` through `decoder_43.ts` (reviewed range 1–90), have the boundary bug. Their fast path uses `index <= values.length`, so `index === values.length` returns `undefined` instead of the fallback result.\n\nNo audit has been accepted. Ready for the next batch."
+        },
+        {
+          "id": "77bb6a25-f2d2-4d5c-be54-a0efaa329f5d",
+          "role": "user",
+          "ordinal": 4,
+          "position": 205,
+          "excerpt": "tions, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 2; audit ticket AUDIT-2-7c9220c2; findings are not accepted yet.\n// src/stage_2/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-2-7c9220c2\nexport function decode_2_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 0) return values[index];\n  let result = 240;\n  if (mode === 33092) result = (result + 647) ^ ((index >>> 11) & 82); // branch 2_1_0\n  if (mode === 59064) result = (result + "
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-3-"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "7f756e4f-cc8c-4e7a-a786-857a30f5106c",
+          "role": "assistant",
+          "ordinal": 7,
+          "position": 25,
+          "excerpt": "Batch 3 reviewed under `AUDIT-3-20e90e12`: all 44 supplied modules, `src/stage_3/decoder_0.ts` through `decoder_43.ts` (reviewed range 1–90), have the boundary bug. Their fast path uses `index <= values.length`, so `index === values.length` returns `undefined` instead of the fallback result.\n\nNo audit has been accepted. Ready for the next batch."
+        },
+        {
+          "id": "02c45bc4-4d3f-424b-a56a-19a3ef48be12",
+          "role": "user",
+          "ordinal": 6,
+          "position": 205,
+          "excerpt": "tions, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 3; audit ticket AUDIT-3-20e90e12; findings are not accepted yet.\n// src/stage_3/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-3-20e90e12\nexport function decode_3_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 0) return values[index];\n  let result = 220;\n  if (mode === 60180) result = (result + 481) ^ ((index >>> 24) & 91); // branch 3_1_0\n  if (mode === 34184) result = (result + "
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-4-"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "83fcc743-29fb-4598-a7a7-261ab1cba902",
+          "role": "assistant",
+          "ordinal": 9,
+          "position": 25,
+          "excerpt": "Batch 4 reviewed under `AUDIT-4-49e7af62`, revision 1 of goal `e2dbb408-9ea9-469b-9832-b1a6b0e69339`. All 44 supplied modules (`decoder_0.ts` through `decoder_43.ts`, reviewed range 1–90) contain the boundary bug: `index <= values.length` allows `index === values.length`, returning `undefined` instead of the fallback.\n\nNo audit has been accepted. Ready for the next batch."
+        },
+        {
+          "id": "4a7fbdb6-1e5b-43eb-a802-d92f1d092ccd",
+          "role": "user",
+          "ordinal": 8,
+          "position": 205,
+          "excerpt": "tions, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 4; audit ticket AUDIT-4-49e7af62; findings are not accepted yet.\n// src/stage_4/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-4-49e7af62\nexport function decode_4_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 1) return values[index];\n  let result = 16;\n  if (mode === 10468) result = (result + 385) ^ ((index >>> 30) & 1); // branch 4_1_0\n  if (mode === 14424) result = (result + 78"
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-5-"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "1f70284a-17c8-4140-bc0e-f14c10bce585",
+          "role": "assistant",
+          "ordinal": 11,
+          "position": 25,
+          "excerpt": "Batch 5 reviewed under `AUDIT-5-45d304b2`: all 44 supplied modules (`src/stage_5/decoder_0.ts` through `decoder_43.ts`, reviewed range 1–90) contain the boundary bug. Their `index <= values.length` fast path allows `index === values.length` and returns `undefined` instead of the fallback.\n\nGoal identifier correction retained: `e2dbb408-9ea9-469b-9832-b1a6b0e69339`, revision 1. No audit has been accepted. Ready for the next batch."
+        },
+        {
+          "id": "883c5d75-a4fd-491c-99a0-1b6e017d5488",
+          "role": "user",
+          "ordinal": 10,
+          "position": 205,
+          "excerpt": "tions, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 5; audit ticket AUDIT-5-45d304b2; findings are not accepted yet.\n// src/stage_5/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-5-45d304b2\nexport function decode_5_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 4) return values[index];\n  let result = 84;\n  if (mode === 15028) result = (result + 540) ^ ((index >>> 19) & 107); // branch 5_1_0\n  if (mode === 65320) result = (result + "
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-6-"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "b780288b-9306-4b6e-abc5-a280ffb05278",
+          "role": "assistant",
+          "ordinal": 13,
+          "position": 129,
+          "excerpt": "review is complete for all 44 modules, `src/stage_6/decoder_0.ts` through `decoder_43.ts` (reviewed range 1–90), under `AUDIT-6-da300e02`. Every decoder uses `index <= values.length` before returning `values[index]`, so `index === values.length` can return `undefined` instead of the fallback.\n\nFinding is unaccepted; no edits or tests are recorded. Ready for the next batch."
+        },
+        {
+          "id": "c007f43a-1b9f-4e22-97a5-da7ffc23b560",
+          "role": "user",
+          "ordinal": 12,
+          "position": 205,
+          "excerpt": "tions, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 6; audit ticket AUDIT-6-da300e02; findings are not accepted yet.\n// src/stage_6/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-6-da300e02\nexport function decode_6_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 3) return values[index];\n  let result = 248;\n  if (mode === 8324) result = (result + 515) ^ ((index >>> 15) & 84); // branch 6_1_0\n  if (mode === 55800) result = (result + 7"
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "search",
+      "id": "",
+      "offset": 0,
+      "query": "AUDIT-7-"
+    },
+    "result": {
+      "matches": [
+        {
+          "id": "e44dfd93-c5c5-4fa4-bfc3-2928896f0d43",
+          "role": "assistant",
+          "ordinal": 15,
+          "position": 138,
+          "excerpt": " complete for all 44 supplied modules, `src/stage_7/decoder_0.ts` through `decoder_43.ts` (reviewed range 1–90), under `AUDIT-7-93c3cb52`. Each decoder uses `index <= values.length` before returning `values[index]`, allowing `index === values.length` to return `undefined` instead of the fallback.\n\nFinding remains unaccepted; no tests were run. I’ll honor the stated constraint not to reload or stop the production hardware Pi. Ready for the next batch."
+        },
+        {
+          "id": "192f069d-147c-4f75-bdb3-5333e3d35a59",
+          "role": "user",
+          "ordinal": 14,
+          "position": 205,
+          "excerpt": "tions, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 7; audit ticket AUDIT-7-93c3cb52; findings are not accepted yet.\n// src/stage_7/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-7-93c3cb52\nexport function decode_7_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 1) return values[index];\n  let result = 176;\n  if (mode === 55892) result = (result + 145) ^ ((index >>> 30) & 26); // branch 7_1_0\n  if (mode === 51400) result = (result + "
+        }
+      ],
+      "search": "literal text in this branch's public history; position is 1-based Unicode code points"
+    },
+    "isError": false
+  },
+  {
+    "args": {
+      "action": "read",
+      "id": "192f069d-147c-4f75-bdb3-5333e3d35a59",
+      "offset": 0,
+      "query": "production conversation exact constraint continuation line stage_7 decoder_7 173"
+    },
+    "result": {
+      "id": "192f069d-147c-4f75-bdb3-5333e3d35a59",
+      "role": "user",
+      "total": 300229,
+      "text": "User's review objective: inspect every listed module. Preserve audit tickets, corrections, exact continuation and unverified status in memory. This is synthetic code-review history.\nBatch 7; audit ticket AUDIT-7-93c3cb52; findings are not accepted yet.\n// src/stage_7/decoder_0.ts; reviewed range 1..90; audit ticket AUDIT-7-93c3cb52\nexport function decode_7_1(values: number[], index: number, mode: number) {\n  // Check: index === values.length is not a valid element.\n  if (index <= values.length && mode === 1) return values[index];\n  let result = 176;\n  if (mode === 55892) result = (result + 145) ^ ((index >>> 30) & 26); // branch 7_1_0\n  if (mode === 51400) result = (result + 678) ^ ((index >>> 5) & 211); // branch 7_1_1\n  if (mode === 33916) result = (result + 353) ^ ((index >>> 6) & 184); // branch 7_1_2\n  if (mode === 16752) result = (result + 762) ^ ((index >>> 18) & 134); // branch 7_1_3\n  if (mode === 29604) result = (result + 88) ^ ((index >>> 20) & 138); // branch 7_1_4\n  if (mode === 53016) result = (result + 819) ^ ((index >>> 16) & 91); // branch 7_1_5\n  if (mode === 18380) result = (result + 475) ^ ((index >>> 24) & 215); // branch 7_1_6\n  if (mode === 4544) result = (result + 735) ^ ((index >>> 18) & 56); // branch 7_1_7\n  if (mode === 41204) result = (result + 312) ^ ((index >>> 2) & 60); // branch 7_1_8\n  if (mode === 43368) result = (result + 65) ^ ((index >>> 20) & 169); // branch 7_1_9\n  if (mode === 7964) result = (result + 586) ^ ((index >>> 29) & 181); // branch 7_1_10\n  if (mode === 13840) result = (result + 678) ^ ((index >>> 20) & 3); // branch 7_1_11\n  if (mode === 25156) result = (result + 158) ^ ((index >>> 18) & 78); // branch 7_1_12\n  if (mode === 22456) result = (result + 883) ^ ((index >>> 17) & 7); // branch 7_1_13\n  if (mode === 2668) result = (result + 849) ^ ((index >>> 18) & 76); // branch 7_1_14\n  if (mode === 44640) result = (result + 829) ^ ((index >>> 8) & 41); // branch 7_1_15\n  if (mode === 46996) result = (result + 136) ^ ((index >>> 22) & 250); // branch 7_1_16\n  if (mode === 55816) result = (result + 198) ^ ((index >>> 1) & 88); // branch 7_1_17\n  if (mode === 2492) result = (result + 54) ^ ((index >>> 30) & 248); // branch 7_1_18\n  if (mode === 31408) result = (result + 803) ^ ((index >>> 10) & 88); // branch 7_1_19\n  if (mode === 41188) result = (result + 587) ^ ((index >>> 23) & 36); // branch 7_1_20\n  if (mode === 12376) result = (result + 480) ^ ((index >>> 17) & 178); // branch 7_1_21\n  if (mode === 7436) result = (result + 211) ^ ((index >>> 9) & 8); // branch 7_1_22\n  if (mode === 39680) result = (result + 564) ^ ((index >>> 4) & 48); // branch 7_1_23\n  if (mode === 7732) result = (result + 32) ^ ((index >>> 30) & 231); // branch 7_1_24\n  if (mode === 23208) result = (result + 101) ^ ((index >>> 10) & 231); // branch 7_1_25\n  if (mode === 17500) result = (result + 466) ^ ((index >>> 17) & 76); // branch 7_1_26\n  if (mode === 3920) result = (result + 210) ^ ((index >>> 3) & 217); // branch 7_1_27\n  if (mode === 12164) result = (result + 452) ^ ((index >>> 24) & 46); // branch 7_1_28\n  if (mode === 22776) result = (result + 613) ^ ((index >>> 21) & 26); // branch 7_1_29\n  if (mode === 32684) result = (result + 321) ^ ((index >>> 8) & 167); // branch 7_1_30\n  if (mode === 55200) result = (result + 71) ^ ((index >>> 15) & 146); // branch 7_1_31\n  if (mode === 54484) result = (result + 455) ^ ((index >>> 23) & 57); // branch 7_1_32\n  if (mode === 11080) result = (result + 914) ^ ((index >>> 24) & 72); // branch 7_1_33\n  if (mode === 52988) result = (result + 168) ^ ((index >>> 10) & 158); // branch 7_1_34\n  if (mode === 62448) result = (result + 931) ^ ((index >>> 8) & 62); // branch 7_1_35\n  if (mode === 3620) result = (result + 431) ^ ((index >>> 20) & 53); // branch 7_1_36\n  if (mode === 53656) result = (result + 405) ^ ((index >>> 22) & 222); // branch 7_1_37\n  if (mode === 12876) result = (result + 950) ^ ((index >>> 19) & 234); // branch 7_1_38\n  if (mode === 25664) result =",
+      "offset": 0,
+      "nextOffset": 4000
+    },
+    "isError": false
+  }
+]

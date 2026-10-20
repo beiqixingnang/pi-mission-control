@@ -1,0 +1,1546 @@
+{
+  "startedAt": "2026-10-20T03:12:59.647Z",
+  "model": "gptcodex/gpt-6-luna",
+  "platform": "linux",
+  "contextWindowConfigured": 1050000,
+  "tokenizer": "o200k_base estimate; actual provider usage stored per request",
+  "requests": [
+    {
+      "label": "reading-work-0-0",
+      "startedAt": "2026-10-20T03:12:59.936Z",
+      "elapsedMs": 4344,
+      "usage": {
+        "input": 127630,
+        "output": 71,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 127701,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 278
+    },
+    {
+      "label": "reading-work-1-0",
+      "startedAt": "2026-10-20T03:13:04.280Z",
+      "elapsedMs": 5252,
+      "usage": {
+        "input": 123508,
+        "output": 64,
+        "cacheRead": 127488,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 251060,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 245
+    },
+    {
+      "label": "reading-summary-1-chunk",
+      "startedAt": "2026-10-20T03:13:09.656Z",
+      "elapsedMs": 4797,
+      "usage": {
+        "input": 82947,
+        "output": 162,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 83109,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 708
+    },
+    {
+      "label": "reading-summary-1-chunk",
+      "startedAt": "2026-10-20T03:13:14.458Z",
+      "elapsedMs": 5445,
+      "usage": {
+        "input": 78982,
+        "output": 99,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 83049,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 358
+    },
+    {
+      "label": "reading-summary-1-chunk",
+      "startedAt": "2026-10-20T03:13:19.909Z",
+      "elapsedMs": 4931,
+      "usage": {
+        "input": 78728,
+        "output": 152,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 82848,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 613
+    },
+    {
+      "label": "reading-summary-1-chunk",
+      "startedAt": "2026-10-20T03:13:24.841Z",
+      "elapsedMs": 3217,
+      "usage": {
+        "input": 11456,
+        "output": 62,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 15486,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 252
+    },
+    {
+      "label": "reading-summary-1-merge",
+      "startedAt": "2026-10-20T03:13:28.059Z",
+      "elapsedMs": 3344,
+      "usage": {
+        "input": 805,
+        "output": 109,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 4882,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 440
+    },
+    {
+      "label": "reading-work-2-0",
+      "startedAt": "2026-10-20T03:13:31.408Z",
+      "elapsedMs": 4907,
+      "usage": {
+        "input": 127924,
+        "output": 81,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 128005,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 284
+    },
+    {
+      "label": "reading-work-3-0",
+      "startedAt": "2026-10-20T03:13:36.316Z",
+      "elapsedMs": 6452,
+      "usage": {
+        "input": 123667,
+        "output": 75,
+        "cacheRead": 127744,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 251486,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 264
+    },
+    {
+      "label": "reading-summary-3-chunk",
+      "startedAt": "2026-10-20T03:13:42.854Z",
+      "elapsedMs": 9615,
+      "usage": {
+        "input": 82888,
+        "output": 270,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 41,
+        "totalTokens": 83158,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 871
+    },
+    {
+      "label": "reading-summary-3-chunk",
+      "startedAt": "2026-10-20T03:13:52.473Z",
+      "elapsedMs": 5815,
+      "usage": {
+        "input": 79045,
+        "output": 128,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 83141,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 447
+    },
+    {
+      "label": "reading-summary-3-chunk",
+      "startedAt": "2026-10-20T03:13:58.290Z",
+      "elapsedMs": 6511,
+      "usage": {
+        "input": 78793,
+        "output": 107,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 82868,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 388
+    },
+    {
+      "label": "reading-summary-3-chunk",
+      "startedAt": "2026-10-20T03:14:04.803Z",
+      "elapsedMs": 6709,
+      "usage": {
+        "input": 11804,
+        "output": 72,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 15844,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 260
+    },
+    {
+      "label": "reading-summary-3-merge",
+      "startedAt": "2026-10-20T03:14:11.514Z",
+      "elapsedMs": 12092,
+      "usage": {
+        "input": 4832,
+        "output": 358,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 5190,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 1302
+    },
+    {
+      "label": "reading-work-4-0",
+      "startedAt": "2026-10-20T03:14:23.608Z",
+      "elapsedMs": 11977,
+      "usage": {
+        "input": 128167,
+        "output": 128,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 128295,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 404
+    },
+    {
+      "label": "reading-work-5-0",
+      "startedAt": "2026-10-20T03:14:35.586Z",
+      "elapsedMs": 6967,
+      "usage": {
+        "input": 123696,
+        "output": 100,
+        "cacheRead": 128000,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 251796,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 359
+    },
+    {
+      "label": "reading-summary-5-chunk",
+      "startedAt": "2026-10-20T03:14:42.639Z",
+      "elapsedMs": 13078,
+      "usage": {
+        "input": 82756,
+        "output": 493,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 24,
+        "totalTokens": 83249,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 1642
+    },
+    {
+      "label": "reading-summary-5-chunk",
+      "startedAt": "2026-10-20T03:14:55.719Z",
+      "elapsedMs": 7187,
+      "usage": {
+        "input": 79024,
+        "output": 160,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 83152,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 552
+    },
+    {
+      "label": "reading-summary-5-chunk",
+      "startedAt": "2026-10-20T03:15:02.908Z",
+      "elapsedMs": 4947,
+      "usage": {
+        "input": 78856,
+        "output": 79,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 82903,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 279
+    },
+    {
+      "label": "reading-summary-5-chunk",
+      "startedAt": "2026-10-20T03:15:07.856Z",
+      "elapsedMs": 4835,
+      "usage": {
+        "input": 16175,
+        "output": 95,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 16270,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 338
+    },
+    {
+      "label": "reading-summary-5-merge",
+      "startedAt": "2026-10-20T03:15:12.693Z",
+      "elapsedMs": 6985,
+      "usage": {
+        "input": 5099,
+        "output": 538,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 5637,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 1878
+    },
+    {
+      "label": "reading-work-6-0",
+      "startedAt": "2026-10-20T03:15:19.680Z",
+      "elapsedMs": 6567,
+      "usage": {
+        "input": 128238,
+        "output": 99,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 128337,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 383
+    },
+    {
+      "label": "reading-work-7-0",
+      "startedAt": "2026-10-20T03:15:26.248Z",
+      "elapsedMs": 7377,
+      "usage": {
+        "input": 251763,
+        "output": 135,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 251898,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 499
+    },
+    {
+      "label": "reading-summary-7-chunk",
+      "startedAt": "2026-10-20T03:15:33.715Z",
+      "elapsedMs": 9992,
+      "usage": {
+        "input": 78667,
+        "output": 582,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 83217,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 2046
+    },
+    {
+      "label": "reading-summary-7-chunk",
+      "startedAt": "2026-10-20T03:15:43.711Z",
+      "elapsedMs": 6071,
+      "usage": {
+        "input": 82929,
+        "output": 107,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 83036,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 399
+    },
+    {
+      "label": "reading-summary-7-chunk",
+      "startedAt": "2026-10-20T03:15:49.784Z",
+      "elapsedMs": 6911,
+      "usage": {
+        "input": 78863,
+        "output": 90,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 82921,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 329
+    },
+    {
+      "label": "reading-summary-7-chunk",
+      "startedAt": "2026-10-20T03:15:56.696Z",
+      "elapsedMs": 4590,
+      "usage": {
+        "input": 12486,
+        "output": 144,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 16598,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 561
+    },
+    {
+      "label": "reading-summary-7-merge",
+      "startedAt": "2026-10-20T03:16:01.287Z",
+      "elapsedMs": 3669,
+      "usage": {
+        "input": 1253,
+        "output": 138,
+        "cacheRead": 3968,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 5359,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 545
+    },
+    {
+      "label": "reading-recall-0",
+      "startedAt": "2026-10-20T03:16:04.957Z",
+      "elapsedMs": 5511,
+      "usage": {
+        "input": 4632,
+        "output": 40,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 4672,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-1",
+      "startedAt": "2026-10-20T03:16:10.684Z",
+      "elapsedMs": 3704,
+      "usage": {
+        "input": 4707,
+        "output": 30,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 4737,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-2",
+      "startedAt": "2026-10-20T03:16:14.403Z",
+      "elapsedMs": 4649,
+      "usage": {
+        "input": 2054,
+        "output": 43,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 6705,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-3",
+      "startedAt": "2026-10-20T03:16:19.058Z",
+      "elapsedMs": 4092,
+      "usage": {
+        "input": 6740,
+        "output": 60,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 6800,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-4",
+      "startedAt": "2026-10-20T03:16:23.160Z",
+      "elapsedMs": 4164,
+      "usage": {
+        "input": 1810,
+        "output": 31,
+        "cacheRead": 6656,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 8497,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-5",
+      "startedAt": "2026-10-20T03:16:27.334Z",
+      "elapsedMs": 4334,
+      "usage": {
+        "input": 327,
+        "output": 33,
+        "cacheRead": 8320,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 8680,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-6",
+      "startedAt": "2026-10-20T03:16:31.678Z",
+      "elapsedMs": 3367,
+      "usage": {
+        "input": 492,
+        "output": 33,
+        "cacheRead": 8448,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 8973,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-7",
+      "startedAt": "2026-10-20T03:16:35.051Z",
+      "elapsedMs": 2865,
+      "usage": {
+        "input": 2711,
+        "output": 32,
+        "cacheRead": 6528,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 9271,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-8",
+      "startedAt": "2026-10-20T03:16:37.925Z",
+      "elapsedMs": 3730,
+      "usage": {
+        "input": 218,
+        "output": 32,
+        "cacheRead": 9088,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 9338,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "reading-recall-9",
+      "startedAt": "2026-10-20T03:16:41.662Z",
+      "elapsedMs": 7981,
+      "usage": {
+        "input": 157,
+        "output": 155,
+        "cacheRead": 9216,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 9528,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 379
+    },
+    {
+      "label": "notes-batch-0-0",
+      "startedAt": "2026-10-20T03:16:50.681Z",
+      "elapsedMs": 7791,
+      "usage": {
+        "input": 127818,
+        "output": 284,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 128102,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 160
+    },
+    {
+      "label": "notes-batch-0-1",
+      "startedAt": "2026-10-20T03:16:58.480Z",
+      "elapsedMs": 4576,
+      "usage": {
+        "input": 541,
+        "output": 54,
+        "cacheRead": 127616,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 128211,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 208
+    },
+    {
+      "label": "notes-batch-1-0",
+      "startedAt": "2026-10-20T03:17:03.057Z",
+      "elapsedMs": 7645,
+      "usage": {
+        "input": 123499,
+        "output": 324,
+        "cacheRead": 128000,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 251823,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 202
+    },
+    {
+      "label": "notes-batch-1-1",
+      "startedAt": "2026-10-20T03:17:10.708Z",
+      "elapsedMs": 7795,
+      "usage": {
+        "input": 491,
+        "output": 284,
+        "cacheRead": 251392,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 252167,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-1-2",
+      "startedAt": "2026-10-20T03:17:18.513Z",
+      "elapsedMs": 5724,
+      "usage": {
+        "input": 446,
+        "output": 15,
+        "cacheRead": 251776,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 252237,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-2-0",
+      "startedAt": "2026-10-20T03:17:24.328Z",
+      "elapsedMs": 10541,
+      "usage": {
+        "input": 130611,
+        "output": 664,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 131275,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 252
+    },
+    {
+      "label": "notes-batch-2-1",
+      "startedAt": "2026-10-20T03:17:34.880Z",
+      "elapsedMs": 5971,
+      "usage": {
+        "input": 954,
+        "output": 102,
+        "cacheRead": 130432,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 131488,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 378
+    },
+    {
+      "label": "notes-batch-3-0",
+      "startedAt": "2026-10-20T03:17:40.853Z",
+      "elapsedMs": 8786,
+      "usage": {
+        "input": 123687,
+        "output": 308,
+        "cacheRead": 131200,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255195,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-3-1",
+      "startedAt": "2026-10-20T03:17:49.646Z",
+      "elapsedMs": 7510,
+      "usage": {
+        "input": 531,
+        "output": 330,
+        "cacheRead": 254720,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255581,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-3-2",
+      "startedAt": "2026-10-20T03:17:57.166Z",
+      "elapsedMs": 6274,
+      "usage": {
+        "input": 532,
+        "output": 15,
+        "cacheRead": 255104,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255651,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-4-0",
+      "startedAt": "2026-10-20T03:18:03.569Z",
+      "elapsedMs": 9542,
+      "usage": {
+        "input": 130722,
+        "output": 358,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 131080,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 120
+    },
+    {
+      "label": "notes-batch-4-1",
+      "startedAt": "2026-10-20T03:18:13.120Z",
+      "elapsedMs": 6008,
+      "usage": {
+        "input": 575,
+        "output": 77,
+        "cacheRead": 130560,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 131212,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 289
+    },
+    {
+      "label": "notes-batch-5-0",
+      "startedAt": "2026-10-20T03:18:19.129Z",
+      "elapsedMs": 7582,
+      "usage": {
+        "input": 123662,
+        "output": 418,
+        "cacheRead": 130944,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255024,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 214
+    },
+    {
+      "label": "notes-batch-5-1",
+      "startedAt": "2026-10-20T03:18:26.720Z",
+      "elapsedMs": 6807,
+      "usage": {
+        "input": 614,
+        "output": 311,
+        "cacheRead": 254464,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255389,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-5-2",
+      "startedAt": "2026-10-20T03:18:33.532Z",
+      "elapsedMs": 7863,
+      "usage": {
+        "input": 467,
+        "output": 15,
+        "cacheRead": 254976,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255458,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-6-0",
+      "startedAt": "2026-10-20T03:18:41.487Z",
+      "elapsedMs": 8671,
+      "usage": {
+        "input": 130603,
+        "output": 356,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 130959,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 234
+    },
+    {
+      "label": "notes-batch-6-1",
+      "startedAt": "2026-10-20T03:18:50.162Z",
+      "elapsedMs": 6203,
+      "usage": {
+        "input": 579,
+        "output": 37,
+        "cacheRead": 130432,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 131048,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 121
+    },
+    {
+      "label": "notes-batch-7-0",
+      "startedAt": "2026-10-20T03:18:56.366Z",
+      "elapsedMs": 9212,
+      "usage": {
+        "input": 123651,
+        "output": 418,
+        "cacheRead": 130816,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 254885,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 227
+    },
+    {
+      "label": "notes-batch-7-1",
+      "startedAt": "2026-10-20T03:19:05.586Z",
+      "elapsedMs": 8664,
+      "usage": {
+        "input": 608,
+        "output": 366,
+        "cacheRead": 254336,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255310,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-batch-7-2",
+      "startedAt": "2026-10-20T03:19:14.255Z",
+      "elapsedMs": 14224,
+      "usage": {
+        "input": 515,
+        "output": 15,
+        "cacheRead": 254848,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 255378,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-recall-0",
+      "startedAt": "2026-10-20T03:19:28.593Z",
+      "elapsedMs": 7877,
+      "usage": {
+        "input": 3206,
+        "output": 40,
+        "cacheRead": 4224,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 7470,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-recall-1",
+      "startedAt": "2026-10-20T03:19:36.487Z",
+      "elapsedMs": 5170,
+      "usage": {
+        "input": 209,
+        "output": 51,
+        "cacheRead": 7296,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 7556,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-recall-2",
+      "startedAt": "2026-10-20T03:19:41.665Z",
+      "elapsedMs": 4485,
+      "usage": {
+        "input": 314,
+        "output": 51,
+        "cacheRead": 7424,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 7789,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "rawStopReason": "completed",
+      "visibleChars": 0
+    },
+    {
+      "label": "notes-recall-3",
+      "startedAt": "2026-10-20T03:19:46.158Z",
+      "elapsedMs": 6189,
+      "usage": {
+        "input": 1898,
+        "output": 163,
+        "cacheRead": 7552,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 9613,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop",
+      "rawStopReason": "completed",
+      "visibleChars": 392
+    }
+  ],
+  "corpusChars": 2400318,
+  "corpusEstimatedTokens": 986833,
+  "batches": [
+    {
+      "chars": 300048,
+      "estimatedTokens": 123314
+    },
+    {
+      "chars": 300038,
+      "estimatedTokens": 123269
+    },
+    {
+      "chars": 300031,
+      "estimatedTokens": 123421
+    },
+    {
+      "chars": 300050,
+      "estimatedTokens": 123380
+    },
+    {
+      "chars": 300109,
+      "estimatedTokens": 123404
+    },
+    {
+      "chars": 299952,
+      "estimatedTokens": 123375
+    },
+    {
+      "chars": 299962,
+      "estimatedTokens": 123270
+    },
+    {
+      "chars": 300114,
+      "estimatedTokens": 123400
+    }
+  ],
+  "readingComparison": {
+    "success": true,
+    "elapsedMs": 229709,
+    "requests": 38,
+    "checkpoints": 4,
+    "cumulativeSourceEstimatedTokens": 986833,
+    "finalWindowEstimatedTokens": 8337,
+    "answer": "{\"audit_tickets\":[\"AUDIT-1-35dde772\",\"AUDIT-2-7c9220c2\",\"AUDIT-3-20e90e12\",\"AUDIT-4-49e7af62\",\"AUDIT-5-45d304b2\",\"AUDIT-6-da300e02\",\"AUDIT-7-93c3cb52\"],\"corrected_goal_id\":\"e2dbb408-9ea9-469b-9832-b1a6b0e69339\",\"revision\":1,\"next_file\":\"src/stage_7/decoder_7.ts\",\"next_line\":173,\"audit_accepted\":false,\"production_conversation_not_to_touch\":\"production hardware Pi conversation\"}",
+    "score": {
+      "passed": 13,
+      "total": 14,
+      "checks": {
+        "batch0": false,
+        "batch1": true,
+        "batch2": true,
+        "batch3": true,
+        "batch4": true,
+        "batch5": true,
+        "batch6": true,
+        "batch7": true,
+        "correctedId": true,
+        "revision": true,
+        "nextFile": true,
+        "nextLine": true,
+        "acceptance": true,
+        "production": true
+      }
+    }
+  },
+  "updatedAt": "2026-10-20T03:19:52.362Z",
+  "notes": {
+    "success": true,
+    "elapsedMs": 181672,
+    "requests": 24,
+    "rollovers": 4,
+    "cumulativeSourceEstimatedTokens": 986833,
+    "finalWindowEstimatedTokens": 6871,
+    "answer": "{\"goal_id\":\"e2dbb408-9ea9-469b-9832-b1a6b0e69339\",\"revision\":1,\"audit_tickets\":[\"AUDIT-0-fd076222\",\"AUDIT-1-35dde772\",\"AUDIT-2-7c9220c2\",\"AUDIT-3-20e90e12\",\"AUDIT-4-49e7af62\",\"AUDIT-5-45d304b2\",\"AUDIT-6-da300e02\",\"AUDIT-7-93c3cb52\"],\"next_file\":\"src/stage_7/decoder_7.ts\",\"next_line\":173,\"audit_accepted\":false,\"production_conversation_not_to_touch\":\"the production hardware Pi conversation\"}",
+    "score": {
+      "passed": 14,
+      "total": 14,
+      "checks": {
+        "batch0": true,
+        "batch1": true,
+        "batch2": true,
+        "batch3": true,
+        "batch4": true,
+        "batch5": true,
+        "batch6": true,
+        "batch7": true,
+        "correctedId": true,
+        "revision": true,
+        "nextFile": true,
+        "nextLine": true,
+        "acceptance": true,
+        "production": true
+      }
+    },
+    "notes": [
+      {
+        "name": "handoff",
+        "revision": 5,
+        "chars": 1237,
+        "source": "8c765251-5016-4604-b1b2-543493cd3442",
+        "at": 1792466354248
+      },
+      {
+        "name": "index",
+        "revision": 8,
+        "chars": 1163,
+        "source": "d336a4b2-2bf3-4423-91a5-1c47e60c26f0",
+        "at": 1792466345576
+      }
+    ]
+  }
+}

@@ -4,7 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { ContextMemory, historyText } from "../../runtime/context-memory.ts";
+import {
+  ContextMemory,
+  historyText,
+  recentUserContext,
+  NOTE_LIMITS,
+} from "../../runtime/context-memory.ts";
 import {
   summarizeChunks,
   estimateSummaryTokens,
@@ -28,6 +33,82 @@ const entry = (id, text, role = "user") => ({
   type: "message",
   message: { role, content: [{ type: "text", text }] },
 });
+
+test("bounded user excerpts retain literal latest corrections separately from erroneous working notes", () => {
+  const entries = [
+    entry("user-old", "Initial identifier OLD-ID."),
+    entry(
+      "user-correction",
+      "USER CORRECTION: identifier CORRECT-ID revision 1.\n" +
+        "中文🙂 source body ".repeat(8000) +
+        "\nExact next file decoder.ts line 173.",
+    ),
+    entry("claim", "Wrong model claim: OLD-ID revision 1.", "assistant"),
+    entry("continue", "继续，沿用之前的纠正。"),
+  ];
+  const pinned = recentUserContext(entries);
+  assert.ok(estimateSummaryTokens(pinned) <= NOTE_LIMITS.userRequests);
+  assert.match(pinned, /CORRECT-ID|User source user-correction/);
+  assert.match(pinned, /decoder.ts line 173/);
+  assert.match(pinned, /middle omitted/);
+  assert.match(pinned, /继续/);
+  assert.doesNotMatch(pinned, /Wrong model claim/);
+  assert.ok(
+    !Array.from(pinned).some(
+      (char) => char.codePointAt(0) >= 0xd800 && char.codePointAt(0) <= 0xdfff,
+    ),
+  );
+  usingMemory((m) => {
+    const branch = [
+      entry("a", "USER CORRECTION: identifier CORRECT-ID revision 1."),
+      entry("b", "continue"),
+    ];
+    m.write("index", "review index", "b");
+    m.write("handoff", "Wrong model note: OLD-ID revision 1.", "b");
+    const summary = m.prepare(branch, "b").summary;
+    assert.ok(
+      summary.indexOf("RECENT USER SOURCE") >
+        summary.indexOf("Wrong model note"),
+    );
+    assert.match(summary, /User source a/);
+    assert.match(summary, /CORRECT-ID revision 1/);
+    assert.equal(
+      m.note("handoff").text,
+      "Wrong model note: OLD-ID revision 1.",
+      "raw user text is pinned without rewriting or verifying a model's notes",
+    );
+  });
+});
+
+test("history role filters find actual user corrections instead of newer repeated model claims", () =>
+  usingMemory((m) => {
+    m.sync([
+      entry("user", "revision 1 使用 CORRECT-ID 中文"),
+      entry("claim", "revision 1 OLD-ID 中文", "assistant"),
+      {
+        id: "compaction",
+        type: "compaction",
+        summary: "revision 1 OLD-ID 中文",
+      },
+    ]);
+    assert.deepEqual(
+      m.search("revision", 20, "user").matches.map((row) => row.id),
+      ["user"],
+    );
+    assert.deepEqual(
+      m.search("中文", 20, "user").matches.map((row) => row.id),
+      ["user"],
+    );
+    assert.deepEqual(
+      m.search("revision", 20, "assistant").matches.map((row) => row.id),
+      ["claim"],
+    );
+    assert.deepEqual(
+      m.search("revision", 20, "compaction").matches.map((row) => row.id),
+      ["compaction"],
+    );
+    assert.throws(() => m.search("revision", 10, "system"), /Search needs/);
+  }));
 
 test("notes persist only the latest handoff, bound reads and reject stale revisions without truncation", () => {
   usingMemory((m, directory) => {
@@ -158,6 +239,62 @@ test("notes rollover requires a current handoff, preserves history and excludes 
     assert.match(result.summary, /decoder.py line 120/);
     assert.doesNotMatch(result.summary, /stale handoff|DO_NOT_AUTO_INJECT/);
     assert.equal(result.firstKeptEntryId, "c");
+    const memoryCall = {
+      id: "memory-call",
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "write-handoff",
+            name: "context_note",
+            arguments: {
+              action: "write",
+              name: "handoff",
+              text: "mechanical save",
+            },
+          },
+        ],
+      },
+    };
+    const memoryReceipt = {
+      id: "memory-receipt",
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolName: "context_note",
+        toolCallId: "write-handoff",
+        content: [{ type: "text", text: "saved" }],
+      },
+    };
+    m.write("handoff", "latest complete handoff", "c");
+    assert.doesNotThrow(
+      () =>
+        m.prepare(
+          [
+            ...entries,
+            memoryCall,
+            memoryReceipt,
+            entry("tail", "rollover boundary"),
+          ],
+          "tail",
+        ),
+      "saving memory and its receipt after the covered point must not make the handoff stale",
+    );
+    assert.throws(
+      () =>
+        m.prepare(
+          [
+            ...entries,
+            entry("new-read", "new source evidence"),
+            entry("tail", "rollover boundary"),
+          ],
+          "tail",
+        ),
+      /stale/,
+      "new project facts still require a new handoff",
+    );
     assert.equal(m.history("a").text, "original objective");
     assert.throws(
       () => m.prepare([entry("z", "different branch")], "z"),
@@ -210,6 +347,168 @@ test("large mixed Unicode summaries use bounded inputs, short intermediate summa
     );
     assert.equal(requests.at(-1).outputChars, 800);
     assert.equal(requests.at(-1).phase, "merge");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rolling summaries keep the previous checkpoint outside lossy source chunks and merge it after new code is reduced", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "summary-prior-")),
+    calls = [];
+  try {
+    const result = await summarizeChunks(
+      ["new source code without the old identifier\n".repeat(300)],
+      {
+        directory,
+        model: "fixture",
+        maxInputChars: 2000,
+        maxInputTokens: 1024,
+        maxOutputChars: 400,
+        intermediateOutputChars: 150,
+        previousSummary:
+          "Earlier unit: REF-OLD-ZERO, unaccepted. Continue original scope.",
+        complete: async (prompt, _signal, request) => {
+          calls.push({ prompt, ...request });
+          return {
+            stopReason: "stop",
+            content: [
+              {
+                type: "text",
+                text:
+                  request.phase === "merge" && prompt.includes("REF-OLD-ZERO")
+                    ? "REF-OLD-ZERO preserved; new source reviewed, unaccepted."
+                    : "New source reviewed; no old metadata in this excerpt.",
+              },
+            ],
+          };
+        },
+      },
+    );
+    assert.match(result, /REF-OLD-ZERO/);
+    assert.ok(
+      calls
+        .filter((c) => c.phase === "chunk")
+        .every((c) => !c.prompt.includes("REF-OLD-ZERO")),
+      "no new-code chunk gets to erase the previous checkpoint",
+    );
+    assert.ok(
+      calls.every((c) => !c.prompt.includes("REF-OLD-ZERO")),
+      "old facts stay literal while the complete checkpoint fits its output budget",
+    );
+    assert.ok(
+      calls.every(
+        (c) =>
+          c.prompt.length <= 2000 && estimateSummaryTokens(c.prompt) <= 1024,
+      ),
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("changing only a prior checkpoint reuses source chunks without reusing an obsolete merged checkpoint", async () => {
+  const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "summary-prior-cache-"),
+    ),
+    calls = [];
+  const options = {
+    directory,
+    model: "fixture",
+    maxInputChars: 2000,
+    maxOutputChars: 400,
+    intermediateOutputChars: 150,
+    complete: async (prompt, _signal, request) => {
+      calls.push({ ...request, prompt });
+      return {
+        stopReason: "stop",
+        content: [
+          {
+            type: "text",
+            text:
+              request.phase === "chunk"
+                ? "New code result unchanged."
+                : prompt.includes("REVISED-ONE")
+                  ? "REVISED-ONE and unchanged new code result."
+                  : prompt.includes("OLD-ZERO")
+                    ? "OLD-ZERO and unchanged new code result."
+                    : "Aggregated new code result.",
+          },
+        ],
+      };
+    },
+  };
+  try {
+    const parts = ["unchanged new source\n".repeat(90)];
+    assert.match(
+      await summarizeChunks(parts, { ...options, previousSummary: "OLD-ZERO" }),
+      /OLD-ZERO/,
+    );
+    const before = calls.length;
+    const revised = await summarizeChunks(parts, {
+      ...options,
+      previousSummary: "REVISED-ONE",
+    });
+    assert.match(revised, /REVISED-ONE/);
+    assert.doesNotMatch(revised, /OLD-ZERO/);
+    assert.ok(calls.slice(before).every((call) => call.phase === "merge"));
+    assert.equal(
+      calls.length,
+      before,
+      "changing the old checkpoint does not resend already summarized new code while both fit",
+    );
+    const controller = new AbortController();
+    controller.abort(Error("CANCELLED_PRIOR_ONLY"));
+    await assert.rejects(
+      summarizeChunks([], {
+        ...options,
+        previousSummary: "OLD-ZERO",
+        signal: controller.signal,
+      }),
+      /CANCELLED_PRIOR_ONLY/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rolling checkpoint consolidation runs only under actual output pressure and stays inside request/output budgets", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "summary-pressure-")),
+    calls = [];
+  try {
+    const result = await summarizeChunks(["new source observations"], {
+      directory,
+      model: "fixture",
+      maxInputChars: 2000,
+      maxInputTokens: 1024,
+      maxOutputChars: 400,
+      previousSummary: "EARLIER_UNIT_REFERENCE status unaccepted. ".repeat(5),
+      complete: async (prompt, _signal, request) => {
+        calls.push({ prompt, ...request });
+        return {
+          stopReason: "stop",
+          content: [
+            {
+              type: "text",
+              text:
+                request.phase === "merge"
+                  ? "EARLIER_UNIT_REFERENCE retained; latest unit reviewed, not accepted."
+                  : "Latest unit observation. ".repeat(10),
+            },
+          ],
+        };
+      },
+    });
+    assert.match(result, /EARLIER_UNIT_REFERENCE/);
+    assert.ok(result.length <= 400);
+    assert.equal(calls.filter((call) => call.phase === "merge").length, 1);
+    assert.ok(calls.at(-1).prompt.includes("PREVIOUS CHECKPOINT"));
+    assert.ok(
+      calls.every(
+        (call) =>
+          call.prompt.length <= 2000 &&
+          estimateSummaryTokens(call.prompt) <= 1024,
+      ),
+    );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

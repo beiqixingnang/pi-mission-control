@@ -1,0 +1,328 @@
+{
+  "startedAt": "2026-10-20T03:21:22.686Z",
+  "model": "gptcodex/gpt-6-luna",
+  "sessionId": "85289420-ef5b-472a-82ca-5387b6998102",
+  "requests": [
+    {
+      "elapsedMs": 6366,
+      "streamElapsedMs": 260,
+      "usage": {
+        "input": 48292,
+        "output": 115,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 72,
+        "totalTokens": 48407,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop"
+    },
+    {
+      "elapsedMs": 6889,
+      "streamElapsedMs": 708,
+      "usage": {
+        "input": 43733,
+        "output": 165,
+        "cacheRead": 4736,
+        "cacheWrite": 0,
+        "reasoning": 95,
+        "totalTokens": 48634,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 7841,
+      "streamElapsedMs": 827,
+      "usage": {
+        "input": 62981,
+        "output": 45,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 12,
+        "totalTokens": 63026,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop"
+    },
+    {
+      "elapsedMs": 5909,
+      "streamElapsedMs": 281,
+      "usage": {
+        "input": 1597,
+        "output": 134,
+        "cacheRead": 4736,
+        "cacheWrite": 0,
+        "reasoning": 89,
+        "totalTokens": 6467,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 5434,
+      "streamElapsedMs": 884,
+      "usage": {
+        "input": 411,
+        "output": 56,
+        "cacheRead": 6144,
+        "cacheWrite": 0,
+        "reasoning": 8,
+        "totalTokens": 6611,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 4334,
+      "streamElapsedMs": 763,
+      "usage": {
+        "input": 228,
+        "output": 42,
+        "cacheRead": 6400,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 6670,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop"
+    }
+  ],
+  "tools": [
+    {
+      "name": "read",
+      "args": {
+        "limit": 2000,
+        "offset": 0,
+        "path": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_15.ts"
+      },
+      "isError": false
+    },
+    {
+      "name": "context_history",
+      "args": {
+        "action": "read",
+        "id": "61f7b3d8",
+        "limit": 1000,
+        "offset": 0,
+        "query": "",
+        "role": "user"
+      },
+      "isError": false
+    },
+    {
+      "name": "verify_correction",
+      "args": {
+        "identifier": "e2dbb408-9ea9-469b-9832-b1a6b0e69339",
+        "revision": 7
+      },
+      "isError": false
+    }
+  ],
+  "phases": [
+    {
+      "event": "settled",
+      "aborted": false,
+      "reviewed": 0
+    },
+    {
+      "event": "settled",
+      "aborted": false,
+      "reviewed": 0
+    },
+    {
+      "event": "settled",
+      "aborted": false,
+      "reviewed": 0
+    }
+  ],
+  "files": [
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_00.ts",
+      "bytes": 40993,
+      "estimatedTokens": 13665
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_01.ts",
+      "bytes": 40963,
+      "estimatedTokens": 13655
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_02.ts",
+      "bytes": 40976,
+      "estimatedTokens": 13659
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_03.ts",
+      "bytes": 40980,
+      "estimatedTokens": 13660
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_04.ts",
+      "bytes": 40966,
+      "estimatedTokens": 13656
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_05.ts",
+      "bytes": 40957,
+      "estimatedTokens": 13653
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_06.ts",
+      "bytes": 40993,
+      "estimatedTokens": 13665
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_07.ts",
+      "bytes": 40996,
+      "estimatedTokens": 13666
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_08.ts",
+      "bytes": 40996,
+      "estimatedTokens": 13666
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_09.ts",
+      "bytes": 40984,
+      "estimatedTokens": 13662
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_10.ts",
+      "bytes": 41574,
+      "estimatedTokens": 13858
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_11.ts",
+      "bytes": 41561,
+      "estimatedTokens": 13854
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_12.ts",
+      "bytes": 41560,
+      "estimatedTokens": 13854
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_13.ts",
+      "bytes": 41564,
+      "estimatedTokens": 13855
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_14.ts",
+      "bytes": 41564,
+      "estimatedTokens": 13855
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_15.ts",
+      "bytes": 41575,
+      "estimatedTokens": 13859
+    }
+  ],
+  "checks": {
+    "userSourcePinned": true,
+    "userCorrectionOutsideRetainedTail": true,
+    "reloadPreservedMode": true,
+    "probeCorrection": true,
+    "verified": true,
+    "continuousWindows": true,
+    "sameSession": true,
+    "noOutsideRead": true,
+    "noExtensionErrors": true
+  },
+  "probe": "correction",
+  "elapsedMs": 37778,
+  "reviewed": 0,
+  "windows": [
+    {
+      "id": "1c54db71",
+      "firstKeptEntryId": "180884ad",
+      "details": {
+        "contextMode": "notes"
+      },
+      "tokensBefore": 63026
+    }
+  ],
+  "memoryStatus": {
+    "mode": "notes",
+    "notes": [
+      {
+        "name": "handoff",
+        "revision": 18,
+        "chars": 183,
+        "source": "180884ad",
+        "at": 1792466504441
+      },
+      {
+        "name": "index",
+        "revision": 2045,
+        "chars": 89,
+        "source": "180884ad",
+        "at": 1792466504433
+      }
+    ],
+    "limits": {
+      "index": 1500,
+      "handoff": 4000,
+      "topic": 8000,
+      "read": 2000,
+      "userRequests": 1500
+    },
+    "storage": "this extension's own per-Pi-session database; no goal/task databases read",
+    "rolloverQueued": false,
+    "budget": {
+      "model": "gptcodex/gpt-6-luna",
+      "configuredWindowTokens": 1050000,
+      "outputReserveTokens": 16384,
+      "safetyReserveTokens": 32768,
+      "inputLimitTokens": 64000,
+      "prepareAtTokens": 48000,
+      "repairBelowTokens": 58880,
+      "handoffReserveTokens": 5120,
+      "policy": {
+        "inputLimitTokens": 64000
+      },
+      "kind": "conservative budget; provider usage and limits may differ"
+    },
+    "usage": {
+      "tokens": 6670,
+      "source": "Pi usage-backed estimate"
+    }
+  },
+  "success": true
+}

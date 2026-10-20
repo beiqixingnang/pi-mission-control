@@ -1,0 +1,115 @@
+{
+  "date": "2026-10-20",
+  "candidateBranch": "codex/context-modes",
+  "productionCommit": "b6aaad0",
+  "installed": false,
+  "windows": {
+    "failed": 0,
+    "passed": 236,
+    "skipped": 4,
+    "tests": 240
+  },
+  "wsl": {
+    "failed": 0,
+    "passed": 236,
+    "skipped": 4,
+    "tests": 240
+  },
+  "tui": {
+    "sameProcess": true,
+    "checks": 25,
+    "passed": true
+  },
+  "liveNative": {
+    "checks": {
+      "reloadPreservedMode": true,
+      "allFiles": true,
+      "firstTicket": true,
+      "firstConstant": true,
+      "correctedGoal": true,
+      "revision": true,
+      "acceptance": true,
+      "next": true,
+      "verified": true,
+      "continuousWindows": true,
+      "sameSession": true,
+      "noOutsideRead": true,
+      "allNativeFilesRead": true,
+      "noExtensionErrors": true
+    },
+    "windows": 5,
+    "elapsedMs": 413078,
+    "success": true,
+    "requests": 64
+  },
+  "correctionProbe": {
+    "success": true,
+    "checks": {
+      "userSourcePinned": true,
+      "userCorrectionOutsideRetainedTail": true,
+      "reloadPreservedMode": true,
+      "probeCorrection": true,
+      "verified": true,
+      "continuousWindows": true,
+      "sameSession": true,
+      "noOutsideRead": true,
+      "noExtensionErrors": true
+    }
+  },
+  "summaryMillion": {
+    "score": {
+      "passed": 14,
+      "total": 14,
+      "checks": {
+        "batch0": true,
+        "batch1": true,
+        "batch2": true,
+        "batch3": true,
+        "batch4": true,
+        "batch5": true,
+        "batch6": true,
+        "batch7": true,
+        "correctedId": true,
+        "revision": true,
+        "nextFile": true,
+        "nextLine": true,
+        "acceptance": true,
+        "production": true
+      }
+    },
+    "elapsedMs": 200100,
+    "success": true,
+    "requests": 35
+  },
+  "notesMillion": {
+    "score": {
+      "passed": 14,
+      "total": 14,
+      "checks": {
+        "batch0": true,
+        "batch1": true,
+        "batch2": true,
+        "batch3": true,
+        "batch4": true,
+        "batch5": true,
+        "batch6": true,
+        "batch7": true,
+        "correctedId": true,
+        "revision": true,
+        "nextFile": true,
+        "nextLine": true,
+        "acceptance": true,
+        "production": true
+      }
+    },
+    "elapsedMs": 156212,
+    "success": true,
+    "requests": 27
+  },
+  "offlineReplay": {
+    "allOldCheckpointsLiteral": true,
+    "finalTickets": 8,
+    "finalChars": 5206,
+    "networkRequests": 0
+  }
+}

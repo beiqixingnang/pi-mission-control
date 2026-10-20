@@ -1,0 +1,1397 @@
+{
+  "startedAt": "2026-10-20T02:53:36.679Z",
+  "model": "gptcodex/gpt-6-luna",
+  "sessionId": "85289420-ef5b-472a-82ca-5387b6998102",
+  "requests": [
+    {
+      "elapsedMs": 341,
+      "usage": {
+        "input": 19945,
+        "output": 140,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 54,
+        "totalTokens": 20085,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 270,
+      "usage": {
+        "input": 14596,
+        "output": 98,
+        "cacheRead": 19840,
+        "cacheWrite": 0,
+        "reasoning": 36,
+        "totalTokens": 34534,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 354,
+      "usage": {
+        "input": 284,
+        "output": 69,
+        "cacheRead": 34304,
+        "cacheWrite": 0,
+        "reasoning": 22,
+        "totalTokens": 34657,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 484,
+      "usage": {
+        "input": 14570,
+        "output": 60,
+        "cacheRead": 34432,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 49062,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 636,
+      "usage": {
+        "input": 44648,
+        "output": 198,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 94,
+        "totalTokens": 49454,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 1935,
+      "usage": {
+        "input": 44892,
+        "output": 270,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 49770,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 654,
+      "usage": {
+        "input": 45200,
+        "output": 15,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 49823,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 259,
+      "usage": {
+        "input": 1970,
+        "output": 105,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 58,
+        "totalTokens": 6683,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 374,
+      "usage": {
+        "input": 14629,
+        "output": 85,
+        "cacheRead": 6400,
+        "cacheWrite": 0,
+        "reasoning": 23,
+        "totalTokens": 21114,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 327,
+      "usage": {
+        "input": 304,
+        "output": 56,
+        "cacheRead": 20864,
+        "cacheWrite": 0,
+        "reasoning": 9,
+        "totalTokens": 21224,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 438,
+      "usage": {
+        "input": 14586,
+        "output": 74,
+        "cacheRead": 20992,
+        "cacheWrite": 0,
+        "reasoning": 11,
+        "totalTokens": 35652,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 310,
+      "usage": {
+        "input": 250,
+        "output": 136,
+        "cacheRead": 35456,
+        "cacheWrite": 0,
+        "reasoning": 39,
+        "totalTokens": 35842,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 804,
+      "usage": {
+        "input": 14609,
+        "output": 80,
+        "cacheRead": 35584,
+        "cacheWrite": 0,
+        "reasoning": 18,
+        "totalTokens": 50273,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 546,
+      "usage": {
+        "input": 45859,
+        "output": 201,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 99,
+        "totalTokens": 50668,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 2072,
+      "usage": {
+        "input": 46099,
+        "output": 315,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 51022,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 266,
+      "usage": {
+        "input": 51059,
+        "output": 15,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 51074,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 189,
+      "usage": {
+        "input": 2085,
+        "output": 94,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 47,
+        "totalTokens": 6787,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 164,
+      "usage": {
+        "input": 16533,
+        "output": 80,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 18,
+        "totalTokens": 21221,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 218,
+      "usage": {
+        "input": 283,
+        "output": 83,
+        "cacheRead": 20992,
+        "cacheWrite": 0,
+        "reasoning": 36,
+        "totalTokens": 21358,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 311,
+      "usage": {
+        "input": 14590,
+        "output": 75,
+        "cacheRead": 21120,
+        "cacheWrite": 0,
+        "reasoning": 11,
+        "totalTokens": 35785,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 246,
+      "usage": {
+        "input": 255,
+        "output": 57,
+        "cacheRead": 35584,
+        "cacheWrite": 0,
+        "reasoning": 10,
+        "totalTokens": 35896,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 328,
+      "usage": {
+        "input": 14535,
+        "output": 68,
+        "cacheRead": 35712,
+        "cacheWrite": 0,
+        "reasoning": 7,
+        "totalTokens": 50315,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 2027,
+      "usage": {
+        "input": 45882,
+        "output": 325,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 210,
+        "totalTokens": 50815,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 1979,
+      "usage": {
+        "input": 46256,
+        "output": 365,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 51229,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 247,
+      "usage": {
+        "input": 46658,
+        "output": 15,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 51281,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 837,
+      "usage": {
+        "input": 2302,
+        "output": 292,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 49,
+        "totalTokens": 7202,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop"
+    },
+    {
+      "elapsedMs": 612,
+      "usage": {
+        "input": 796,
+        "output": 330,
+        "cacheRead": 6784,
+        "cacheWrite": 0,
+        "reasoning": 217,
+        "totalTokens": 7910,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 296,
+      "usage": {
+        "input": 14843,
+        "output": 87,
+        "cacheRead": 7424,
+        "cacheWrite": 0,
+        "reasoning": 21,
+        "totalTokens": 22354,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 296,
+      "usage": {
+        "input": 264,
+        "output": 54,
+        "cacheRead": 22144,
+        "cacheWrite": 0,
+        "reasoning": 7,
+        "totalTokens": 22462,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 512,
+      "usage": {
+        "input": 14544,
+        "output": 69,
+        "cacheRead": 22272,
+        "cacheWrite": 0,
+        "reasoning": 6,
+        "totalTokens": 36885,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 582,
+      "usage": {
+        "input": 203,
+        "output": 54,
+        "cacheRead": 36736,
+        "cacheWrite": 0,
+        "reasoning": 7,
+        "totalTokens": 36993,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 275,
+      "usage": {
+        "input": 14611,
+        "output": 72,
+        "cacheRead": 36736,
+        "cacheWrite": 0,
+        "reasoning": 8,
+        "totalTokens": 51419,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 1696,
+      "usage": {
+        "input": 47005,
+        "output": 360,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 212,
+        "totalTokens": 51973,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 2909,
+      "usage": {
+        "input": 47414,
+        "output": 433,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 52455,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 293,
+      "usage": {
+        "input": 47883,
+        "output": 15,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 52506,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 2480,
+      "usage": {
+        "input": 2509,
+        "output": 97,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 23,
+        "totalTokens": 7214,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 242,
+      "usage": {
+        "input": 14651,
+        "output": 94,
+        "cacheRead": 6912,
+        "cacheWrite": 0,
+        "reasoning": 30,
+        "totalTokens": 21657,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 286,
+      "usage": {
+        "input": 335,
+        "output": 56,
+        "cacheRead": 21376,
+        "cacheWrite": 0,
+        "reasoning": 9,
+        "totalTokens": 21767,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 186,
+      "usage": {
+        "input": 14488,
+        "output": 69,
+        "cacheRead": 21632,
+        "cacheWrite": 0,
+        "reasoning": 7,
+        "totalTokens": 36189,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 172,
+      "usage": {
+        "input": 275,
+        "output": 55,
+        "cacheRead": 35968,
+        "cacheWrite": 0,
+        "reasoning": 8,
+        "totalTokens": 36298,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 363,
+      "usage": {
+        "input": 14551,
+        "output": 86,
+        "cacheRead": 36096,
+        "cacheWrite": 0,
+        "reasoning": 22,
+        "totalTokens": 50733,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 329,
+      "usage": {
+        "input": 46319,
+        "output": 166,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 38,
+        "totalTokens": 51093,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 2783,
+      "usage": {
+        "input": 46524,
+        "output": 492,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 51624,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 381,
+      "usage": {
+        "input": 47054,
+        "output": 15,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 51677,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 119,
+      "usage": {
+        "input": 2454,
+        "output": 129,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 51,
+        "totalTokens": 7191,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 343,
+      "usage": {
+        "input": 14629,
+        "output": 84,
+        "cacheRead": 6912,
+        "cacheWrite": 0,
+        "reasoning": 20,
+        "totalTokens": 21625,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 301,
+      "usage": {
+        "input": 303,
+        "output": 112,
+        "cacheRead": 21376,
+        "cacheWrite": 0,
+        "reasoning": 17,
+        "totalTokens": 21791,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 344,
+      "usage": {
+        "input": 14634,
+        "output": 77,
+        "cacheRead": 21504,
+        "cacheWrite": 0,
+        "reasoning": 13,
+        "totalTokens": 36215,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 290,
+      "usage": {
+        "input": 282,
+        "output": 95,
+        "cacheRead": 35968,
+        "cacheWrite": 0,
+        "reasoning": 17,
+        "totalTokens": 36345,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 1813,
+      "usage": {
+        "input": 269,
+        "output": 406,
+        "cacheRead": 36096,
+        "cacheWrite": 0,
+        "reasoning": 295,
+        "totalTokens": 36771,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 2854,
+      "usage": {
+        "input": 32190,
+        "output": 440,
+        "cacheRead": 4608,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "totalTokens": 37238,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse"
+    },
+    {
+      "elapsedMs": 4096,
+      "usage": {
+        "input": 671,
+        "output": 1249,
+        "cacheRead": 36608,
+        "cacheWrite": 0,
+        "reasoning": 413,
+        "totalTokens": 38528,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "stop"
+    }
+  ],
+  "tools": [
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_rollover",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_rollover",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_rollover",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_rollover",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_rollover",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "read",
+      "isError": false
+    },
+    {
+      "name": "record_review",
+      "isError": false
+    },
+    {
+      "name": "finish_review",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    },
+    {
+      "name": "context_note",
+      "isError": false
+    }
+  ],
+  "phases": [
+    {
+      "event": "settled",
+      "aborted": false,
+      "reviewed": 8
+    },
+    {
+      "event": "settled",
+      "aborted": false,
+      "reviewed": 16
+    }
+  ],
+  "files": [
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_00.ts",
+      "bytes": 40993,
+      "estimatedTokens": 13665
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_01.ts",
+      "bytes": 40963,
+      "estimatedTokens": 13655
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_02.ts",
+      "bytes": 40976,
+      "estimatedTokens": 13659
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_03.ts",
+      "bytes": 40980,
+      "estimatedTokens": 13660
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_04.ts",
+      "bytes": 40966,
+      "estimatedTokens": 13656
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_05.ts",
+      "bytes": 40957,
+      "estimatedTokens": 13653
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_06.ts",
+      "bytes": 40993,
+      "estimatedTokens": 13665
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_07.ts",
+      "bytes": 40996,
+      "estimatedTokens": 13666
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_08.ts",
+      "bytes": 40996,
+      "estimatedTokens": 13666
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_09.ts",
+      "bytes": 40984,
+      "estimatedTokens": 13662
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_10.ts",
+      "bytes": 41574,
+      "estimatedTokens": 13858
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_11.ts",
+      "bytes": 41561,
+      "estimatedTokens": 13854
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_12.ts",
+      "bytes": 41560,
+      "estimatedTokens": 13854
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_13.ts",
+      "bytes": 41564,
+      "estimatedTokens": 13855
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_14.ts",
+      "bytes": 41564,
+      "estimatedTokens": 13855
+    },
+    {
+      "file": "/home/lishuo/pi-mission-control-test/workspace/context-live-source/decoder_15.ts",
+      "bytes": 41575,
+      "estimatedTokens": 13859
+    }
+  ],
+  "checks": {
+    "reloadPreservedMode": true,
+    "allFiles": true,
+    "firstTicket": true,
+    "firstConstant": true,
+    "correctedGoal": true,
+    "revision": true,
+    "acceptance": true,
+    "next": true
+  },
+  "elapsedMs": 283606,
+  "reviewed": 16,
+  "windows": [
+    {
+      "id": "c61e7cda",
+      "firstKeptEntryId": "6840b91c",
+      "details": {
+        "contextMode": "notes",
+        "boundary": true
+      },
+      "tokensBefore": 49827
+    },
+    {
+      "id": "bc0d493a",
+      "firstKeptEntryId": "3dc20122",
+      "details": {
+        "contextMode": "notes",
+        "boundary": true
+      },
+      "tokensBefore": 51078
+    },
+    {
+      "id": "b85ee83c",
+      "firstKeptEntryId": "27e8d62c",
+      "details": {
+        "contextMode": "notes",
+        "boundary": true
+      },
+      "tokensBefore": 51285
+    },
+    {
+      "id": "760fa90e",
+      "firstKeptEntryId": "d8a5b62b",
+      "details": {
+        "contextMode": "notes",
+        "boundary": true
+      },
+      "tokensBefore": 52510
+    },
+    {
+      "id": "26922c9b",
+      "firstKeptEntryId": "0a5af636",
+      "details": {
+        "contextMode": "notes",
+        "boundary": true
+      },
+      "tokensBefore": 51681
+    }
+  ],
+  "memoryStatus": {
+    "mode": "notes",
+    "notes": [
+      {
+        "name": "handoff",
+        "revision": 9,
+        "chars": 990,
+        "source": "b6e7e1e2",
+        "at": 1792465089114
+      },
+      {
+        "name": "index",
+        "revision": 2037,
+        "chars": 148,
+        "source": "2d530530",
+        "at": 1792465082619
+      }
+    ],
+    "limits": {
+      "index": 1500,
+      "handoff": 4000,
+      "topic": 8000,
+      "read": 2000
+    },
+    "storage": "this extension's own per-Pi-session database; no goal/task databases read",
+    "rolloverQueued": false,
+    "budget": {
+      "model": "gptcodex/gpt-6-luna",
+      "configuredWindowTokens": 1050000,
+      "outputReserveTokens": 16384,
+      "safetyReserveTokens": 32768,
+      "inputLimitTokens": 64000,
+      "prepareAtTokens": 48000,
+      "repairBelowTokens": 58880,
+      "handoffReserveTokens": 5120,
+      "policy": {
+        "inputLimitTokens": 64000
+      },
+      "kind": "conservative budget; provider usage and limits may differ"
+    },
+    "usage": {
+      "tokens": 38528,
+      "source": "Pi usage-backed estimate"
+    }
+  },
+  "success": false,
+  "error": "Cannot read properties of undefined (reading 'path')"
+}
