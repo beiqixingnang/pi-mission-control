@@ -23,6 +23,7 @@ const streamError =
 
 test("summary retries distinguish rate limits and truncated transports from permanent errors", () => {
   assert.equal(summaryFailureKind(streamError), "transport");
+  assert.equal(summaryFailureKind("This operation was aborted"), "transport");
   assert.equal(
     summaryFailureKind("429 Too many requests retry-after: 12"),
     "rate_limit",
@@ -38,8 +39,42 @@ test("summary retries distinguish rate limits and truncated transports from perm
     "Your input exceeds the context window of this model",
     "Response incomplete: length",
     "Content filter",
+    "429 insufficient_quota",
   ])
     assert.equal(summaryFailureKind(error), undefined, error);
+});
+
+test("a transport AbortError is retried while a real caller abort is never retried", async () => {
+  let calls = 0;
+  assert.equal(
+    await requestSummary(
+      async () => {
+        if (++calls === 1)
+          throw new DOMException("This operation was aborted", "AbortError");
+        return success;
+      },
+      { budget: { remaining: 1, used: 0 }, wait: async () => {} },
+    ),
+    success,
+  );
+  assert.equal(calls, 2);
+  const controller = new AbortController();
+  await assert.rejects(
+    requestSummary(
+      async () => {
+        calls++;
+        controller.abort(new Error("USER_STOP"));
+        throw new DOMException("This operation was aborted", "AbortError");
+      },
+      {
+        signal: controller.signal,
+        budget: { remaining: 3, used: 0 },
+        wait: async () => {},
+      },
+    ),
+    /USER_STOP/,
+  );
+  assert.equal(calls, 3);
 });
 test("bounded transient retries share one allowance across summary requests and never accept partial output", async () => {
   const budget = { remaining: 2, used: 0 },

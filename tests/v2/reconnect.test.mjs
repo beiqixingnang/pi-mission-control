@@ -7,6 +7,7 @@ import {
   reconnectPolicy,
   contextLimitError,
   waitForReconnect,
+  providerFailureKind,
 } from "../../runtime/reconnect.ts";
 const { loadExtensions, createExtensionRuntime } = await import(
   pathToFileURL(path.join(hostDir, "dist/core/extensions/loader.js"))
@@ -183,3 +184,51 @@ test("fixed reconnect delay is cancellable without waiting five seconds", async 
   assert.equal(await waiting, false);
   assert.ok(Date.now() - start < 1000);
 });
+
+test("provider-side aborted messages receive reconnect while the actual cancellation signal remains authoritative", () =>
+  harness(async (h) => {
+    await h.emit("message_end", {
+      message: {
+        role: "assistant",
+        stopReason: "aborted",
+        errorMessage: "This operation was aborted",
+      },
+    });
+    const result = await h.emit("agent_before_settle", {
+      entries: [],
+      continue: false,
+      outcome: "aborted",
+    });
+    assert.equal(result.continue, true);
+    h.controller.abort();
+    assert.equal(
+      await h.emit("agent_before_settle", {
+        entries: [],
+        continue: false,
+        outcome: "aborted",
+      }),
+      undefined,
+    );
+  }));
+
+test("account and configuration errors are managed without repeating the same invalid request", () =>
+  harness(async (h) => {
+    for (const error of [
+      "401 invalid API key",
+      "403 permission denied",
+      "429 insufficient_quota",
+      "model fixture not found",
+    ]) {
+      assert.equal(providerFailureKind(error), "external");
+      assert.equal(await h.fail(error), undefined, error);
+    }
+    assert.equal(
+      providerFailureKind("This operation was aborted"),
+      "transient",
+    );
+    assert.equal(
+      providerFailureKind("subscription_sharing_usage_unavailable"),
+      "transient",
+    );
+    assert.equal(providerFailureKind("context window exceeded"), "context");
+  }));

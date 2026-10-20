@@ -530,17 +530,23 @@ export default function (pi: ExtensionAPI) {
     }
   });
   pi.on("message_end", (event, context) => {
-    if (event.message.role === "assistant")
+    if (event.message.role === "assistant") {
+      const cancelled =
+        Boolean(context.signal?.aborted) &&
+        ["error", "aborted"].includes(event.message.stopReason);
       kernel?.leadMessage(
-        event.message.stopReason === "error" ||
-          Boolean(
-            event.message.errorMessage &&
-              event.message.stopReason !== "aborted",
-          ) ||
-          (event.message.stopReason === "aborted" && !context.signal?.aborted),
+        !cancelled &&
+          (event.message.stopReason === "error" ||
+            Boolean(
+              event.message.errorMessage &&
+                event.message.stopReason !== "aborted",
+            ) ||
+            event.message.stopReason === "aborted"),
         event.message.usage?.output ?? 0,
         event.message.errorMessage,
+        cancelled,
       );
+    }
   });
   pi.on("agent_settled", (event) => {
     kernel?.leadSettled(event.aborted);

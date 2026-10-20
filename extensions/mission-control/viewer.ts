@@ -597,7 +597,7 @@ export class MissionPanel {
                   ...(s.recovery
                     ? [
                         `恢复原因：${s.recovery.reason}`,
-                        `恢复请求：${s.recovery.requests}/${this.kernel.settings.recoveryMaxRequests}${s.recovery.nextAt ? " · 下次检查：" + new Date(s.recovery.nextAt).toISOString() : ""}`,
+                        `本轮失败：${s.recovery.burstFailures ?? s.recovery.requests}/${this.kernel.settings.recoveryMaxRequests} · 累计请求：${s.recovery.requests}${s.recovery.nextAt ? " · 下次检查：" + new Date(s.recovery.nextAt).toISOString() : ""}`,
                       ]
                     : []),
                   ...m.criteria.map(

@@ -11,6 +11,7 @@ import { cleanText } from "../../runtime/public.ts";
 import {
   reconnectPolicy,
   contextLimitError,
+  providerFailureKind,
   waitForReconnect,
   type ReconnectOptions,
 } from "../../runtime/reconnect.ts";
@@ -29,6 +30,7 @@ export default function installReconnect(
     extraAttempts = 0,
     generation = 0;
   let lastError = "",
+    providerAborted = false,
     waiting: AbortController | undefined,
     nextAt: number | undefined;
   const reset = () => {
@@ -38,6 +40,7 @@ export default function installReconnect(
     failures = 0;
     extraAttempts = 0;
     lastError = "";
+    providerAborted = false;
     nextAt = undefined;
   };
   function policy(ctx: ExtensionContext) {
@@ -70,10 +73,13 @@ export default function installReconnect(
   pi.on("session_tree", clear);
   pi.on("before_agent_start", clear);
   pi.events.on("mission-control:interrupt", reset);
-  pi.on("message_end", (event) => {
+  pi.on("message_end", (event, ctx) => {
     if (event.message.role !== "assistant") return;
+    providerAborted =
+      event.message.stopReason === "aborted" && !ctx.signal?.aborted;
     if (
       event.message.stopReason === "error" ||
+      providerAborted ||
       (event.message.errorMessage && event.message.stopReason !== "aborted")
     ) {
       failures++;
@@ -88,7 +94,12 @@ export default function installReconnect(
     }
   });
   pi.on("agent_before_settle", async (event, ctx) => {
-    if (event.outcome !== "error" || ctx.signal?.aborted) return;
+    if (
+      (event.outcome !== "error" &&
+        !(event.outcome === "aborted" && providerAborted)) ||
+      ctx.signal?.aborted
+    )
+      return;
     let config;
     try {
       config = policy(ctx);
@@ -103,6 +114,7 @@ export default function installReconnect(
       used >= config.maxRetries ||
       extraAttempts >= config.maxRetries ||
       contextLimitError(lastError) ||
+      providerFailureKind(lastError) === "external" ||
       persistence?.retryAllowed?.() === false ||
       ctx.hasPendingMessages()
     )
@@ -164,7 +176,7 @@ export default function installReconnect(
     extraAttempts,
     nextAt,
     lastError,
-    note: "Native retry runs first; automatic lead requests share a persistent recovery allowance. off disables supplemental reconnect only.",
+    note: "Native retry runs first; failed lead requests share a persistent burst allowance followed by cooldown probes. Healthy responses clear the fault. off disables supplemental reconnect only.",
   });
   const configure = (ctx: ExtensionContext, patch: ReconnectOptions) => {
     if (!persistence) throw new Error("No persistent lead runtime attached");

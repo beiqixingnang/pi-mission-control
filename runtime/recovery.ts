@@ -2,8 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { Store } from "./store.ts";
 import type { Recovery, Settings } from "./types.ts";
 import { cleanText } from "./public.ts";
+import { providerFailureKind } from "./reconnect.ts";
 
-/** One durable failure episode shared by native retry, supplemental retry and outbox probes. */
+// Custom summary failures are reported separately from Pi's generic cancel
+// receipt. Only an explicit compaction cancellation represents user intent.
+const cancelledCompaction = (reason: string) =>
+  /^Compaction (?:cancelled|canceled)(?: by\b.*)?$|^Compaction failed or was cancelled$/i.test(
+    reason,
+  );
+
+/** Durable failure bursts; exhausted bursts cool down rather than abandoning approved work. */
 export class LeadRecovery {
   private admittedId?: string;
   private store: Store;
@@ -30,10 +38,50 @@ export class LeadRecovery {
         previousPhase,
         requests: value.requests,
         probes: value.probes,
+        failures: value.failures,
+        burstFailures: value.burstFailures,
+        burstProbes: value.burstProbes,
+        cooldowns: value.cooldowns,
+        nextAt: value.nextAt,
         missionId: value.missionId,
         revision: value.revision,
       });
     return value;
+  }
+  private delay(value: Recovery) {
+    const backoff = Math.min(
+      this.settings().recoveryCooldownMs *
+        2 ** Math.min(value.cooldowns ?? 0, 6),
+      3_600_000,
+    );
+    const retryAfter = value.reason.match(
+      /retry[- ]after\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|seconds?)?/i,
+    );
+    return Math.max(
+      backoff,
+      retryAfter
+        ? Number(retryAfter[1]) *
+            (retryAfter[2]?.toLowerCase().startsWith("m") ? 1 : 1000)
+        : 0,
+    );
+  }
+  private exhausted(value: Recovery) {
+    if (value.phase === "exhausted" && value.nextAt !== undefined) return;
+    value.phase = "exhausted";
+    value.nextAt = this.now() + this.delay(value);
+    value.cooldowns = (value.cooldowns ?? 0) + 1;
+    this.save(value, "exhausted");
+  }
+  retryAllowed(): boolean {
+    const value = this.current();
+    return (
+      !value ||
+      (value.kind !== "context" &&
+        value.phase !== "blocked" &&
+        value.phase !== "exhausted" &&
+        (value.burstFailures ?? value.requests) <
+          this.settings().recoveryMaxRequests)
+    );
   }
   revise(revision: number) {
     const value = this.current();
@@ -54,22 +102,32 @@ export class LeadRecovery {
       reason: "",
       requests: 0,
       probes: 0,
+      version: 2,
+      failures: 0,
+      burstFailures: 0,
+      burstProbes: 0,
+      cooldowns: 0,
       openedAt: this.now(),
       updatedAt: this.now(),
     };
     if (this.admittedId !== value.id) value.requests++;
     this.admittedId = undefined;
+    value.failures = (value.failures ?? 0) + 1;
+    value.burstFailures = (value.burstFailures ?? 0) + 1;
     // An overflow requires a changed context, even if the episode began as a transport failure.
     if (kind === "context" || value.kind !== "context" || value.compactionId)
       value.kind = kind;
     value.reason = cleanText(reason, 1500);
-    value.phase = value.kind === "context" ? "waiting_compaction" : "cooldown";
+    value.phase =
+      value.kind === "context"
+        ? "waiting_compaction"
+        : providerFailureKind(reason) === "external"
+          ? "blocked"
+          : "cooldown";
+    if (value.kind === "context" && value.compactionId)
+      value.compactionAttempted = false;
     value.nextAt =
-      this.now() +
-      Math.min(
-        this.settings().recoveryCooldownMs * 2 ** Math.min(value.probes, 5),
-        3_600_000,
-      );
+      value.phase === "blocked" ? undefined : this.now() + this.delay(value);
     return this.save(value, fresh ? "opened" : undefined);
   }
   /** Called for every context build, including native and extension retries. */
@@ -77,11 +135,14 @@ export class LeadRecovery {
     this.admittedId = undefined;
     const value = this.current();
     if (!value) return true;
-    if (automatic && value.requests >= this.settings().recoveryMaxRequests) {
-      if (value.phase !== "exhausted") {
-        value.phase = "exhausted";
-        this.save(value, "exhausted");
-      }
+    if (
+      automatic &&
+      (value.phase === "blocked" ||
+        value.phase === "exhausted" ||
+        (value.burstFailures ?? value.requests) >=
+          this.settings().recoveryMaxRequests)
+    ) {
+      if (value.phase !== "blocked") this.exhausted(value);
       return false;
     }
     value.requests++;
@@ -94,31 +155,27 @@ export class LeadRecovery {
     if (!value) return;
     if (
       value.kind !== "context" &&
-      (value.requests >= this.settings().recoveryMaxRequests ||
-        value.probes >= this.settings().maxWakeAttempts)
+      value.phase !== "blocked" &&
+      ((value.burstFailures ?? value.requests) >=
+        this.settings().recoveryMaxRequests ||
+        (value.burstProbes ?? value.probes) >= this.settings().maxWakeAttempts)
     ) {
-      value.phase = "exhausted";
-      value.nextAt = undefined;
-      this.save(value, "exhausted");
+      this.exhausted(value);
     } else this.save(value, "deferred");
   }
   ready(): boolean {
     const value = this.current();
     if (!value) return true;
     if (
-      value.phase === "cooldown" &&
+      (value.phase === "cooldown" || value.phase === "exhausted") &&
       (value.nextAt ?? Infinity) <= this.now()
     ) {
-      if (
-        value.requests >= this.settings().recoveryMaxRequests ||
-        value.probes >= this.settings().maxWakeAttempts
-      ) {
-        value.phase = "exhausted";
-        this.save(value, "exhausted");
-      } else {
-        value.phase = "ready";
-        this.save(value);
+      if (value.phase === "exhausted") {
+        value.burstFailures = 0;
+        value.burstProbes = 0;
       }
+      value.phase = "ready";
+      this.save(value, "retry-ready");
     }
     return value.phase === "ready";
   }
@@ -127,10 +184,19 @@ export class LeadRecovery {
     if (!value) return;
     value.phase = "probing";
     value.probes++;
+    value.burstProbes = (value.burstProbes ?? 0) + 1;
     this.save(value, "probe");
   }
   claimCompaction(): boolean {
     const value = this.current();
+    if (
+      value?.phase === "compaction_failed" &&
+      value.nextAt !== undefined &&
+      value.nextAt <= this.now()
+    ) {
+      value.phase = "waiting_compaction";
+      value.compactionAttempted = false;
+    }
     if (
       !value ||
       value.kind !== "context" ||
@@ -154,10 +220,9 @@ export class LeadRecovery {
     if (!value || value.kind !== "context" || value.compactionId === id)
       return false;
     value.compactionId = id;
-    value.phase =
-      value.requests < this.settings().recoveryMaxRequests
-        ? "ready"
-        : "exhausted";
+    value.phase = "ready";
+    value.burstFailures = 0;
+    value.burstProbes = 0;
     value.nextAt = this.now();
     this.save(value, "context-repaired");
     return value.phase === "ready";
@@ -166,16 +231,18 @@ export class LeadRecovery {
     const value = this.current();
     if (!value || value.kind !== "context") return;
     if (
-      !(
-        value.phase === "compaction_failed" &&
-        /^Compaction (?:cancelled|failed|failed or was cancelled)$/i.test(
-          reason,
-        )
-      )
+      value.phase === "compaction_failed" &&
+      /^Compaction (?:cancelled|failed|failed or was cancelled)$/i.test(reason)
     )
-      value.reason = cleanText(reason, 1500);
+      return;
+    value.reason = cleanText(reason, 1500);
     value.phase = "compaction_failed";
-    value.nextAt = undefined;
+    value.nextAt =
+      cancelledCompaction(reason) || providerFailureKind(reason) !== "transient"
+        ? undefined
+        : this.now() + this.delay(value);
+    if (value.nextAt !== undefined)
+      value.cooldowns = (value.cooldowns ?? 0) + 1;
     value.compactionAttempted = true;
     this.save(value, "compaction-failed");
   }
@@ -188,6 +255,29 @@ export class LeadRecovery {
   }
   restart() {
     const value = this.current();
+    if (value && value.version !== 2) {
+      value.version = 2;
+      // Old requests included healthy continuations: do not relabel them as failures.
+      value.legacyRequests = value.requests;
+      value.failures = value.burstFailures = value.burstProbes = 0;
+      value.cooldowns = 0;
+      if (
+        (value.phase === "exhausted" ||
+          (value.phase === "compaction_failed" &&
+            !cancelledCompaction(value.reason) &&
+            providerFailureKind(value.reason) === "transient")) &&
+        value.nextAt === undefined
+      )
+        value.nextAt = this.now() + this.delay(value);
+      if (
+        value.kind !== "context" &&
+        providerFailureKind(value.reason) === "external"
+      ) {
+        value.phase = "blocked";
+        value.nextAt = undefined;
+      }
+      this.save(value, "migrated");
+    }
     if (
       value?.kind === "context" &&
       (value.phase === "compacting" ||

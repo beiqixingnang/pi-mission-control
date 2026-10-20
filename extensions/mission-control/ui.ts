@@ -36,7 +36,8 @@ export function missionState(m?: Mission, recovery?: Recovery) {
       cooldown: "恢复等待",
       ready: "等待恢复验证",
       probing: "恢复验证中",
-      exhausted: "恢复需要检查",
+      exhausted: "恢复冷却",
+      blocked: "等待外部修复",
     }[recovery.phase];
   return m?.externalWait ? "等待外部事件" : m ? stateNames[m.status] : "就绪";
 }
@@ -185,7 +186,7 @@ export function board(
     if (m?.reason) lines.push(`需处理：${cleanText(m.reason, 240)}`);
     if (s.recovery)
       lines.push(
-        `恢复原因 ${cleanText(s.recovery.reason, 240)} · 请求 ${s.recovery.requests}/${kernel.settings.recoveryMaxRequests}`,
+        `恢复原因 ${cleanText(s.recovery.reason, 240)} · 本轮失败 ${s.recovery.burstFailures ?? s.recovery.requests}/${kernel.settings.recoveryMaxRequests} · 累计请求 ${s.recovery.requests}${s.recovery.nextAt ? " · 下次检查 " + new Date(s.recovery.nextAt).toISOString() : ""}`,
       );
     if (m)
       lines.push(

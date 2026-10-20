@@ -67,7 +67,9 @@ def main():
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 140, 0, 0))
     environment = {key: value for key, value in os.environ.items() if not any(secret in key.upper() for secret in ["API_KEY", "AUTH_TOKEN", "ACCESS_TOKEN"])}
-    environment.update(PI_CODING_AGENT_DIR=str(agent), PI_OFFLINE="1", TERM="xterm-256color", COLUMNS="140", LINES="42")
+    lifecycle_trace = reports / ("tui-lifecycle-" + uuid.uuid4().hex[:8] + ".jsonl")
+    environment.update(PI_CODING_AGENT_DIR=str(agent), PI_OFFLINE="1", TERM="xterm-256color", COLUMNS="140", LINES="42",
+        MC_FIXTURE_LIFECYCLE_TRACE=str(lifecycle_trace))
     process = subprocess.Popen([shutil.which("pi"), "--offline", "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates",
         "--tools", "*",
         "-e", str(fixture), "--provider", "mission-fixture", "--model", "model", "--thinking", "off", *arguments],
@@ -121,6 +123,16 @@ def main():
     def tool(name, args):
         line("V2_TEST:" + json.dumps({"op": "tool", "name": name, "args": args, "noRepeatWake": True}, separators=(",", ":")))
 
+    def reload(label):
+        # TUI redraws can repeat an old "Reloaded" notice before a new reload
+        # actually happens. Wait for a fresh session_start from the fixture.
+        previous = len(lifecycle_trace.read_text().splitlines()) if lifecycle_trace.exists() else 0
+        line("/reload")
+        wait(lambda: lifecycle_trace.exists() and len(lifecycle_trace.read_text().splitlines()) > previous, label)
+        end = time.monotonic() + .4
+        while time.monotonic() < end:
+            drain()
+
     try:
         wait(lambda: database.exists() and "↑" in visible and "model" in visible, "dedicated test conversation opened and TUI input is ready")
         line("/name " + config["name"])
@@ -134,9 +146,7 @@ def main():
         wait(lambda: mission()["humanPaused"], "baseline paused")
         original = mission().copy()
         copy_package(candidate, package)
-        marker = len(visible)
-        line("/reload")
-        wait(lambda: "Reloaded keybindings" in visible[marker:], "candidate loaded through literal /reload in the same Pi process")
+        reload("candidate loaded through literal /reload in the same Pi process")
         assert mission()["id"] == original["id"] and mission()["humanPaused"]
         assert mission()["outputTokens"] == original["outputTokens"]
         line("/mission resume")
@@ -170,11 +180,110 @@ def main():
         wait(lambda: any(n["id"] == leaf["id"] and n["state"] == "accepted" for n in query("goal_nodes")), "scope and evidence accepted once")
         line("/mission pause")
         wait(lambda: mission()["humanPaused"], "test goal paused for retention")
-        marker = len(visible)
-        line("/reload")
-        wait(lambda: "Reloaded keybindings" in visible[marker:], "second /reload preserved test goal, scope and acceptance")
+        reload("second /reload preserved test goal, scope and acceptance")
         retained = next(n for n in query("goal_nodes") if n["id"] == leaf["id"])
         assert retained["state"] == "accepted" and retained["scope"] == leaf["scope"]
+        # Real TUI fault injection uses only this offline provider and test workspace.
+        (agent / "mission-control.json").write_text(json.dumps({"workerExtensions": [str(fixture)],
+            "progressIntervalMs": 3600000, "recoveryMaxRequests": 3, "recoveryCooldownMs": 1000,
+            "reconnect": {"enabled": True, "delayMs": 0}}))
+        reload("fault-test settings loaded through /reload while paused")
+        fault_dir = workspace / ("recovery-" + uuid.uuid4().hex[:8])
+        fault_dir.mkdir()
+        line("/mission resume")
+        wait(lambda: not mission()["humanPaused"], "test mission resumed for automatic recovery fault injection")
+        existing_nodes = {node["id"] for node in query("goal_nodes")}
+        tool("goal_plan", {"goals": [{"parentId": leaf["parentId"], "objective": "Exercise isolated recovery evidence writes",
+            "criteria": ["24 evidence writes survive a transient failure"],
+            "scope": {"unitKind": "batch", "items": [str(fault_dir)]}}]})
+        wait(lambda: any(n["id"] not in existing_nodes for n in query("goal_nodes")), "separate unaccepted goal registered for fault-injection evidence")
+        fault_leaf = next(n for n in query("goal_nodes") if n["id"] not in existing_nodes)
+
+        def recovery():
+            values = query("meta", "key='leadRecovery'")
+            return values[0] if values else None
+
+        def attempts(file):
+            return [json.loads(row) for row in file.read_text().splitlines()] if file.exists() else []
+
+        def quiet(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                drain()
+
+        def assistant_said(prefix):
+            session_file = next(sessions.glob("*_" + config["id"] + ".jsonl"))
+            with session_file.open("rb") as source:
+                source.seek(max(0, session_file.stat().st_size - 1024 * 1024))
+                lines = source.read().splitlines()
+            for row in lines:
+                try:
+                    message = json.loads(row).get("message", {})
+                except (ValueError, UnicodeError):
+                    continue
+                if message.get("role") == "assistant" and any(block.get("type") == "text" and
+                    block.get("text", "").startswith(prefix) for block in message.get("content", [])):
+                    return True
+            return False
+
+        tool("goal_focus", {"goalId": fault_leaf["id"], "revision": 0})
+        wait(lambda: any(n["id"] == fault_leaf["id"] and n["state"] == "active" for n in query("goal_nodes")), "fault injection bound to the unaccepted file batch")
+        burst_trace = fault_dir / "burst.jsonl"
+        tool("schedule", {"action": "create", "title": "Injected upstream outage", "afterSeconds": 1,
+            "prompt": "V2_TEST:" + json.dumps({"op": "flaky", "key": uuid.uuid4().hex,
+                "failures": 5, "error": "502 Upstream service temporarily unavailable", "traceFile": str(burst_trace)}, separators=(",", ":"))})
+        wait(lambda: recovery() and recovery()["phase"] == "exhausted", "injected upstream outage exhausted one bounded failure burst")
+        saved_fault = recovery().copy()
+        assert saved_fault["burstFailures"] == 3 and saved_fault["requests"] == 3
+        assert saved_fault["nextAt"] > int(time.time() * 1000)
+        reload("literal /reload retained the outage in the same Pi process")
+        if recovery():
+            assert recovery()["id"] == saved_fault["id"] and recovery()["requests"] >= 3
+        wait(lambda: len(attempts(burst_trace)) >= 6 and not recovery(), "upstream outage recovered automatically after cooldown and reload without a human continue")
+        burst = attempts(burst_trace)
+        assert len(burst) == 6 and sum(row["failed"] for row in burst) == 5
+        assert mission()["id"] == original["id"] and not mission()["humanPaused"]
+
+        abort_trace = fault_dir / "provider-abort.jsonl"
+        tool("schedule", {"action": "create", "title": "Injected provider abort", "afterSeconds": 1,
+            "prompt": "V2_TEST:" + json.dumps({"op": "flaky", "key": uuid.uuid4().hex,
+                "failures": 1, "transportAbort": True, "error": "This operation was aborted", "traceFile": str(abort_trace)}, separators=(",", ":"))})
+        wait(lambda: len(attempts(abort_trace)) == 2 and not recovery(), "provider-side aborted response reconnected without becoming a user Escape hold")
+        assert not query("meta", "key='escapeHold'") or not query("meta", "key='escapeHold'")[0]
+
+        chain_dir = fault_dir / "chain"
+        chain_dir.mkdir()
+        chain_key = uuid.uuid4().hex
+        tool("schedule", {"action": "create", "title": "Injected abort during source work", "afterSeconds": 1,
+            "prompt": "V2_TEST:" + json.dumps({"op": "recovery-chain", "key": chain_key,
+                "directory": str(chain_dir), "steps": 24}, separators=(",", ":"))})
+        wait(lambda: len(list(chain_dir.glob("step-*.txt"))) == 24 and assistant_said("RECOVERY_CHAIN_COMPLETE " + chain_key),
+            "24 real tool calls continued after one aborted request without exhausting the failure allowance")
+        assert not recovery()
+
+        pause_trace, pause_control = fault_dir / "pause.jsonl", fault_dir / "pause-control.json"
+        pause_control.write_text(json.dumps({"failures": 100}))
+        tool("schedule", {"action": "create", "title": "User pause during outage", "afterSeconds": 1,
+            "prompt": "V2_TEST:" + json.dumps({"op": "flaky", "key": uuid.uuid4().hex,
+                "controlFile": str(pause_control), "traceFile": str(pause_trace), "error": "This operation was aborted"}, separators=(",", ":"))})
+        wait(lambda: recovery() and recovery()["phase"] == "exhausted", "second injected outage reached persisted cooldown")
+        line("/mission pause")
+        wait(lambda: mission()["humanPaused"], "user pause remained authoritative during an outage")
+        paused_attempts = len(attempts(pause_trace))
+        quiet(2)
+        assert len(attempts(pause_trace)) == paused_attempts
+        reload("paused recovery and accepted evidence survived literal /reload")
+        quiet(2)
+        assert len(attempts(pause_trace)) == paused_attempts and mission()["humanPaused"]
+        checks.append("cooldown retries did not bypass a user pause, including after reload")
+        pause_control.write_text(json.dumps({"failures": 0}))
+        line("/mission resume")
+        wait(lambda: len(attempts(pause_trace)) > paused_attempts and not recovery(), "explicit user resume continued the retained task after the provider was repaired")
+        line("/mission pause")
+        wait(lambda: mission()["humanPaused"], "test mission paused after fault regressions")
+        (reports / "recovery-fault-injection.json").write_text(json.dumps({"passed": True,
+            "sameProcess": process.poll() is None, "sessionId": config["id"], "outage": burst,
+            "providerAbort": attempts(abort_trace), "chainWrites": 24, "pauseAttempts": attempts(pause_trace)}, indent=2))
         memory_file = agent / "context-memory" / config["id"] / "memory.sqlite"
 
         def memory_rows(sql, args=()):
@@ -208,9 +317,7 @@ def main():
         before_windows = len(compactions())
         tool("context_rollover", {})
         wait(lambda: len(compactions()) > before_windows and compactions()[-1].get("details", {}).get("boundary"), "model tool rollover committed at the current boundary and continued in the same Pi process")
-        marker = len(visible)
-        line("/reload")
-        wait(lambda: "Reloaded keybindings" in visible[marker:], "notes context survived literal /reload in the same Pi process")
+        reload("notes context survived literal /reload in the same Pi process")
         assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)]
         assert 40000 in local_budget()
         checks.append("reload preserved the model-specific input budget")

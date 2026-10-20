@@ -13,6 +13,18 @@ let summaryCalls = 0;
 const requestAttempts = new Map<string, number>();
 let notesCycle: any;
 export default function (pi: ExtensionAPI) {
+  pi.on("session_start", (_event, ctx) => {
+    if (process.env.MC_FIXTURE_LIFECYCLE_TRACE)
+      fs.appendFileSync(
+        process.env.MC_FIXTURE_LIFECYCLE_TRACE,
+        JSON.stringify({
+          event: "session_start",
+          pid: process.pid,
+          sessionId: ctx.sessionManager.getSessionId(),
+          at: Date.now(),
+        }) + "\n",
+      );
+  });
   pi.registerProvider("mission-fixture", {
     baseUrl: "http://127.0.0.1/unused",
     api: "mission-fixture",
@@ -316,22 +328,87 @@ export default function (pi: ExtensionAPI) {
             stream.end();
             return;
           }
+          if (command.op === "recovery-chain") {
+            const key = command.key;
+            if (
+              last?.role === "toolResult" &&
+              last.isError &&
+              last.toolCallId?.startsWith(`fixture-step-${key}-`)
+            )
+              throw new Error("Fixture evidence write rejected: " + lastText);
+            const step = context.messages.filter(
+              (m: any) =>
+                m.role === "toolResult" &&
+                m.toolCallId?.startsWith(`fixture-step-${key}-`),
+            ).length;
+            const failed = requestAttempts.get(key) ?? 0;
+            if (
+              step === (command.failAtStep ?? 1) &&
+              failed < (command.failures ?? 1)
+            ) {
+              requestAttempts.set(key, failed + 1);
+              throw new Error(command.error ?? "This operation was aborted");
+            }
+            if (step < (command.steps ?? 24)) {
+              tool("write", {
+                path: `${command.directory}/step-${step}.txt`,
+                content: `Evidence ${key} ${step}\n`,
+              });
+              message.content[0].id = `fixture-step-${key}-${step}`;
+            } else if (
+              last?.role !== "toolResult" ||
+              last.toolName !== "mission_status"
+            ) {
+              tool("mission_status", {});
+            } else answer(`RECOVERY_CHAIN_COMPLETE ${key} ` + lastText);
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: message.stopReason, message });
+            stream.end();
+            return;
+          }
           if (command.op === "flaky") {
             const key = command.key ?? "default";
-            const attempt = (requestAttempts.get(key) ?? 0) + 1;
+            const trace =
+              command.traceFile && fs.existsSync(command.traceFile)
+                ? fs
+                    .readFileSync(command.traceFile, "utf8")
+                    .trim()
+                    .split("\n")
+                    .filter(Boolean)
+                : [];
+            const attempt =
+              (command.traceFile
+                ? trace.length
+                : (requestAttempts.get(key) ?? 0)) + 1;
             requestAttempts.set(key, attempt);
-            if (attempt <= command.failures && command.transportAbort) {
+            const fault = command.controlFile
+              ? {
+                  ...command,
+                  ...JSON.parse(fs.readFileSync(command.controlFile, "utf8")),
+                }
+              : command;
+            if (command.traceFile)
+              fs.appendFileSync(
+                command.traceFile,
+                JSON.stringify({
+                  attempt,
+                  at: Date.now(),
+                  failed: attempt <= fault.failures,
+                }) + "\n",
+              );
+            if (attempt <= fault.failures && fault.transportAbort) {
               message.stopReason = "aborted";
               message.errorMessage =
+                fault.error ??
                 "Fixture provider transport aborted without a user cancellation";
               stream.push({ type: "start", partial: message });
               stream.push({ type: "error", reason: "aborted", error: message });
               stream.end();
               return;
             }
-            if (attempt <= command.failures)
+            if (attempt <= fault.failures)
               throw new Error(
-                command.error ??
+                fault.error ??
                   "custom station disconnected without a standard status code",
               );
             answer(`RECOVERED_REQUEST_${attempt}`);

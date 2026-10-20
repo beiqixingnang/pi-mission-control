@@ -598,7 +598,7 @@ test("restart records interrupted work and delivers recovery instead of replayin
     assert.match(h.wakes[0].content, /reconcile|Runtime closed/i);
   }));
 
-test("failed wakes cool down and quarantine unread results after bounded recovery without pausing the goal", () =>
+test("failed wakes preserve unread results and automatically probe again after a bounded burst", () =>
   using(async (h) => {
     h.add("worker");
     h.kernel.dispatch("worker", "task");
@@ -613,15 +613,19 @@ test("failed wakes cool down and quarantine unread results after bounded recover
       h.advance(600000);
       await h.kernel.tick();
     }
-    assert.equal(h.wakes.length, 4);
+    assert.equal(h.wakes.length, 5);
     assert.equal(h.kernel.store.mission().status, "active");
-    assert.equal(h.kernel.snapshot().recovery.phase, "exhausted");
+    assert.equal(h.kernel.snapshot().recovery.phase, "probing");
     assert.ok(
       h.kernel.store.deliveries("lead").some((d) => d.state === "quarantined"),
     );
+    h.kernel.leadStarted(h.wakes.at(-1));
+    h.kernel.leadMessage(true);
+    h.kernel.leadSettled();
+    h.idle();
     h.advance(20000);
     await h.kernel.tick();
-    assert.equal(h.wakes.length, 4);
+    assert.equal(h.wakes.length, 5);
   }));
 
 test("reminder occurrence and outbox commit together; missed intervals do not accumulate old reminders", () =>

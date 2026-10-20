@@ -77,6 +77,7 @@ export class MissionKernel {
   private leadResponded = false;
   private automaticTurn = false;
   private runtimeAborted = false;
+  private leadRequests = 0;
   private recovery: LeadRecovery;
   private activityClock: MissionActivityClock;
   private leadRunning = false;
@@ -1628,7 +1629,7 @@ export class MissionKernel {
     return {
       eligible: this.recovery.ready(),
       recovery: this.recovery.current(),
-      note: "Recovery preserves goal budgets. Context errors require successful compaction; exhausted transport recovery requires a successful human request or explicit user resume.",
+      note: "Recovery preserves goal budgets and retained tool results. Context errors require successful compaction. Exhausted failure bursts retry after the persisted cooldown; external account/configuration errors require repair. No extra human continue is needed after a healthy response.",
     };
   }
   claimRecoveryCompaction() {
@@ -1665,7 +1666,8 @@ export class MissionKernel {
     this.changed();
   }
   admitLeadRequest() {
-    if (this.recovery.admit(this.automaticTurn)) {
+    if (this.recovery.admit(this.automaticTurn || this.leadRequests > 0)) {
+      this.leadRequests++;
       this.leadRunning = true;
       this.syncActivity();
       return true;
@@ -1679,11 +1681,12 @@ export class MissionKernel {
     this.runtimeAborted = true;
   }
   canRetryLeadRequest() {
-    const value = this.recovery.current();
     return (
-      !value ||
-      (value.kind !== "context" &&
-        value.requests < this.settings.recoveryMaxRequests)
+      !this.closing &&
+      !this.userHold &&
+      !this.store.mission()?.humanPaused &&
+      !this.store.get("relocationHold") &&
+      this.recovery.retryAllowed()
     );
   }
   leadStarted(wake?: Wake) {
@@ -1705,6 +1708,7 @@ export class MissionKernel {
     this.leadFailed = false;
     this.leadResponded = false;
     this.runtimeAborted = false;
+    this.leadRequests = 0;
     this.automaticTurn = Boolean(wake);
     this.turnActed = false;
     this.wakeIncluded = false;
@@ -1743,6 +1747,7 @@ export class MissionKernel {
     error: boolean,
     outputTokens = 0,
     errorText = "Provider request failed",
+    cancelled = false,
   ) {
     // A provider may report the locally aborted request as an error. It was not admitted.
     if (this.runtimeAborted) {
@@ -1752,13 +1757,14 @@ export class MissionKernel {
       return;
     }
     this.leadFailed = error;
-    this.leadResponded = true;
-    this.leadRunning = !error;
+    this.leadResponded = !cancelled;
+    this.leadRunning = !error && !cancelled;
     if (error)
       this.recovery.fail(
         contextLimitError(errorText) ? "context" : "provider",
         errorText,
       );
+    else if (!cancelled) this.recovery.succeeded();
     const m = this.store.mission();
     if (m && !["complete", "stopped"].includes(m.status)) {
       m.outputTokens += outputTokens;
@@ -2004,7 +2010,9 @@ export class MissionKernel {
           arguments: { action: "status", target: "lead" },
         },
         instruction:
-          "Inspect the exact summary route and failure. Automatic compaction has stopped; it is not waiting for an expired timer. Resume cached work with mission_compact or /compact after inspecting the cause. Never disable the custom summary route to fall back to a rate-limited inference model.",
+          recovery.nextAt !== undefined
+            ? `Transient summary failure; cached compaction will retry automatically after ${new Date(recovery.nextAt).toISOString()}. Do not start a duplicate or change the configured summary route.`
+            : "Inspect the exact summary route and failure. Cancellation or an external configuration/account error requires repair before resuming cached work with mission_compact or /compact. Never silently fall back to the inference model.",
       };
     if (recovery?.phase === "compacting")
       return {
@@ -2016,7 +2024,11 @@ export class MissionKernel {
     if (recovery)
       return {
         ...base,
-        state: "runtime_recovery",
+        state:
+          recovery.phase === "blocked"
+            ? "external_repair_required"
+            : "runtime_recovery",
+        nextAt: recovery.nextAt,
         nextCall: {
           tool: "mission_recover",
           arguments: {
@@ -2025,7 +2037,9 @@ export class MissionKernel {
           },
         },
         instruction:
-          "Inspect the existing automatic recovery episode; no user hold or budget is renewed.",
+          recovery.phase === "blocked"
+            ? "Repair the reported account, permission or model configuration. A new successful request clears this fault; do not repeat an unchanged invalid request. User holds and budgets remain authoritative."
+            : "The runtime owns automatic retries and cooldown probes. A healthy model response clears the fault immediately; continue approved work without requesting another human continue. Inspect retained results before repeating commands. User holds and budgets remain authoritative.",
       };
     if (m?.externalWait)
       return {
@@ -2342,7 +2356,7 @@ export class MissionKernel {
         } else if (this.recovery.current()?.phase === "exhausted") {
           d.state = "quarantined";
           d.reason =
-            "Recovery request allowance exhausted; notification remains unread and can be explicitly collected.";
+            "Recovery failure burst is cooling down; notification remains unread and will retry after a healthy response, or can be explicitly collected.";
         } else continue;
         this.store.putDelivery(d);
         this.store.event(`delivery.${d.state}`, d.id);
@@ -2388,13 +2402,15 @@ export class MissionKernel {
     const fault = this.recovery.current();
     if (
       fault?.phase === "ready" &&
-      m?.status === "active" &&
-      !m.externalWait &&
+      (!m || m.status === "active") &&
+      !m?.externalWait &&
       !this.store
         .deliveries("lead")
         .some(
           (d) =>
-            d.state === "pending" && (!d.missionId || d.missionId === m.id),
+            d.state === "pending" &&
+            d.nextAttemptAt <= this.now() &&
+            (!d.missionId || d.missionId === m?.id),
         )
     ) {
       this.delivery({

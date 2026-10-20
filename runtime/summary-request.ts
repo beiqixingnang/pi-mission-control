@@ -1,5 +1,5 @@
 import type { SummaryResponse } from "./summarize.ts";
-import { contextLimitError } from "./reconnect.ts";
+import { contextLimitError, providerFailureKind } from "./reconnect.ts";
 
 export interface SummaryRetryBudget {
   remaining: number;
@@ -19,6 +19,7 @@ export function summaryFailureKind(
 ): SummaryRetryEvent["kind"] | undefined {
   if (
     contextLimitError(reason) ||
+    providerFailureKind(reason) === "external" ||
     /(?:\b401\b|\b403\b|invalid api key|authentication|permission denied|model.{0,30}(?:not found|unavailable)|content.?filter|Response incomplete:|max_output_tokens)/i.test(
       reason,
     )
@@ -27,7 +28,7 @@ export function summaryFailureKind(
   if (/\b429\b|rate.?limit|too many requests|resource.?exhausted/i.test(reason))
     return "rate_limit";
   if (
-    /stream ended before a terminal response event|ended without|stream disconnected|malformed server-sent event JSON|error reading response|connection.{0,20}(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.?error|timed? out|timeout|ECONNRESET|EPIPE|ENOTFOUND/i.test(
+    /stream ended before a terminal response event|ended without|stream disconnected|malformed server-sent event JSON|error reading response|connection.{0,20}(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.?error|timed? out|timeout|ECONNRESET|EPIPE|ENOTFOUND|terminated|\baborted\b|AbortError/i.test(
       reason,
     )
   )

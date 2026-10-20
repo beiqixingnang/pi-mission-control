@@ -34,6 +34,19 @@ export function contextLimitError(text: string) {
     text,
   );
 }
+/** Unknown gateway errors are recoverable; explicit configuration/account failures need repair. */
+export function providerFailureKind(
+  text: string,
+): "context" | "external" | "transient" {
+  if (contextLimitError(text)) return "context";
+  if (
+    /\b40[13]\b|invalid.{0,12}api.{0,6}key|authentication.{0,20}(?:failed|required)|permission denied|insufficient_quota|quota exceeded|out of budget|insufficient (?:balance|credits|funds)|billing|GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|subscription_sharing_usage_limit_exceeded|model.{0,40}(?:not found|does not exist)|unsupported (?:model|parameter)|invalid (?:parameter|argument)|content.?filter/i.test(
+      text,
+    )
+  )
+    return "external";
+  return "transient";
+}
 export function waitForReconnect(
   ms: number,
   signal: AbortSignal,

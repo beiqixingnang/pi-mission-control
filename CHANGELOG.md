@@ -1,9 +1,12 @@
-# Unreleased — context modes candidate
+# 2.4.0 — context modes and durable fault recovery (2026-10-20)
 
+- Count actual consecutive provider failures separately from successful tool continuations; clear a recovery episode immediately on a healthy model response. Exhausted bursts retry after durable, increasing cooldowns instead of requiring another human continue.
+- Reconnect provider-side aborted responses while preserving real cancellation, user holds and budgets. Classify external account/configuration faults, retry transient summary failures with retained caches, and migrate legacy exhausted recovery on /reload.
+- Inject upstream failures, non-user aborts, long tool sequences and pause/reload scenarios into real Pi and the dedicated WSL TUI conversation.
 - Add a standalone, per-conversation notes mode with bounded working notes, public-history lookup, persisted mode selection and safe rollover/resume through existing Pi compaction hooks.
 - Separate summary input, intermediate and final budgets; retain explicit legacy character limits, completed chunk caches, failure recovery and strict summary routing. Preserve corrected identifiers and continuation details in summary prompts.
 - Require a complete goal inventory before execution; discuss execution-time scope changes with the user, reserving rolling planning for approved exploratory work with unclear requirements.
-- Extend Windows/WSL regression coverage and same-process TUI reload checks. Add an opt-in synthetic live-model benchmark; this candidate is not installed automatically.
+- Extend Windows/WSL regression coverage and same-process TUI reload checks. Add an opt-in synthetic live-model benchmark and require isolated validation before installation.
 - Refresh notes at Pi turn boundaries so managed members survive multiple windows before task settlement. Use native cut points and ignore mechanical memory-save receipts when checking handoff coverage.
 - Add per-route conservative notes input budgets, bounded automatic handoff preparation and context-rejection learning. Preserve repair allowances across reload; do not treat 429 as a context limit or silently change summary routes.
 - Exercise continuous standalone/member windows, cancellation and rate limits with real Pi; add an opt-in WSL 6luna test using native file reads in the dedicated test conversation.

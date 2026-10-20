@@ -239,10 +239,18 @@ export interface Recovery {
     | "cooldown"
     | "ready"
     | "probing"
-    | "exhausted";
+    | "exhausted"
+    | "blocked";
   reason: string;
   requests: number;
   probes: number;
+  /** v2 counts actual failures separately from successful tool continuations. */
+  version?: 2;
+  failures?: number;
+  burstFailures?: number;
+  burstProbes?: number;
+  cooldowns?: number;
+  legacyRequests?: number;
   openedAt: number;
   updatedAt: number;
   nextAt?: number;

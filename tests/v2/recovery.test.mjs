@@ -120,6 +120,9 @@ async function using(run, settings = {}) {
     get compactions() {
       return compactions;
     },
+    get now() {
+      return now;
+    },
     advance: (ms) => (now += ms),
     idle: (value = true) => (idle = value),
     add: (name) =>
@@ -286,28 +289,60 @@ test("overflow requests one compaction and resumes once after an idle, successfu
     assert.equal(h.kernel.snapshot().recovery, undefined);
   }));
 
-test("failed compaction retains the fault and does not launch an automatic compaction loop", () =>
+test("transient compaction failures retry cached work after a durable cooldown, never in a tight loop", () =>
   using(async (h) => {
     h.delivery("result");
     await h.kernel.tick();
     h.settle(true, "maximum context exceeded");
     await h.kernel.tick();
     h.kernel.compactionSettled(undefined, "Summary provider failed");
-    for (let i = 0; i < 4; i++) {
-      h.advance(100000);
-      await h.kernel.tick();
-    }
+    const nextAt = h.kernel.snapshot().recovery.nextAt;
+    await h.kernel.tick();
     assert.equal(h.compactions, 1);
     assert.equal(h.wakes.length, 1);
     assert.equal(h.kernel.snapshot().recovery.phase, "compaction_failed");
-    assert.equal(h.kernel.snapshot().recovery.nextAt, undefined);
+    assert.ok(nextAt > h.now);
     assert.equal(h.kernel.recoveryPlan().state, "compaction_failed");
     h.kernel.compactionSettled(undefined, "Compaction cancelled");
     assert.equal(
       h.kernel.snapshot().recovery.reason,
       "Summary provider failed",
     );
+    assert.equal(h.kernel.snapshot().recovery.nextAt, nextAt);
+    await h.restart();
+    h.advance(nextAt - h.now - 1);
+    await h.kernel.tick();
+    assert.equal(h.compactions, 1);
+    h.advance(1);
+    await h.kernel.tick();
+    assert.equal(h.compactions, 2);
+    h.kernel.compactionSettled("repaired-summary");
+    await h.kernel.tick();
+    assert.equal(h.wakes.length, 2);
+    h.settle();
+    assert.equal(h.kernel.snapshot().recovery, undefined);
   }));
+
+test("cancelled and externally blocked compactions remain stopped until repaired", async () => {
+  for (const reason of [
+    "Compaction cancelled",
+    "401 invalid API key",
+    "429 insufficient_quota",
+  ]) {
+    await using(async (h) => {
+      h.delivery("result");
+      await h.kernel.tick();
+      h.settle(true, "maximum context exceeded");
+      await h.kernel.tick();
+      h.kernel.compactionSettled(undefined, reason);
+      h.advance(86_400_000);
+      await h.kernel.tick();
+      assert.equal(h.compactions, 1, reason);
+      assert.equal(h.kernel.snapshot().recovery.nextAt, undefined, reason);
+      assert.equal(h.wakes.length, 1);
+    });
+  }
+});
 
 test("a repeated compaction checkpoint cannot rearm an already failed recovery probe", () =>
   using(async (h) => {
@@ -324,7 +359,7 @@ test("a repeated compaction checkpoint cannot rearm an already failed recovery p
     assert.equal(h.kernel.snapshot().recovery.phase, "compacting");
   }));
 
-test("native and supplemental request admissions share a durable cap across reload", () =>
+test("native and supplemental failures share a durable burst cap across reload and automatically rearm", () =>
   using(
     async (h) => {
       h.delivery("result");
@@ -348,13 +383,24 @@ test("native and supplemental request admissions share a durable cap across relo
         "a runtime budget abort is not Escape",
       );
       await h.restart();
-      h.advance(100000);
+      const before = h.kernel.snapshot().recovery;
+      h.advance(before.nextAt - h.now - 1);
       await h.kernel.tick();
       assert.equal(h.wakes.length, 1);
       assert.equal(h.kernel.snapshot().recovery.requests, 3);
       assert.equal(h.kernel.snapshot().recovery.phase, "exhausted");
-      h.kernel.onHumanInput("Connection is repaired; inspect progress");
-      h.kernel.leadStarted();
+      h.advance(1);
+      await h.kernel.tick();
+      assert.equal(h.wakes.length, 2, "no human continue needed");
+      assert.equal(
+        h.kernel.snapshot().recovery.requests,
+        3,
+        "cumulative telemetry is retained",
+      );
+      assert.equal(h.kernel.snapshot().recovery.burstFailures, 0);
+      const resumed = h.wakes.at(-1);
+      h.kernel.leadStarted(resumed);
+      h.kernel.includeWake(resumed.batchId);
       assert.ok(h.kernel.admitLeadRequest());
       h.kernel.leadMessage(false);
       h.kernel.leadSettled();
@@ -362,6 +408,133 @@ test("native and supplemental request admissions share a durable cap across relo
     },
     { recoveryMaxRequests: 3 },
   ));
+
+test("healthy tool responses clear recovery immediately and cannot exhaust the allowance in a long run", () =>
+  using(
+    async (h) => {
+      h.delivery("result");
+      await h.kernel.tick();
+      const wake = h.wakes[0];
+      h.kernel.leadStarted(wake);
+      h.kernel.includeWake(wake.batchId);
+      assert.ok(h.kernel.admitLeadRequest());
+      h.kernel.leadMessage(true, 1, "This operation was aborted");
+      assert.ok(h.kernel.admitLeadRequest());
+      h.kernel.leadMessage(false, 1);
+      assert.equal(
+        h.kernel.snapshot().recovery,
+        undefined,
+        "clear before the next status tool, not at agent settlement",
+      );
+      assert.equal(h.kernel.recoveryPlan().state, "ready");
+      for (let i = 0; i < 40; i++) {
+        assert.ok(h.kernel.admitLeadRequest());
+        h.kernel.leadMessage(false, 1);
+      }
+      h.kernel.leadSettled();
+      assert.equal(h.kernel.snapshot().held, false);
+      assert.equal(h.kernel.store.mission().outputTokens, 42);
+      assert.equal(h.kernel.store.mission().status, "active");
+    },
+    { recoveryMaxRequests: 3 },
+  ));
+
+test("a successful compaction resets the failure burst before a long automatic continuation", () =>
+  using(
+    async (h) => {
+      h.delivery("result");
+      await h.kernel.tick();
+      h.settle(true, "maximum context exceeded");
+      h.kernel.compactionSettled("new-context");
+      assert.equal(h.kernel.snapshot().recovery.burstFailures, 0);
+      await h.kernel.tick();
+      const wake = h.wakes.at(-1);
+      h.kernel.leadStarted(wake);
+      h.kernel.includeWake(wake.batchId);
+      for (let i = 0; i < 15; i++) {
+        assert.ok(h.kernel.admitLeadRequest());
+        h.kernel.leadMessage(false);
+      }
+      h.kernel.leadSettled();
+      assert.equal(h.kernel.snapshot().recovery, undefined);
+    },
+    { recoveryMaxRequests: 1 },
+  ));
+
+test("legacy exhausted recovery migrates through reload without losing identity, usage or unread results", () =>
+  using(async (h) => {
+    const result = h.delivery("result", 3);
+    result.state = "quarantined";
+    h.kernel.store.putDelivery(result);
+    h.kernel.store.set("leadRecovery", {
+      id: "legacy-fault",
+      missionId: h.kernel.store.mission().id,
+      revision: 0,
+      kind: "provider",
+      phase: "exhausted",
+      reason: "upstream service unavailable",
+      requests: 14,
+      probes: 3,
+      openedAt: h.now - 10000,
+      updatedAt: h.now - 1000,
+    });
+    const before = h.kernel.store.mission();
+    await h.restart();
+    const fault = h.kernel.snapshot().recovery;
+    assert.equal(fault.id, "legacy-fault");
+    assert.equal(fault.requests, 14);
+    assert.equal(fault.legacyRequests, 14);
+    assert.equal(
+      fault.failures,
+      0,
+      "historical requests are not invented as actual failures",
+    );
+    assert.equal(fault.version, 2);
+    assert.ok(fault.nextAt > h.now);
+    h.advance(fault.nextAt - h.now);
+    await h.kernel.tick();
+    assert.equal(h.wakes.length, 1);
+    h.settle();
+    const saved = h.kernel.store
+      .deliveries("lead")
+      .find((d) => d.id === result.id);
+    assert.equal(
+      saved.state,
+      "pending",
+      "health probe did not pretend to consume quarantined evidence",
+    );
+    assert.equal(
+      h.kernel.store.mission().budgetStartedAt,
+      before.budgetStartedAt,
+    );
+  }));
+
+test("external provider failures do not hammer invalid credentials; a healthy human request clears the stale fault", async () => {
+  for (const reason of [
+    "401 Unauthorized",
+    "403 permission denied",
+    "429 insufficient_quota",
+    "model fixture not found",
+  ]) {
+    await using(async (h) => {
+      h.delivery("result");
+      await h.kernel.tick();
+      h.settle(true, reason);
+      assert.equal(h.kernel.snapshot().recovery.phase, "blocked", reason);
+      assert.equal(h.kernel.canRetryLeadRequest(), false);
+      assert.equal(h.kernel.recoveryPlan().state, "external_repair_required");
+      h.advance(86_400_000);
+      await h.kernel.tick();
+      assert.equal(h.wakes.length, 1, reason);
+      h.kernel.onHumanInput("Credentials repaired; inspect existing work");
+      h.kernel.leadStarted();
+      assert.ok(h.kernel.admitLeadRequest());
+      h.kernel.leadMessage(false);
+      assert.equal(h.kernel.snapshot().recovery, undefined);
+      h.kernel.leadSettled();
+    });
+  }
+});
 
 test("cooldown survives a runtime restart and a new notification cannot reset it", () =>
   using(async (h) => {
@@ -379,6 +552,67 @@ test("cooldown survives a runtime restart and a new notification cannot reset it
     await h.kernel.tick();
     assert.equal(h.wakes.length, 2);
   }));
+
+test("a provider Retry-After remains authoritative across an exhausted burst and reload", () =>
+  using(
+    async (h) => {
+      h.delivery("result");
+      await h.kernel.tick();
+      h.settle(true, "429 Too many requests retry-after: 120");
+      const fault = h.kernel.snapshot().recovery;
+      assert.equal(fault.phase, "exhausted");
+      assert.equal(fault.nextAt, h.now + 120000);
+      await h.restart();
+      h.advance(119999);
+      await h.kernel.tick();
+      assert.equal(h.wakes.length, 1);
+      h.advance(1);
+      await h.kernel.tick();
+      assert.equal(h.wakes.length, 2);
+    },
+    { recoveryMaxRequests: 1, recoveryCooldownMs: 1000 },
+  ));
+
+test("a cancelled transport in summary error text is not mistaken for user compaction cancellation", () =>
+  using(async (h) => {
+    h.delivery("result");
+    await h.kernel.tick();
+    h.settle(true, "maximum context exceeded");
+    await h.kernel.tick();
+    h.kernel.compactionSettled(
+      undefined,
+      "Upstream request cancelled before headers",
+    );
+    const fault = h.kernel.snapshot().recovery;
+    assert.ok(fault.nextAt > h.now);
+    h.advance(fault.nextAt - h.now);
+    await h.kernel.tick();
+    assert.equal(h.compactions, 2);
+  }));
+
+test("repeated outage bursts increase their persisted cooldown instead of spinning or permanently stopping", () =>
+  using(
+    async (h) => {
+      h.delivery("result");
+      await h.kernel.tick();
+      for (let i = 0; i < 5; i++) {
+        h.settle(true, "upstream temporarily unavailable");
+        const fault = h.kernel.snapshot().recovery;
+        assert.equal(fault.nextAt - h.now, 1000 * 2 ** i);
+        assert.equal(fault.failures, i + 1);
+        await h.restart();
+        h.advance(fault.nextAt - h.now - 1);
+        await h.kernel.tick();
+        assert.equal(h.wakes.length, i + 1);
+        h.advance(1);
+        await h.kernel.tick();
+        assert.equal(h.wakes.length, i + 2);
+      }
+      h.settle();
+      assert.equal(h.kernel.snapshot().recovery, undefined);
+    },
+    { recoveryMaxRequests: 1, recoveryCooldownMs: 1000 },
+  ));
 
 test("goal edits and recovery cannot clear user pause, Escape, relocation or budget holds", () =>
   using(

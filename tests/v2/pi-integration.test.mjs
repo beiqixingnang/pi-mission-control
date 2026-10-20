@@ -679,7 +679,7 @@ test(
         );
         const failed = await h.snapshot();
         assert.equal(failed.recovery.phase, "compaction_failed");
-        assert.equal(failed.recovery.nextAt, undefined);
+        assert.ok(failed.recovery.nextAt > Date.now());
         assert.match(failed.recovery.reason, /429/);
         assert.equal(failed.recoveryPlan.state, "compaction_failed");
         const status = JSON.parse(
@@ -878,6 +878,23 @@ test(
         assert.ok(!result.isError, result.content[0].text);
         assert.match(result.content[0].text, /RECOVERED_REQUEST_3/);
         assert.equal((await h.snapshot()).members.length, 1);
+        const memberSession = (await h.snapshot()).members[0].sessionId;
+        const aborted = await h.tool("team_send", {
+          to: "flaky-worker",
+          wait: true,
+          message:
+            "V2_TEST:" +
+            JSON.stringify({
+              op: "flaky",
+              key: crypto.randomUUID(),
+              failures: 1,
+              transportAbort: true,
+              error: "This operation was aborted",
+            }),
+        });
+        assert.ok(!aborted.isError, aborted.content[0].text);
+        assert.match(aborted.content[0].text, /RECOVERED_REQUEST_2/);
+        assert.equal((await h.snapshot()).members[0].sessionId, memberSession);
       } finally {
         await h.session.abort();
         await lead;
@@ -2086,7 +2103,7 @@ test(
 );
 
 test(
-  "real Pi native retries cannot exceed the shared automatic recovery request cap",
+  "real Pi bounds native retry bursts and automatically resumes after cooldown without human input",
   { timeout: 20000 },
   () =>
     harness(async (h) => {
@@ -2124,7 +2141,7 @@ test(
           JSON.stringify({
             op: "flaky",
             key: crypto.randomUUID(),
-            failures: 100,
+            failures: 5,
             error: "502 Bad Gateway",
           }),
         afterSeconds: 1,
@@ -2144,10 +2161,104 @@ test(
       assert.equal(failures(), 3);
       assert.equal((await h.snapshot()).recovery.requests, 3);
       assert.equal((await h.snapshot()).held, false);
-      await new Promise((r) => setTimeout(r, 1200));
-      assert.equal(failures(), 3);
+      assert.ok((await h.snapshot()).recovery.nextAt > Date.now());
+      await until(
+        () => h.session.getLastAssistantText() === "RECOVERED_REQUEST_6",
+      );
+      assert.equal(failures(), 5);
+      assert.equal((await h.snapshot()).recovery, undefined);
+      assert.equal((await h.snapshot()).mission.status, "active");
     }),
 );
+
+test(
+  "real Pi continues 24 tool calls after an aborted request without replaying saved writes or exposing stale recovery",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt("/reconnect on");
+      await h.session.prompt("/reconnect delay 0");
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"READY_FOR_RECOVERY_CHAIN"}',
+      );
+      await h.tool("goal_start", {
+        objective: "Preserve long automatic tool sequences",
+        criteria: ["Each evidence file is written once"],
+      });
+      const key = crypto.randomUUID();
+      await h.tool("schedule", {
+        action: "create",
+        title: "long tool chain",
+        afterSeconds: 1,
+        prompt:
+          "V2_TEST:" +
+          JSON.stringify({
+            op: "recovery-chain",
+            key,
+            directory: h.cwd,
+            steps: 24,
+          }),
+      });
+      await until(() =>
+        h.session.getLastAssistantText()?.startsWith("RECOVERY_CHAIN_COMPLETE"),
+      );
+      const writes = h.events.filter(
+        (e) => e.type === "tool_execution_end" && e.toolName === "write",
+      );
+      assert.equal(writes.length, 24);
+      assert.equal(new Set(writes.map((e) => e.toolCallId)).size, 24);
+      for (let i = 0; i < 24; i++)
+        assert.equal(
+          await fs.readFile(path.join(h.cwd, `step-${i}.txt`), "utf8"),
+          `Evidence ${key} ${i}\n`,
+        );
+      const status = h.events
+        .filter(
+          (e) =>
+            e.type === "tool_execution_end" && e.toolName === "mission_status",
+        )
+        .at(-1);
+      const withinRun = JSON.parse(status.result.content[0].text);
+      assert.equal(withinRun.recovery, undefined);
+      assert.equal(withinRun.recoveryPlan.state, "ready");
+      assert.equal((await h.snapshot()).held, false);
+      assert.equal(
+        h.events.filter(
+          (e) =>
+            e.type === "message_end" &&
+            e.message?.errorMessage?.includes("This operation was aborted"),
+        ).length,
+        1,
+      );
+    }),
+);
+
+test("real Pi reconnects a provider-side aborted response in the same run", () =>
+  harness(async (h) => {
+    await h.session.prompt("/reconnect on");
+    await h.session.prompt("/reconnect delay 0");
+    await h.tool("goal_start", {
+      objective: "Recover provider cancellation",
+      criteria: ["Continue without another human request"],
+    });
+    await h.session.prompt(
+      "V2_TEST:" +
+        JSON.stringify({
+          op: "flaky",
+          key: crypto.randomUUID(),
+          failures: 1,
+          transportAbort: true,
+          error: "This operation was aborted",
+        }),
+    );
+    assert.equal(h.session.getLastAssistantText(), "RECOVERED_REQUEST_2");
+    assert.equal((await h.snapshot()).recovery, undefined);
+    assert.equal((await h.snapshot()).held, false);
+    assert.equal(
+      h.events.filter((e) => e.type === "agent_settled").at(-1).aborted,
+      false,
+    );
+  }));
 
 test("a real provider-side abort remains a recoverable failure and never becomes a user Escape hold", () =>
   harness(async (h) => {
@@ -2169,6 +2280,72 @@ test("a real provider-side abort remains a recoverable failure and never becomes
     assert.equal(snapshot.recovery.kind, "provider");
     assert.equal(snapshot.mission.status, "active");
   }));
+
+test(
+  "real Pi recovers the existing request without requiring an explicit mission",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      await fs.writeFile(
+        path.join(process.env.PI_CODING_AGENT_DIR, "mission-control.json"),
+        JSON.stringify({ recoveryMaxRequests: 1, recoveryCooldownMs: 1000 }),
+      );
+      await h.session.reload();
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "flaky",
+            key: crypto.randomUUID(),
+            failures: 1,
+            error: "This operation was aborted",
+          }),
+      );
+      assert.equal((await h.snapshot()).mission, undefined);
+      assert.equal((await h.snapshot()).recovery.phase, "exhausted");
+      await until(
+        () => h.session.getLastAssistantText() === "RECOVERED_REQUEST_2",
+      );
+      assert.equal((await h.snapshot()).recovery, undefined);
+    }),
+);
+
+test(
+  "real user stop fences persistent cooldown probes even after reload",
+  { timeout: 15000 },
+  () =>
+    harness(async (h) => {
+      await fs.writeFile(
+        path.join(process.env.PI_CODING_AGENT_DIR, "mission-control.json"),
+        JSON.stringify({ recoveryMaxRequests: 1, recoveryCooldownMs: 1000 }),
+      );
+      await h.session.reload();
+      await h.tool("goal_start", {
+        objective: "Respect user stop during an outage",
+        criteria: ["No automatic resume"],
+      });
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "flaky",
+            key: crypto.randomUUID(),
+            failures: 100,
+            error: "This operation was aborted",
+          }),
+      );
+      assert.equal((await h.snapshot()).recovery.phase, "exhausted");
+      await h.session.prompt("/mission stop");
+      const count = () =>
+        h.events.filter(
+          (e) => e.type === "message_end" && e.message?.role === "assistant",
+        ).length;
+      const stopped = count();
+      await h.session.reload();
+      await new Promise((r) => setTimeout(r, 2200));
+      assert.equal(count(), stopped);
+      assert.equal((await h.snapshot()).mission.status, "stopped");
+      assert.equal((await h.snapshot()).mission.humanPaused, true);
+    }),
+);
 
 test(
   "real Pi upgrades an already expired default wall-time hold without erasing prior usage",
