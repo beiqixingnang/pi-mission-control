@@ -36,6 +36,106 @@ const entry = (id, text, role = "user") => ({
   message: { role, content: [{ type: "text", text }] },
 });
 
+test("empty optional search cursors start at the first page while invented nonempty cursors remain invalid", () =>
+  usingMemory((m, directory) => {
+    m.sync([
+      entry("older", "计划里已有 AMD64，第一批"),
+      entry("newer", "计划里已有 AMD64，第二批"),
+    ]);
+    const expected = m.search("计划里已有 AMD64", 1, "user");
+    assert.ok(expected.nextCursor);
+    for (const cursor of ["", "  \t ", null, undefined]) {
+      assert.deepEqual(
+        m.search("计划里已有 AMD64", 1, "user", cursor),
+        expected,
+      );
+      const page = m.historyBatch(
+        [
+          {
+            action: "search",
+            query: "计划里已有 AMD64",
+            role: "user",
+            cursor,
+            limit: 1,
+          },
+        ],
+        1000,
+      );
+      assert.equal(page.results[0].matches[0].id, "newer");
+      assert.equal(page.results[0].nextCursor, expected.nextCursor);
+    }
+    assert.equal(
+      m.search("计划里已有 AMD64", 1, "user", expected.nextCursor).matches[0]
+        .id,
+      "older",
+    );
+    assert.throws(() => m.search("计划里已有 AMD64", 1, "user", "0"), /cursor/);
+    assert.throws(
+      () => m.search("计划里已有 AMD64", 1, "user", " " + expected.nextCursor),
+      /cursor/,
+    );
+    const restored = new ContextMemory(directory, "test");
+    try {
+      assert.equal(
+        restored.search("计划里已有 AMD64", 1, "user", "").matches[0].id,
+        "newer",
+      );
+      assert.equal(
+        restored.search("计划里已有 AMD64", 1, "user", expected.nextCursor)
+          .matches[0].id,
+        "older",
+      );
+    } finally {
+      restored.close();
+    }
+  }));
+
+test("reads distinguish excluded memory receipts from unknown or other-branch IDs without indexing tool echoes", () =>
+  usingMemory((m) => {
+    const source = entry("original", "计划里已有 AMD64，原始说明", "assistant");
+    const receipt = {
+      ...entry("failed-receipt", "PRIVATE_TOOL_ECHO", "toolResult"),
+      message: {
+        role: "toolResult",
+        toolName: "context_history",
+        content: [{ type: "text", text: "PRIVATE_TOOL_ECHO" }],
+      },
+    };
+    const hint = {
+      id: "memory-hint",
+      type: "custom_message",
+      customType: "context-memory-prepare",
+      content: "PRIVATE_HINT",
+    };
+    m.sync([source, receipt, hint]);
+    for (const id of [receipt.id, hint.id]) {
+      assert.throws(
+        () => m.history(id),
+        /HISTORY_ITEM_EXCLUDED.*original user\/assistant.*Do not retry/i,
+      );
+      assert.throws(
+        () => m.historyBatch([{ action: "read", id }], 1000),
+        /HISTORY_ITEM_EXCLUDED/,
+      );
+    }
+    assert.equal(m.search("PRIVATE_TOOL_ECHO").matches.length, 0);
+    assert.equal(m.search("PRIVATE_HINT").matches.length, 0);
+    assert.equal(m.history(source.id).text, "计划里已有 AMD64，原始说明");
+    assert.throws(
+      () => m.history("unrecognized"),
+      /Unknown history item in this conversation branch/,
+    );
+    m.sync([entry("different", "Other branch")]);
+    assert.throws(
+      () => m.history(receipt.id),
+      /Unknown history item in this conversation branch/,
+    );
+    assert.throws(
+      () => m.history(source.id),
+      /Unknown history item in this conversation branch/,
+    );
+  }));
+
 test("256-token search batches page all long Unicode hits without duplicates, false empties or budget overruns", () =>
   usingMemory((m) => {
     const entries = Array.from({ length: 5 }, (_, i) =>

@@ -318,6 +318,129 @@ test(
 );
 
 test(
+  "real Pi accepts filled history placeholders and diagnoses excluded receipts across reload",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const phrase = "计划里已有 AMD64：只读测试原始消息";
+      await h.session.prompt(
+        "V2_TEST:" + JSON.stringify({ op: "answer", text: phrase }),
+      );
+      const original = h.session.sessionManager
+        .getBranch()
+        .find(
+          (e) =>
+            e.type === "message" &&
+            e.message?.role === "assistant" &&
+            e.message.content?.some(
+              (b) => b.type === "text" && b.text === phrase,
+            ),
+        );
+      assert.ok(original);
+      const call = async (args) => {
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({ op: "tool", name: "context_history", args }),
+        );
+        return JSON.parse(h.session.getLastAssistantText());
+      };
+      const filled = {
+        action: "search",
+        budgetTokens: 1000,
+        cursor: "",
+        id: "",
+        limit: 3,
+        offset: 0,
+        query: phrase,
+        requests: [
+          {
+            action: "search",
+            cursor: "",
+            id: "",
+            limit: 3,
+            offset: 0,
+            query: phrase,
+            role: "assistant",
+          },
+        ],
+        role: "assistant",
+        startRequest: 0,
+      };
+      const first = await call(filled);
+      assert.ok(!first.isError, first.text);
+      assert.ok(
+        JSON.parse(first.text).matches.some((hit) => hit.id === original.id),
+      );
+      const forged = await call({ ...filled, cursor: "0" });
+      assert.equal(forged.isError, true);
+      assert.match(forged.text, /omit cursor/);
+      const receipt = h.session.sessionManager
+        .getBranch()
+        .findLast(
+          (e) =>
+            e.type === "message" &&
+            e.message?.role === "toolResult" &&
+            e.message.toolName === "context_history" &&
+            e.message.isError,
+        );
+      assert.ok(receipt);
+      const readReceipt = {
+        ...filled,
+        action: "read",
+        id: receipt.id,
+        query: "",
+        role: "toolResult",
+        limit: 1000,
+        requests: [
+          {
+            action: "read",
+            cursor: "",
+            id: receipt.id,
+            limit: 1000,
+            offset: 0,
+            query: "",
+            role: "toolResult",
+          },
+        ],
+      };
+      const excluded = await call(readReceipt);
+      assert.equal(excluded.isError, true);
+      assert.match(excluded.text, /HISTORY_ITEM_EXCLUDED.*Do not retry/);
+      const source = await call({ ...readReceipt, id: original.id });
+      assert.ok(!source.isError, source.text);
+      assert.equal(JSON.parse(source.text).text, phrase);
+      const batch = await call({ ...filled, action: "batch" });
+      assert.ok(!batch.isError, batch.text);
+      assert.ok(JSON.parse(batch.text).results[0].matches.length);
+      const sessionId = h.session.sessionManager.getSessionId();
+      await h.session.reload();
+      assert.equal(h.session.sessionManager.getSessionId(), sessionId);
+      const restored = await call({ ...filled, cursor: null });
+      assert.ok(!restored.isError, restored.text);
+      assert.ok(JSON.parse(restored.text).matches.length);
+      const batchNull = await call({
+        ...filled,
+        action: "batch",
+        requests: [{ ...filled.requests[0], cursor: null }],
+      });
+      assert.ok(!batchNull.isError, batchNull.text);
+      const stillExcluded = await call(readReceipt);
+      assert.equal(stillExcluded.isError, true);
+      assert.match(stillExcluded.text, /HISTORY_ITEM_EXCLUDED/);
+      assert.equal(
+        h.events.filter(
+          (e) =>
+            e.type === "tool_execution_end" &&
+            e.toolName === "context_history" &&
+            e.isError,
+        ).length,
+        3,
+        "only the invented cursor and two intentional excluded reads fail",
+      );
+    }),
+);
+
+test(
   "a real Pi burst crossing the local handoff reserve still saves notes and resumes the next window",
   { timeout: 20000 },
   () =>

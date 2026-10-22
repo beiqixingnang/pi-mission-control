@@ -428,6 +428,26 @@ def main():
                 reload("search cursor survived literal /reload in the same Pi process")
         assert len(seen) == len(set(seen)) == 5
         checks.append("256-token Unicode search pages retained every user hit without duplicates")
+        filled_search = {"action": "search", "budgetTokens": 1000, "cursor": "", "id": "", "limit": 3,
+            "offset": 0, "query": search_marker, "requests": [{"action": "search", "cursor": "", "id": "", "limit": 3,
+                "offset": 0, "query": search_marker, "role": "user"}], "role": "user", "startRequest": 0}
+        failed, text = call_tool("context_history", filled_search)
+        assert not failed, text
+        original_history_id = json.loads(text)["matches"][0]["id"]
+        checks.append("first history search accepts empty optional fields from a model tool call")
+        failed, text = call_tool("context_history", {**filled_search, "cursor": "0"})
+        assert failed and "omit cursor" in text
+        excluded_receipt_id = latest_tool("context_history")["id"]
+        failed, text = call_tool("context_history", {"action": "read", "id": excluded_receipt_id, "offset": 0, "limit": 1000})
+        assert failed and "HISTORY_ITEM_EXCLUDED" in text and "Do not retry" in text
+        checks.append("invented cursors and excluded memory receipts explain how to recover without exposing tool echoes")
+        failed, text = call_tool("context_history", {"action": "read", "id": original_history_id, "offset": 0, "limit": 1000})
+        assert not failed and search_marker in json.loads(text)["text"], text
+        reload("history placeholder compatibility and original message IDs survived literal /reload")
+        failed, text = call_tool("context_history", {**filled_search, "action": "batch", "cursor": None,
+            "requests": [{**filled_search["requests"][0], "cursor": None}]})
+        assert not failed and json.loads(text)["results"][0]["matches"], text
+        checks.append("batched first-page searches accept null placeholders after reload")
         failed, _ = call_tool("goal_stop", {"goalId": selected, "reason": "Isolated review regression completed"})
         assert not failed and mission() is None
         clock = query("meta", "key=?", ("goalActivityClock:" + selected,))[0]

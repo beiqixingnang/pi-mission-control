@@ -1,3 +1,9 @@
+# 2.5.2 — optional history cursors and actionable excluded reads (2026-10-22)
+
+- Treat omitted, null and blank history search cursors as the first page, including batch requests. Keep every nonempty cursor signed and branch/query/role scoped; invented values such as 0 remain invalid with explicit recovery guidance.
+- Distinguish a known branch entry excluded from public history (such as a memory-tool receipt or hint) from an unknown/out-of-branch ID. Direct models to search the original user/assistant text instead of repeatedly reading the tool's own error receipt; keep those receipts out of the search index.
+- Add real Pi regressions for filled optional argument placeholders, schema-valid null cursors, batch calls and same-session reload. Preserve existing databases and cursor keys without a migration or index rebuild.
+
 # 2.5.1 — exact acceptance, closed clocks and resumable history (2026-10-21)
 
 - Validate the requested root identity and revision in the acceptance transaction. Reject unselected roots before any writes; return the original receipt for an accepted revision.

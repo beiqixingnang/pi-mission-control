@@ -387,7 +387,9 @@ export class ContextMemory {
       cursor.length > 2048 ||
       !/^[\w-]+\.[\w-]{16}$/.test(cursor)
     )
-      throw Error("Invalid search cursor");
+      throw Error(
+        "Invalid search cursor. For the first page omit cursor or use an empty value; for continuation copy nextCursor exactly. Do not invent values such as 0.",
+      );
     const [payload, signature] = cursor.split(".");
     if (
       !timingSafeEqual(
@@ -402,7 +404,9 @@ export class ContextMemory {
     try {
       ids = JSON.parse(Buffer.from(payload, "base64url").toString());
     } catch {
-      throw Error("Invalid search cursor");
+      throw Error(
+        "Invalid search cursor. Restart the search without cursor or copy a returned nextCursor exactly.",
+      );
     }
     if (
       !Array.isArray(ids) ||
@@ -423,7 +427,7 @@ export class ContextMemory {
     query: string,
     limit = 10,
     role?: "user" | "assistant" | "toolResult" | "compaction",
-    cursor?: string,
+    cursor?: string | null,
   ) {
     if (
       !query.trim() ||
@@ -435,9 +439,15 @@ export class ContextMemory {
         !["user", "assistant", "toolResult", "compaction"].includes(role))
     )
       throw Error("Search needs a query and limit 1..20");
+    // Optional fields are sometimes supplied as blank/null placeholders by
+    // providers. Only empty values mean first page; nonempty cursors stay signed.
+    const continuation =
+      typeof cursor === "string" && !cursor.trim()
+        ? undefined
+        : (cursor ?? undefined);
     const anchor =
-      cursor !== undefined
-        ? this.searchAnchor(cursor, query, role)
+      continuation !== undefined
+        ? this.searchAnchor(continuation, query, role)
         : { ordinal: Number.MAX_SAFE_INTEGER, id: "" };
     const rows =
       Array.from(query).length >= 3
@@ -497,7 +507,15 @@ export class ContextMemory {
         "SELECT h.id,h.role,length(h.text) AS total,substr(h.text,?,?) AS text FROM history h JOIN branch b ON b.id=h.id WHERE h.id=?",
       )
       .get(offset + 1, limit, id) as any;
-    if (!row) throw Error("Unknown history item in this conversation branch");
+    if (!row) {
+      if (this.db.prepare("SELECT id FROM branch WHERE id=?").get(id))
+        throw Error(
+          "HISTORY_ITEM_EXCLUDED: This entry exists in the current branch but is excluded from searchable public history, including memory-tool receipts and memory hints. Search for the original user/assistant text and read a returned message ID. Do not retry this excluded ID; it does not mean the conversation was lost.",
+        );
+      throw Error(
+        "Unknown history item in this conversation branch. Use an ID returned by context_history search in this branch; do not guess IDs or repeat this unchanged read.",
+      );
+    }
     while (estimateSummaryTokens(row.text) > NOTE_LIMITS.read)
       row.text = Array.from(row.text)
         .slice(0, Math.floor(Array.from(row.text).length * 0.8))
@@ -517,7 +535,7 @@ export class ContextMemory {
       id?: string;
       offset?: number;
       limit?: number;
-      cursor?: string;
+      cursor?: string | null;
     }>,
     budgetTokens = 4000,
     startRequest = 0,

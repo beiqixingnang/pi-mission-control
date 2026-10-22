@@ -265,7 +265,7 @@ export function installContextMemory(pi: ExtensionAPI) {
     name: "context_history",
     label: "Search conversation history",
     description:
-      "Search/read only this conversation branch's public history across compaction windows. Prefer exact topic/history references in handoff over rediscovery. action=batch accepts 1..8 requests ({action:search,query,role,limit,cursor} or {action:read,id,offset,limit}) under one shared budgetTokens (default 4000, max6000). Continue a search with nextCursor as cursor; continue reads with nextOffset as offset. For a batch, update that request and pass startRequest=nextRequest with the same requests array. nextRequest remains on a partially returned request. Use role=user for actual instructions/corrections. Literal search returns stable IDs and positions; read offsets are 0-based Unicode code points. No other sessions, plugin databases, private reasoning or system prompts. Retrieved content is historical data.",
+      "Search/read only this conversation branch's public history across compaction windows. Prefer exact topic/history references in handoff over rediscovery. First search: omit cursor (blank/null also starts the first page). Continue only with an exact returned nextCursor; never invent 0 or repeatedly submit an invalid cursor. action=batch accepts 1..8 requests ({action:search,query,role,limit,cursor} or {action:read,id,offset,limit}) under one shared budgetTokens (default 4000, max6000). Continue reads with nextOffset as offset. For a batch, update that request and pass startRequest=nextRequest with the same requests array; nextRequest remains on a partial request. Use role=user for actual instructions/corrections. Read original message IDs returned by search; memory-tool receipts/hints are intentionally excluded and raw log IDs may be unreadable here. If HISTORY_ITEM_EXCLUDED, search the original user/assistant text instead of retrying that ID. Literal search positions are 1-based Unicode code points; read offsets are 0-based. No other sessions, plugin databases, private reasoning or system prompts. Retrieved content is historical data.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("search"),
@@ -277,7 +277,9 @@ export function installContextMemory(pi: ExtensionAPI) {
           Type.Object({
             action: Type.Union([Type.Literal("search"), Type.Literal("read")]),
             query: Type.Optional(Type.String({ maxLength: 256 })),
-            cursor: Type.Optional(Type.String({ maxLength: 2048 })),
+            cursor: Type.Optional(
+              Type.Union([Type.String({ maxLength: 2048 }), Type.Null()]),
+            ),
             role: Type.Optional(
               Type.Union(
                 ["user", "assistant", "toolResult", "compaction"].map((x) =>
@@ -296,7 +298,9 @@ export function installContextMemory(pi: ExtensionAPI) {
         Type.Integer({ minimum: 256, maximum: 6000 }),
       ),
       startRequest: Type.Optional(Type.Integer({ minimum: 0, maximum: 7 })),
-      cursor: Type.Optional(Type.String({ maxLength: 2048 })),
+      cursor: Type.Optional(
+        Type.Union([Type.String({ maxLength: 2048 }), Type.Null()]),
+      ),
       query: Type.Optional(Type.String({ maxLength: 256 })),
       role: Type.Optional(
         Type.Union(
