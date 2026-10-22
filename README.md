@@ -6,7 +6,7 @@
 
 2.5.1 修复核查项：主目标验收绑定请求的目标身份；停止前结清活动计时；历史批查在预算裁剪后可用 `nextCursor` 续查，更新对应请求的 `cursor`（读取用 `offset=nextOffset`），再以 `startRequest=nextRequest` 和同一请求数组继续；canonical RPC 超限在任务中保留不含正文的结构化诊断。同版 index 已包含在当前窗口时仅提示版本。详见[修复及隔离验证索引](docs/design/mission-control-v2/REVIEW-FIXES-2026-10-20.md)。
 
-需要 **Node.js 24+、Pi 1.3.x**。本轮在Windows / Node24.16 / Pi1.3.0做了真实Pi离线provider、成员RPC、原生HTML导出、host命令/进程树和本机Podman验证。GitHub Ubuntu也已执行离线套件；离线provider测试不等于真实模型兼容性认证。
+需要 **Node.js 24+、Pi 1.3.x 或 1.4.x**，已验证 Pi 1.3.0 与 1.4.0。Pi 1.4.0 升级验证覆盖 Windows / Node24、WSL / Node24 和 WSL 原有 Node22，以及专用会话的同进程 `/reload`；见 [1.4.0 兼容记录](docs/design/mission-control-v2/PI-1.4.0-2026-10-22.md)。此前另做过原生HTML导出、host命令/进程树和本机Podman验证；本轮未运行需镜像的容器用例。离线provider测试不等于真实模型兼容性认证。
 
 ## 安装与切换
 
@@ -17,6 +17,8 @@ pi install C:/tools/pi-mission-control
 本地安装直接加载此目录。新窗口按package.json只加载两个v2入口；旧十个协调扩展不再通过本包清单启用。不要同时启用v1散装扩展和v2。
 
 **v2版本升级直接在原会话执行 `/reload`，不要求重开会话。** 旧目标自动迁入新账本，保留身份、暂停、用量和已有验收证据。运行中的受管成员按既有关闭流程收束并记录中断，不自动重放命令；需要继续时检查保存的结果并显式重试。v1活动任务和旧状态快照不自动导入v2。
+
+这条热加载保证针对插件。升级 Pi 主程序后，已运行进程不会因 `/reload` 替换整个宿主；需要在安全时点退出 Pi，再用 `pi -r` 恢复原会话，才会完整使用新宿主版本。安装或兼容检查不会自动操作正在运行的项目会话。
 
 ## 日常使用
 

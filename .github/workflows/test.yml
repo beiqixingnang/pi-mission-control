@@ -9,13 +9,14 @@ permissions:
 
 jobs:
   test:
-    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    name: ${{ matrix.os }} / Node ${{ matrix.node }} / Pi ${{ matrix.pi }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         node: [24.x]
+        pi: [1.3.0, 1.4.0]
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -24,7 +25,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: Install Pi host
-        run: npm install --global --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.3.0
+        run: npm install --global --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@${{ matrix.pi }}
       - name: Install local verification tools
         run: npm ci --ignore-scripts --legacy-peer-deps --no-audit --no-fund
       - name: Configure Pi host path
