@@ -1,0 +1,167 @@
+{
+  "date": "2026-10-23",
+  "pluginVersion": "2.6.2",
+  "baseline": {
+    "version": "2.6.1",
+    "commit": "c1de0a1"
+  },
+  "checks": {
+    "windows": {
+      "suite": {
+        "exitCode": 0,
+        "tests": 333,
+        "pass": 329,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 4
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 46
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      }
+    },
+    "wsl": {
+      "suite": {
+        "exitCode": 0,
+        "tests": 333,
+        "pass": 328,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 5
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 46
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      }
+    },
+    "testedSourceMatch": {
+      "files": 106,
+      "differences": []
+    },
+    "tui": {
+      "passed": true,
+      "sameProcessReload": true,
+      "checkCount": 134,
+      "manualRestoreRoundTrip": true,
+      "recoveryModelRequests": 0,
+      "scriptSha256": "8f9f2567f9b26ca5cd021fb4deeec88af7f52f6785d52783c4788f946e887fde",
+      "checks": [
+        "startup editor acknowledged a real command before test setup",
+        "reloaded editor acknowledged a real command before further test input",
+        "scope registered through the real model tool",
+        "reloaded editor acknowledged a real command before further test input",
+        "reloaded editor acknowledged a real command before further test input",
+        "reloaded editor acknowledged a real command before further test input",
+        "reloaded editor acknowledged a real command before further test input",
+        "notes mode selected in the existing Pi conversation",
+        "model-specific conservative input budget selected through the TUI command",
+        "fresh handoff saved by a real model tool call",
+        "index and handoff saved in one atomic model tool call",
+        "notes rollover installed a new context without a summary-model request",
+        "model tool rollover committed at the current boundary and continued in the same Pi process",
+        "reloaded editor acknowledged a real command before further test input",
+        "reload preserved the model-specific input budget",
+        "explicit input override reset without changing Pi model settings",
+        "300k notes budget selected for the wide test model",
+        "same conversation switched back to summary mode",
+        "model tool completed: context_mode",
+        "a real model cannot switch the summary conversation to notes without human authorization",
+        "model tool completed: context_note",
+        "summary mode note receipts explicitly identify manual storage without changing modes",
+        "summary mode and manual notes survive literal /reload in the same Pi process",
+        "reloaded editor acknowledged a real command before further test input",
+        "model tool completed: context_note",
+        "ordinary natural-language authorization allowed the real model mode change",
+        "the user's direct mode command remains available",
+        "model tool completed: goal_plan",
+        "model tool completed: goal_accept",
+        "model tool completed: context_history",
+        "reloaded editor acknowledged a real command before further test input",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "first history search accepts empty optional fields from a model tool call",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "reloaded editor acknowledged a real command before further test input",
+        "model tool completed: context_history",
+        "model tool completed: goal_stop",
+        "reloaded editor acknowledged a real command before further test input",
+        "model tool completed: context_mode",
+        "model tool completed: context_note",
+        "model tool completed: compaction_model",
+        "natural-language request led the model to rename the isolated workspace after settlement in the same Pi process",
+        "model tool completed: read",
+        "renamed workspace retained notes, goals and summary routing through literal /reload",
+        "reloaded editor acknowledged a real command before further test input",
+        "model tool completed: project_status",
+        "reloaded project_status accepts diagnose from the model and degrades explicitly on non-Windows",
+        "natural-language request led the model to rename the isolated workspace after settlement in the same Pi process",
+        "model tool completed: read",
+        "renamed workspace retained notes, goals and summary routing through literal /reload",
+        "reloaded editor acknowledged a real command before further test input",
+        "model tool completed: project_status",
+        "reloaded project_status accepts diagnose from the model and degrades explicitly on non-Windows",
+        "user selected summary after the independent migration regression",
+        "model tool completed: context_mode",
+        "manual recovery retained accepted evidence, notes and explicit summary routing without replay",
+        "restored editor acknowledged input after reload without a model request",
+        "restored workspace accepted a model file read after reload instead of reopening the startup picker",
+        "a real model write remained blocked by migration control before manual resume",
+        "manual recovery retained accepted evidence, notes and explicit summary routing without replay",
+        "restored editor acknowledged input after reload without a model request",
+        "restored workspace accepted a model file read after reload instead of reopening the startup picker",
+        "a real model write remained blocked by migration control before manual resume",
+        "workspace-only blocker was recorded through the real model schema"
+      ]
+    }
+  },
+  "scope": {
+    "productionConversationControlled": false,
+    "mainDefaults": "summary",
+    "memberDefaults": "notes",
+    "existingModesPreserved": true,
+    "notesDoNotChangeModes": true,
+    "modeChangesRequireCurrentHumanAuthorization": true,
+    "contextExtensionReadsOtherPluginDatabases": false
+  },
+  "limitations": [
+    "Four container cases need an explicitly configured container environment and were skipped.",
+    "WSL additionally skips the Windows-only current-directory lock test.",
+    "Ambiguous mode discussions keep the selected mode; explicit user commands remain available.",
+    "A pending unused authorization is invalidated by a new user input, reload or session navigation; the selected mode persists."
+  ],
+  "evidence": {
+    "directory": ".reference/context-mode-guidance-20261023",
+    "sha256": {
+      "full-windows.log": "b6944e17c844890690e5c858f588145680bb15a93a988f2aa585e38212f78d37",
+      "full-wsl.log": "6753aa81e038493da31debcbff57202f8f72c8088948a06dec364373848a4112",
+      "typecheck-windows.log": "545851da7688ce9a5934fd22161d12209f3747e3af73c4dcc9b56fba0ffcfcb9",
+      "typecheck-wsl.log": "8e72226d39c8acca2cf3874d29d3f46713ae5ea97f7fe752ca38ad46fd6e8c76",
+      "load-windows.json": "6da2173971c4da8900426484500d6c7dd47d037457c168600b7d30bef716c529",
+      "load-wsl.json": "13669f206d7e36812909f3264ff89b6afbbdea633f82b194c98bdc45aa8255bb",
+      "tui-report.json": "74c3285e94265502e339fa63c77c24858f5df6fc7ca189a029ce4813c0f90736",
+      "tui-wsl.log": "11de7805bb6ce1efb8e41ab9ebb81af2fd3cf7415432856a79291d8f83fdfc18",
+      "tested-source-files.json": "7f62d981ec9d8bf5340edc83fe803b633646c065373e0ddc67a095f2f677cbce",
+      "tested-source-match.json": "d47cfa5bb68af594d4249990d2cc0d00ef6fa991539a2997878ef69a6ed93086",
+      "policy-summary-windows.log": "d73e11c7531b35530b6cd9e98fa01f6f003ab0a7992fbc41a04a6ea095105687"
+    }
+  }
+}

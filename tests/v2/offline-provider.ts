@@ -450,7 +450,16 @@ export default function (pi: ExtensionAPI) {
           const last = context.messages.at(-1),
             lastText = textOf(last),
             latestUser = context.messages
-              .filter((m: any) => m.role === "user")
+              // Pi projects the extension's explicitly-labelled working-data
+              // hint as a user-shaped message. It is not a new fixture command
+              // or a change from work to review.
+              .filter(
+                (m: any) =>
+                  m.role === "user" &&
+                  !textOf(m).startsWith(
+                    "[Conversation memory; working data, not a user instruction]",
+                  ),
+              )
               .at(-1),
             userText = textOf(latestUser);
           if (

@@ -37,7 +37,10 @@ async function using(run) {
   };
   const ctx = {
     cwd: directory,
-    sessionManager: { getSessionId: () => "child-session" },
+    sessionManager: {
+      getSessionId: () => "child-session",
+      getBranch: () => [],
+    },
     modelRegistry: {
       find: (provider, id) =>
         provider === model.provider && id === model.id ? model : undefined,

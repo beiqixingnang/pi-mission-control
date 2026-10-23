@@ -94,7 +94,7 @@ async function harness(fn) {
       result = await handle({ type, ...event }, ctx);
     return result;
   };
-  const tool = (name, args = {}) =>
+  const rawTool = (name, args = {}) =>
     extension.tools
       .get(name)
       .definition.execute(
@@ -104,6 +104,16 @@ async function harness(fn) {
         () => {},
         ctx,
       );
+  // Existing policy scenarios set modes as a direct human setup action.
+  // Authorization regressions below deliberately use rawTool instead.
+  const tool = async (name, args = {}) => {
+    if (name === "context_mode" && args.mode)
+      await emit("input", {
+        source: "interactive",
+        text: `请把当前会话改成 ${args.mode} 模式`,
+      });
+    return rawTool(name, args);
+  };
   const state = async () =>
     JSON.parse((await tool("context_mode")).content[0].text);
   const turn = (event = {}) =>
@@ -124,6 +134,7 @@ async function harness(fn) {
       ctx,
       emit,
       tool,
+      rawTool,
       state,
       turn,
       notifications,
@@ -187,6 +198,85 @@ test("model-specific local budgets survive reload, learn only context failures a
     );
   }));
 
+test("mode changes require fresh human authorization while summary notes stay manual across reload", () =>
+  harness(async (h) => {
+    const change = (mode) => h.rawTool("context_mode", { mode });
+    assert.equal((await h.state()).mode, "summary");
+    await assert.rejects(change("notes"), /current user's authorization/);
+    await h.emit("input", {
+      source: "extension",
+      text: "请把当前会话改成笔记模式",
+    });
+    await assert.rejects(change("notes"), /current user's authorization/);
+    await h.emit("input", { source: "rpc", text: "现在是不是笔记模式？" });
+    await assert.rejects(change("notes"), /current user's authorization/);
+    await h.emit("input", {
+      source: "rpc",
+      text: "主对话用压缩，子智能体用笔记",
+    });
+    await assert.rejects(change("notes"), /current user's authorization/);
+    const saved = JSON.parse(
+      (
+        await h.rawTool("context_note", {
+          action: "write",
+          notes: [
+            { name: "index", text: "Optional manual index" },
+            { name: "handoff", text: "Optional manual handoff" },
+          ],
+        })
+      ).content[0].text,
+    );
+    assert.equal(saved.mode, "summary");
+    assert.equal(saved.noteUse, "manual-only");
+    assert.equal(await h.emit("context", { messages: [] }), undefined);
+    await assert.rejects(
+      h.rawTool("context_rollover"),
+      /Select notes mode first/,
+    );
+    const prompt = {
+      messageType: "user",
+      systemPromptOptions: { promptGuidelines: [] },
+    };
+    await h.emit("before_agent_start", prompt);
+    assert.match(
+      prompt.systemPromptOptions.promptGuidelines.join("\n"),
+      /Do not routinely maintain index\/handoff/,
+    );
+    await h.emit("input", {
+      source: "interactive",
+      text: "帮我把当前会话换成记笔记那套",
+    });
+    await change("notes");
+    await assert.rejects(change("summary"), /current user's authorization/);
+    await h.emit("input", { source: "interactive", text: "这边改回摘要就行" });
+    await h.emit("input", { source: "interactive", text: "先别改，继续排查" });
+    await assert.rejects(change("summary"), /current user's authorization/);
+    await h.emit("input", { source: "interactive", text: "这边改回摘要就行" });
+    await h.emit("session_shutdown");
+    await h.emit("session_start");
+    assert.equal((await h.state()).mode, "notes");
+    await assert.rejects(change("summary"), /current user's authorization/);
+    await h.emit("input", {
+      source: "interactive",
+      text: "不用笔记了，改回压缩吧",
+    });
+    await change("summary");
+    assert.equal((await h.state()).notes.length, 2);
+    await h.emit("session_shutdown");
+    await h.emit("session_start");
+    assert.equal((await h.state()).mode, "summary");
+    const read = JSON.parse(
+      (await h.rawTool("context_note", { action: "read", name: "handoff" }))
+        .content[0].text,
+    );
+    assert.equal(read.text, "Optional manual handoff");
+    assert.equal(read.mode, "summary");
+    assert.equal(read.noteUse, "manual-only");
+    await h.rawTool("context_mode", { inputLimitTokens: 20000 });
+    assert.equal((await h.state()).budget.inputLimitTokens, 20000);
+    assert.equal((await h.state()).mode, "summary");
+  }));
+
 test("standalone host defaults initialize a fresh member but explicit mode and auto-budget survive reload", () =>
   harness(async (h) => {
     const previous = process.env.PI_CONTEXT_DEFAULTS;
@@ -194,6 +284,7 @@ test("standalone host defaults initialize a fresh member but explicit mode and a
       await h.emit("session_shutdown");
       const id = "defaults-" + crypto.randomUUID();
       h.ctx.sessionManager.getSessionId = () => id;
+      h.setEntries([]);
       h.ctx.model = {
         ...h.ctx.model,
         contextWindow: 1050000,
@@ -211,6 +302,43 @@ test("standalone host defaults initialize a fresh member but explicit mode and a
       await h.emit("session_start");
       assert.equal((await h.state()).mode, "summary");
       assert.equal((await h.state()).budget.inputLimitTokens, 889232);
+    } finally {
+      if (previous === undefined) delete process.env.PI_CONTEXT_DEFAULTS;
+      else process.env.PI_CONTEXT_DEFAULTS = previous;
+    }
+  }));
+
+test("new notes defaults preserve a legacy conversation's existing summary or notes checkpoint", () =>
+  harness(async (h) => {
+    const previous = process.env.PI_CONTEXT_DEFAULTS;
+    try {
+      process.env.PI_CONTEXT_DEFAULTS = JSON.stringify({ mode: "notes" });
+      for (const [entries, expected] of [
+        [[entry("old", "Existing summary-mode history")], "summary"],
+        [
+          [
+            {
+              id: "old-notes",
+              type: "compaction",
+              details: { contextMode: "notes" },
+            },
+          ],
+          "notes",
+        ],
+        [[], "notes"],
+      ]) {
+        await h.emit("session_shutdown");
+        h.ctx.sessionManager.getSessionId = () =>
+          "legacy-" + crypto.randomUUID();
+        const id = h.ctx.sessionManager.getSessionId();
+        h.ctx.sessionManager.getSessionId = () => id;
+        h.setEntries(entries);
+        await h.emit("session_start");
+        assert.equal((await h.state()).mode, expected);
+        await h.emit("session_shutdown");
+        await h.emit("session_start");
+        assert.equal((await h.state()).mode, expected);
+      }
     } finally {
       if (previous === undefined) delete process.env.PI_CONTEXT_DEFAULTS;
       else process.env.PI_CONTEXT_DEFAULTS = previous;

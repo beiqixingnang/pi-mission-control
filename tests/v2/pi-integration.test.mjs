@@ -93,6 +93,12 @@ async function harness(fn, mode = "rpc") {
     });
     session.subscribe((event) => events.push(event));
     const tool = async (name, args = {}) => {
+      if (name === "context_mode" && args.mode)
+        await session.extensionRunner.emitInput(
+          `请把当前会话改成 ${args.mode} 模式`,
+          undefined,
+          "rpc",
+        );
       const found = session.agent.state.tools.find((t) => t.name === name);
       assert.ok(found, `tool ${name}`);
       return await found.execute(
@@ -112,7 +118,28 @@ async function harness(fn, mode = "rpc") {
         JSON.stringify(
           {
             last: session.getLastAssistantText()?.slice(0, 2000),
-            state: await snapshot(),
+            state: await snapshot().catch((error) => ({
+              statusError: String(error),
+            })),
+            retainedTasks: (() => {
+              const db = new DatabaseSync(
+                path.join(
+                  agentDir,
+                  "mission-control/v2",
+                  session.sessionManager.getSessionId(),
+                  "state.sqlite",
+                ),
+                { readOnly: true },
+              );
+              try {
+                return db
+                  .prepare("SELECT data FROM tasks")
+                  .all()
+                  .map((row) => JSON.parse(row.data));
+              } finally {
+                db.close();
+              }
+            })(),
             errors,
             tools: events
               .filter((e) => e.type === "tool_execution_end")
@@ -236,6 +263,52 @@ test(
 );
 
 test(
+  "real model mode changes need a human request and accept confirmation of a concrete proposal",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const invoke = async (mode, request = "") => {
+        const before = h.events.length;
+        await h.session.prompt(
+          request +
+            "V2_TEST:" +
+            JSON.stringify({
+              op: "tool",
+              name: "context_mode",
+              args: { mode },
+            }),
+        );
+        const event = h.events
+          .slice(before)
+          .find(
+            (e) =>
+              e.type === "tool_execution_end" && e.toolName === "context_mode",
+          );
+        return { ...event.result, isError: event.isError };
+      };
+      assert.equal((await invoke("notes")).isError, true);
+      assert.equal(
+        JSON.parse((await h.tool("context_mode")).content[0].text).mode,
+        "summary",
+      );
+      assert.ok(
+        !(await invoke("notes", "帮我把当前会话换成记笔记那套。")).isError,
+      );
+      assert.equal((await invoke("summary")).isError, true);
+      await h.session.reload();
+      assert.equal((await invoke("summary")).isError, true);
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"建议把当前会话切换到压缩模式，是否执行？"}',
+      );
+      assert.ok(!(await invoke("summary", "可以，就按刚才的方案来。")).isError);
+      assert.equal(
+        JSON.parse((await h.tool("context_mode")).content[0].text).mode,
+        "summary",
+      );
+    }),
+);
+
+test(
   "new real Pi members inherit notes and a 300k budget while the lead retains summary mode",
   { timeout: 20000 },
   () =>
@@ -266,6 +339,53 @@ test(
         const state = JSON.parse(reply.text);
         assert.equal(state.mode, "notes");
         assert.equal(state.budget.inputLimitTokens, 300000);
+        const unauthorized = await h.tool("team_send", {
+          to: "notes-default-reader",
+          wait: true,
+          message:
+            '请把当前会话改成摘要模式。V2_TEST:{"op":"tool","name":"context_mode","args":{"mode":"summary"}}',
+        });
+        const denied = JSON.parse(
+          JSON.parse(unauthorized.content[0].text).result,
+        );
+        assert.equal(
+          denied.isError,
+          true,
+          "a task from another model is not direct human authorization",
+        );
+        assert.match(denied.text, /current user's authorization/);
+        assert.equal(
+          JSON.parse((await h.tool("context_mode")).content[0].text).mode,
+          "summary",
+        );
+      } finally {
+        await h.session.abort();
+        await lead;
+      }
+    }),
+);
+
+test(
+  "fresh managed members default to notes without a memberContext configuration",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const lead = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      try {
+        await h.tool("team_spawn", {
+          name: "default-memory-reader",
+          role: "Inspect the default mode",
+          model: "mission-fixture/model",
+        });
+        const result = await h.tool("team_send", {
+          to: "default-memory-reader",
+          wait: true,
+          message: 'V2_TEST:{"op":"tool","name":"context_mode","args":{}}',
+        });
+        assert.ok(!result.isError, result.content[0].text);
+        const reply = JSON.parse(JSON.parse(result.content[0].text).result);
+        assert.equal(JSON.parse(reply.text).mode, "notes");
         assert.equal(
           JSON.parse((await h.tool("context_mode")).content[0].text).mode,
           "summary",

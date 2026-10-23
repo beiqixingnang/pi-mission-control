@@ -1044,8 +1044,13 @@ test("standalone memory extension handles unknown usage, reload and cancelled ro
       result = await h({ type, ...event }, ctx);
     return result;
   };
-  const tool = (name, args) =>
-    extension.tools
+  const tool = async (name, args) => {
+    if (name === "context_mode" && args.mode)
+      await emit("input", {
+        source: "interactive",
+        text: `请把当前会话改成 ${args.mode} 模式`,
+      });
+    return extension.tools
       .get(name)
       .definition.execute(
         "call",
@@ -1054,6 +1059,7 @@ test("standalone memory extension handles unknown usage, reload and cancelled ro
         () => {},
         ctx,
       );
+  };
   try {
     await emit("session_start");
     await tool("context_mode", { mode: "notes" });

@@ -123,6 +123,26 @@ def main():
     def tool(name, args):
         line("V2_TEST:" + json.dumps({"op": "tool", "name": name, "args": args, "noRepeatWake": True}, separators=(",", ":")))
 
+    def editor_ready(label):
+        nonce = uuid.uuid4().hex
+        end = time.monotonic() + 20
+        while time.monotonic() < end:
+            line("/fixture-ready " + nonce)
+            for _ in range(3):
+                drain()
+                if lifecycle_trace.exists():
+                    for record in lifecycle_trace.read_text().splitlines():
+                        try:
+                            event = json.loads(record)
+                        except json.JSONDecodeError:
+                            continue
+                        if event.get("event") == "fixture_ready" and event.get("nonce") == nonce and event.get("pid") == process.pid:
+                            checks.append(label)
+                            return
+            if process.poll() is not None:
+                raise AssertionError("Pi exited before editor readiness: " + label)
+        raise AssertionError("Editor did not acknowledge a real command: " + label)
+
     def reload(label):
         # TUI redraws can repeat an old "Reloaded" notice before a new reload
         # actually happens. Wait for a fresh session_start from the fixture.
@@ -132,13 +152,18 @@ def main():
         end = time.monotonic() + .4
         while time.monotonic() < end:
             drain()
+        editor_ready("reloaded editor acknowledged a real command before further test input")
 
     try:
         wait(lambda: database.exists() and "↑" in visible and "model" in visible, "dedicated test conversation opened and TUI input is ready")
+        editor_ready("startup editor acknowledged a real command before test setup")
         line("/name " + config["name"])
         if mission() and mission()["status"] not in ["complete", "stopped"]:
             line("/mission stop")
             wait(lambda: mission()["status"] == "stopped", "previous isolated test goal explicitly stopped before a new regression")
+        if query("meta", "key='relocationHold'") == [True]:
+            line("/mission resume")
+            wait(lambda: query("meta", "key='relocationHold'") == [False], "a leftover dedicated-test migration pause was explicitly resumed before new setup")
         run_goal = "Plugin task policy regression " + uuid.uuid4().hex[:8]
         line("/mission start " + run_goal + " | Preserve the dedicated test conversation")
         wait(lambda: mission() and mission()["objective"] == run_goal, "baseline goal recorded")
@@ -402,6 +427,26 @@ def main():
             text = "".join(block.get("text", "") for block in message["content"])
             return message.get("isError", False), text
 
+        failed, text = call_tool("context_mode", {"mode": "notes"})
+        assert failed and "current user's authorization" in text
+        checks.append("a real model cannot switch the summary conversation to notes without human authorization")
+        failed, text = call_tool("context_note", {"action": "write", "name": "manual-mode-regression", "text": "Optional manual working note; do not switch context modes."})
+        receipt = json.loads(text)
+        assert not failed and receipt["mode"] == "summary" and receipt["noteUse"] == "manual-only"
+        assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)]
+        checks.append("summary mode note receipts explicitly identify manual storage without changing modes")
+        reload("summary mode and manual notes survive literal /reload in the same Pi process")
+        failed, text = call_tool("context_note", {"action": "read", "name": "manual-mode-regression"})
+        assert not failed and json.loads(text)["noteUse"] == "manual-only"
+        previous = latest_tool("context_mode")
+        line("帮我把当前会话换成记笔记那套。V2_TEST:" + json.dumps({"op": "tool", "name": "context_mode", "args": {"mode": "notes"}, "noRepeatWake": True}, separators=(",", ":")))
+        wait(lambda: latest_tool("context_mode") and latest_tool("context_mode")["id"] != previous["id"], "ordinary natural-language authorization allowed the real model mode change")
+        assert not latest_tool("context_mode")["message"].get("isError", False)
+        assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)]
+        quiet(.4)
+        line("/context mode summary")
+        wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)], "the user's direct mode command remains available")
+
         line("/mission resume")
         wait(lambda: not mission()["humanPaused"], "test mission resumed for root-identity regression")
         selected = mission()["id"]
@@ -494,6 +539,8 @@ def main():
             checks.append("old unknown test executions were reconciled only after actual /proc inspection")
         # Exercise the actual user's intended flow only in the dedicated test
         # workspace, then rename back. Each continuation keeps its ancestry.
+        line("/context mode notes")
+        wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)], "user selected notes for the independent workspace migration regression")
         failed, _ = call_tool("context_mode", {"mode": "notes", "inputLimitTokens": 300000})
         assert not failed
         relocation_note = "RELOCATION_NOTE_" + uuid.uuid4().hex[:8]
@@ -541,6 +588,8 @@ def main():
             identity.write_text(json.dumps({**config, "workspace": str(workspace)}, ensure_ascii=False, indent=2))
         assert workspace == original_workspace and len(set(rename_ancestry)) == 3
         checks.append("natural-language CJK workspace rename and rename-back completed without user slash commands or restarting Pi")
+        line("/context mode summary")
+        wait(lambda: memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)], "user selected summary after the independent migration regression")
         failed, _ = call_tool("context_mode", {"mode": "summary"})
         assert not failed
         assert len(list(sessions.glob("*_" + config["id"] + ".jsonl"))) == 1

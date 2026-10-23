@@ -190,8 +190,10 @@ export function workerEnvironment(assignment: Assignment) {
   });
   if (assignment.settings.webFetch)
     env.MC_V2_WEB_FETCH = JSON.stringify(assignment.settings.webFetch);
-  if (assignment.settings.memberContext)
-    env.PI_CONTEXT_DEFAULTS = JSON.stringify(assignment.settings.memberContext);
+  env.PI_CONTEXT_ROLE = "member";
+  env.PI_CONTEXT_DEFAULTS = JSON.stringify(
+    assignment.settings.memberContext ?? { mode: "notes" },
+  );
   if (assignment.settings.reconnect)
     env.MC_V2_RECONNECT = JSON.stringify(assignment.settings.reconnect);
   env.NODE_NO_WARNINGS = "1";

@@ -1,3 +1,9 @@
+# 2.6.2 — user-controlled context modes (2026-10-23)
+
+- Default new lead conversations to summary and new managed members to notes, preserving existing session selections across reload and migration.
+- Require a current human natural-language instruction before the model can change modes. Keep direct user mode commands, scoped Chinese/English requests and confirmation of a concrete preceding proposal; reject unrelated work, model-generated inputs and historical examples.
+- Clarify that context_note never selects a mode. Summary-mode notes remain optional manual storage; prompts discourage routine index/handoff maintenance, and read/write receipts identify the current mode and note use.
+
 # 2.6.1 — one manual resume after workspace migration (2026-10-23)
 
 - Tell the user to manually run /mission resume after restore, rename or switch, and retain that instruction in the restored history, reload notice, status and compact/detail views. Show a workspace pause instead of an active goal while that control is held.

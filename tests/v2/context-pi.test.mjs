@@ -69,14 +69,21 @@ async function harness(fn) {
     file,
     "export const position = 173; // retain review position\n",
   );
-  const tool = (name, args = {}) =>
-    session.agent.state.tools
+  const tool = async (name, args = {}) => {
+    if (name === "context_mode" && args.mode)
+      await session.extensionRunner.emitInput(
+        `请把当前会话改成 ${args.mode} 模式`,
+        undefined,
+        "rpc",
+      );
+    return session.agent.state.tools
       .find((t) => t.name === name)
       .execute(
         "direct-" + crypto.randomUUID(),
         args,
         new AbortController().signal,
       );
+  };
   const status = async () =>
     JSON.parse((await tool("context_mode")).content[0].text);
   const windows = () =>
@@ -85,10 +92,12 @@ async function harness(fn) {
       .filter(
         (e) => e.type === "compaction" && e.details?.contextMode === "notes",
       );
-  const run = (args) =>
-    session.prompt(
+  const run = async (args) => {
+    await session.prompt("/context mode notes");
+    return session.prompt(
       "V2_TEST:" + JSON.stringify({ op: "notes-cycle", file, ...args }),
     );
+  };
   try {
     await fn({ cwd, session, events, tool, status, windows, run });
     assert.deepEqual(errors, []);

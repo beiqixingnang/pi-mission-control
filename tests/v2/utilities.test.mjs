@@ -481,8 +481,18 @@ test("network guard rejects private/mapped addresses and worker environments do 
     });
     assert.equal(env.MC_FIXTURE_SECRET, undefined);
     assert.equal(env.MC_V2_TOKEN, "token");
+    assert.equal(env.PI_CONTEXT_ROLE, "member");
     assert.equal(JSON.parse(env.PI_CONTEXT_DEFAULTS).inputLimitTokens, 300000);
     assert.equal(JSON.parse(env.MC_V2_WEB_FETCH).useSystemCa, true);
+    const defaults = workerEnvironment({
+      member: {},
+      task: { id: "default", epoch: 1 },
+      directory: "d",
+      bridgeUrl: "u",
+      token: "token",
+      settings: { inheritEnv: [], workerExtensions: [] },
+    });
+    assert.equal(JSON.parse(defaults.PI_CONTEXT_DEFAULTS).mode, "notes");
   } finally {
     if (previous === undefined) delete process.env.MC_FIXTURE_SECRET;
     else process.env.MC_FIXTURE_SECRET = previous;

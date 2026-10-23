@@ -135,14 +135,21 @@ async function harness(fn, options = {}) {
     });
     runtime.setRebindSession(bind);
     await bind(runtime.session);
-    const tool = (name, args = {}) =>
-      runtime.session.agent.state.tools
+    const tool = async (name, args = {}) => {
+      if (name === "context_mode" && args.mode)
+        await runtime.session.extensionRunner.emitInput(
+          `请把当前会话改成 ${args.mode} 模式`,
+          undefined,
+          "rpc",
+        );
+      return runtime.session.agent.state.tools
         .find((t) => t.name === name)
         .execute(
           "test-" + crypto.randomUUID(),
           args,
           new AbortController().signal,
         );
+    };
     const state = async () =>
       JSON.parse((await tool("mission_status")).content[0].text);
     if (!options.noInitialResponse)

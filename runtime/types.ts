@@ -321,6 +321,7 @@ export interface Settings {
   searchUrl?: string;
 }
 export const DEFAULT_SETTINGS: Settings = {
+  memberContext: { mode: "notes" },
   maxParallel: 4,
   taskTimeoutMs: 0,
   progressIntervalMs: 3_600_000,
