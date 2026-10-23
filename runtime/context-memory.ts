@@ -149,6 +149,22 @@ export function recentUserContext(entries: any[]) {
   }
   return selected.reverse().join("\n\n");
 }
+/** Consistent copy for an explicitly authorized continuation; no task/goal data is read. */
+export function snapshotContextMemory(source: string, destination: string) {
+  const stat = fs.lstatSync(source);
+  if (!stat.isFile() || stat.isSymbolicLink())
+    throw Error("Context memory snapshot needs a regular database file");
+  const db = new DatabaseSync(source, { readOnly: true });
+  try {
+    db.exec("PRAGMA busy_timeout=5000");
+    // A file copy would omit committed pages still present in SQLite's WAL.
+    // VACUUM INTO preserves the source and refuses to overwrite a destination.
+    db.prepare("VACUUM INTO ?").run(destination);
+    fs.chmodSync(destination, 0o600);
+  } finally {
+    db.close();
+  }
+}
 export class ContextMemory {
   db: DatabaseSync;
   readonly directory: string;

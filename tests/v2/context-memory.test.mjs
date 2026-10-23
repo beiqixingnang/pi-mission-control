@@ -11,6 +11,7 @@ import {
   NOTE_LIMITS,
   appendContextHint,
   indexAlreadyIncluded,
+  snapshotContextMemory,
 } from "../../runtime/context-memory.ts";
 import {
   summarizeChunks,
@@ -35,6 +36,57 @@ const entry = (id, text, role = "user") => ({
   type: "message",
   message: { role, content: [{ type: "text", text }] },
 });
+
+test("context snapshots include committed WAL notes, settings and cursor keys without modifying or overwriting source data", () =>
+  usingMemory((m, directory) => {
+    m.setMode("notes");
+    m.setSetting("repair", '{"phase":"paused","turns":3}');
+    m.write("index", "中文 snapshot version one", "public-source", 0);
+    m.write("index", "中文 snapshot version two", "public-source", 1);
+    m.sync([
+      entry("older", "SNAPSHOT_TARGET old"),
+      entry("newer", "SNAPSHOT_TARGET new"),
+    ]);
+    const cursor = m.search("SNAPSHOT_TARGET", 1, "user").nextCursor;
+    const before = m.db
+      .prepare("SELECT * FROM note_versions ORDER BY revision")
+      .all();
+    const destination = path.join(directory, "snapshot");
+    fs.mkdirSync(destination);
+    const file = path.join(destination, "memory.sqlite");
+    snapshotContextMemory(path.join(directory, "memory.sqlite"), file);
+    assert.deepEqual(
+      m.db.prepare("SELECT * FROM note_versions ORDER BY revision").all(),
+      before,
+    );
+    const copied = new ContextMemory(destination, "continuation");
+    try {
+      assert.equal(copied.mode, "notes");
+      assert.equal(copied.note("index").revision, 2);
+      assert.equal(
+        copied.setting("repair", ""),
+        ' {"phase":"paused","turns":3}'.trim(),
+      );
+      assert.deepEqual(
+        copied.db
+          .prepare("SELECT * FROM note_versions ORDER BY revision")
+          .all(),
+        before,
+      );
+      assert.equal(
+        copied.search("SNAPSHOT_TARGET", 1, "user", cursor).matches[0].id,
+        "older",
+      );
+      assert.throws(
+        () =>
+          snapshotContextMemory(path.join(directory, "memory.sqlite"), file),
+        /exists|empty/i,
+      );
+      assert.equal(copied.note("index").text, "中文 snapshot version two");
+    } finally {
+      copied.close();
+    }
+  }));
 
 test("empty optional search cursors start at the first page while invented nonempty cursors remain invalid", () =>
   usingMemory((m, directory) => {

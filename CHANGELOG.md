@@ -1,3 +1,10 @@
+# 2.5.3 — workspace continuations preserve notes and summary routing (2026-10-23)
+
+- Preserve the standalone context-memory database, mode, note revisions, learned budgets and cursor keys when renaming or switching workspace. Snapshot SQLite consistently, including committed WAL pages, before attaching the continuation; keep the source data and remove only the new snapshot on rollback.
+- Copy explicit lead/member summary settings, diagnostics and completed summary caches with the existing runtime migration. A workspace continuation no longer silently loses its summary route or resets notes mode.
+- Explain that externally renaming the current directory must be undone before using /project rename; switch remains a change to another existing workspace and preserves member permissions.
+- Add actual Pi regressions for quoted CJK names, goal/evidence retention, notes and summary routing, rollback and reload. Extend the dedicated WSL TUI test with rename and rename-back in the same process.
+
 # 2.5.2 — optional history cursors and actionable excluded reads (2026-10-22)
 
 - Treat omitted, null and blank history search cursors as the first page, including batch requests. Keep every nonempty cursor signed and branch/query/role scoped; invented values such as 0 remain invalid with explicit recovery guidance.

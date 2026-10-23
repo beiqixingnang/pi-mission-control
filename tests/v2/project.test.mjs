@@ -40,8 +40,8 @@ async function harness(fn, options = {}) {
   const base = fs.realpathSync.native(
     fs.mkdtempSync(path.join(os.tmpdir(), "mc-v2-project-")),
   );
-  const source = path.join(base, "source"),
-    target = path.join(base, "target"),
+  const source = path.join(base, options.sourceName ?? "source"),
+    target = path.join(base, options.targetName ?? "target"),
     agent = path.join(base, "agent");
   fs.mkdirSync(source);
   fs.mkdirSync(agent);
@@ -299,9 +299,233 @@ test(
       assert.match(h.runtime.session.getLastAssistantText(), /TARGET_SCOPE/);
     }),
 );
+
+for (const action of ["rename", "switch"]) {
+  test(
+    `workspace ${action} retains standalone context mode, notes and explicit summary routing through reload`,
+    { timeout: 20000 },
+    () =>
+      harness(async (h) => {
+        if (action === "switch") fs.mkdirSync(h.target);
+        await h.tool("context_mode", {
+          mode: "notes",
+          inputLimitTokens: 300000,
+        });
+        await h.tool("context_note", {
+          action: "write",
+          notes: [
+            { name: "index", text: "WORKSPACE_INDEX_173" },
+            {
+              name: "handoff",
+              text: "Next: decoder.py line 173; not accepted",
+            },
+            { name: "topic/decode", text: "UNCHANGED_TOPIC_DETAIL_173" },
+          ],
+        });
+        await h.tool("compaction_model", {
+          action: "set",
+          model: "mission-fixture/summary",
+        });
+        const original = JSON.parse(
+          (await h.tool("context_mode", {})).content[0].text,
+        );
+        const summaryBefore = JSON.parse(
+          (
+            await h.tool("compaction_model", {
+              action: "status",
+              target: "lead",
+            })
+          ).content[0].text,
+        );
+        assert.equal(summaryBefore.model, "mission-fixture/summary");
+        const sourceId = h.runtime.session.sessionId;
+        await h.command(
+          action === "rename"
+            ? "/project rename target"
+            : '/project switch "' + h.target + '"',
+        );
+        assert.equal(h.runtime.cwd, h.target, JSON.stringify(h.notices));
+        assert.notEqual(h.runtime.session.sessionId, sourceId);
+        const after = JSON.parse(
+          (await h.tool("context_mode", {})).content[0].text,
+        );
+        assert.equal(
+          after.mode,
+          "notes",
+          "standalone memory mode must continue with the relocated conversation",
+        );
+        assert.equal(
+          after.budget.inputLimitTokens,
+          original.budget.inputLimitTokens,
+        );
+        assert.deepEqual(
+          after.notes,
+          original.notes,
+          "note revisions, sources and timestamps must remain unchanged",
+        );
+        const handoff = JSON.parse(
+          (await h.tool("context_note", { action: "read", name: "handoff" }))
+            .content[0].text,
+        );
+        assert.equal(handoff.text, "Next: decoder.py line 173; not accepted");
+        const summaryAfter = JSON.parse(
+          (
+            await h.tool("compaction_model", {
+              action: "status",
+              target: "lead",
+            })
+          ).content[0].text,
+        );
+        assert.equal(
+          summaryAfter.model,
+          summaryBefore.model,
+          "never silently fall back to inference model during relocation",
+        );
+        await h.runtime.session.reload();
+        const reloaded = JSON.parse(
+          (await h.tool("context_mode", {})).content[0].text,
+        );
+        assert.equal(reloaded.mode, "notes");
+        assert.deepEqual(reloaded.notes, original.notes);
+        assert.equal(
+          JSON.parse(
+            (
+              await h.tool("compaction_model", {
+                action: "status",
+                target: "lead",
+              })
+            ).content[0].text,
+          ).model,
+          summaryBefore.model,
+        );
+      }),
+  );
+}
+
+test("a manual external directory rename cannot silently reassign the old session or member permissions", () =>
+  harness(async (h) => {
+    const before = h.runtime.session.sessionId;
+    fs.renameSync(h.source, h.target);
+    await h.command('/project switch "' + h.target + '"');
+    assert.equal(h.runtime.cwd, h.source);
+    assert.equal(h.runtime.session.sessionId, before);
+    assert.ok(
+      h.notices.some((notice) =>
+        String(notice[0]).includes("restore its previous name first"),
+      ),
+      JSON.stringify(h.notices),
+    );
+    fs.renameSync(h.target, h.source);
+  }));
+
+test(
+  "quoted CJK workspace rename retains goal evidence, native relative reads and new-directory resume discovery",
+  { timeout: 20000 },
+  () =>
+    harness(
+      async (h) => {
+        const evidence = path.join(h.source, "evidence.txt");
+        fs.writeFileSync(evidence, "RENAMED_EVIDENCE_173");
+        const plan = JSON.parse(
+          (
+            await h.tool("goal_plan", {
+              goals: [
+                {
+                  key: "root",
+                  objective: "Quoted rename inventory",
+                  criteria: ["All batches accepted"],
+                },
+                {
+                  key: "leaf",
+                  parentId: "root",
+                  objective: "Inspect evidence file",
+                  criteria: ["Evidence file exists"],
+                  scope: { unitKind: "file", items: [evidence] },
+                },
+              ],
+            })
+          ).content[0].text,
+        );
+        const leaf = plan.created.find((n) => n.key === "leaf");
+        const accepted = JSON.parse(
+          (
+            await h.tool("goal_accept", {
+              goalId: leaf.id,
+              revision: 0,
+              evidence: [
+                {
+                  criterion: 1,
+                  source: "artifact",
+                  path: evidence,
+                  summary: "Concrete evidence file retained during rename",
+                },
+              ],
+            })
+          ).content[0].text,
+        );
+        const before = JSON.parse(
+          (await h.tool("goal_tree", {})).content[0].text,
+        );
+        process.chdir(h.source);
+        await h.command('/project rename "' + path.basename(h.target) + '"');
+        assert.equal(h.runtime.cwd, h.target, JSON.stringify(h.notices));
+        assert.equal(fs.existsSync(h.source), false);
+        const after = JSON.parse(
+          (await h.tool("goal_tree", {})).content[0].text,
+        );
+        assert.deepEqual(
+          after.nodes,
+          before.nodes,
+          "goal identity, revision and acceptance status remain unchanged",
+        );
+        const detail = JSON.parse(
+          (await h.tool("goal_tree", { goalId: leaf.id })).content[0].text,
+        );
+        assert.equal(detail.acceptance.id, accepted.id);
+        assert.equal(
+          JSON.parse(
+            (await h.tool("project_resolve", { path: evidence })).content[0]
+              .text,
+          ).resolved,
+          path.join(h.target, "evidence.txt"),
+        );
+        await h.command(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "tool",
+              name: "read",
+              args: { path: "evidence.txt" },
+            }),
+        );
+        assert.match(
+          h.runtime.session.getLastAssistantText(),
+          /RENAMED_EVIDENCE_173/,
+        );
+        assert.equal(
+          SessionManager.continueRecent(h.target).getSessionId(),
+          h.runtime.session.sessionId,
+        );
+        await h.runtime.session.reload();
+        assert.equal(
+          JSON.parse(
+            (await h.tool("goal_tree", { goalId: leaf.id })).content[0].text,
+          ).acceptance.id,
+          accepted.id,
+        );
+      },
+      { sourceName: "原 工作区", targetName: "新 工作区 2026" },
+    ),
+);
 test("a cancelled native switch rolls back rename and leaves the original runtime paused and usable", () =>
   harness(async (h) => {
     const original = h.runtime.session;
+    await h.tool("context_mode", { mode: "notes", inputLimitTokens: 300000 });
+    await h.tool("context_note", {
+      action: "write",
+      name: "index",
+      text: "ORIGINAL_NOTE_AFTER_ROLLBACK",
+    });
+    const originalId = original.sessionId;
     original.resourceLoader
       .getExtensions()
       .extensions[0].handlers.set("session_before_switch", [
@@ -312,6 +536,31 @@ test("a cancelled native switch rolls back rename and leaves the original runtim
     assert.equal(h.runtime.cwd, h.source);
     assert.ok(fs.existsSync(h.source));
     assert.equal(fs.existsSync(h.target), false);
+    const journals = fs
+      .readdirSync(path.join(h.agent, "project-migrations"))
+      .map((id) =>
+        JSON.parse(
+          fs.readFileSync(
+            path.join(h.agent, "project-migrations", id, "migration.json"),
+            "utf8",
+          ),
+        ),
+      );
+    const rolled = journals.find((r) => r.previousSessionId === originalId);
+    assert.equal(rolled.state, "rolled-back");
+    assert.ok(rolled.memoryDirectory);
+    assert.equal(
+      fs.existsSync(rolled.memoryDirectory),
+      false,
+      "rollback removes only its newly created memory snapshot",
+    );
+    assert.equal(
+      JSON.parse(
+        (await h.tool("context_note", { action: "read", name: "index" }))
+          .content[0].text,
+      ).text,
+      "ORIGINAL_NOTE_AFTER_ROLLBACK",
+    );
     await h.command('V2_TEST:{"op":"recall"}');
     assert.match(
       h.runtime.session.getLastAssistantText(),

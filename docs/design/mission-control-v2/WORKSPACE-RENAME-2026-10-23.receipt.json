@@ -1,0 +1,231 @@
+{
+  "schema": "pi-workspace-rename-v1",
+  "recordedAt": "2026-10-23T01:39:15.921Z",
+  "version": "2.5.3",
+  "baseCommit": "0c7dd7996c39263ffb3175e2749d2048b3b8ccd3",
+  "branch": "codex/workspace-rename-check",
+  "sourceFiles": {
+    "CHANGELOG.md": "97f191e563ffeaefaab46dabc5a17b8893692625e841cbb3e5b1bb66d1189153",
+    "README.md": "3def2f967600fe2ecb33f5ebee11f5c2490c2307c56a62393040aa40dffbbabc",
+    "docs/design/mission-control-v2/VALIDATION.md": "d3ee865b8f4bc5a4fff7ead97be3ca35f297f0cf34a01165bbbe901b11d698f7",
+    "package-lock.json": "81bde38f90778e132e50a8f015af33821c593fef77f72491c32f3d049ec07b80",
+    "package.json": "1abac9236772af4cfb6ef8cb7b40ea81413f9c1f2649d6f523731215c733c051",
+    "runtime/context-memory.ts": "05fedc8a3f2292b6d413ad256bfdf451671b68c4bb68ea5d55aa4f2077335dab",
+    "runtime/relocation.ts": "9da43f028d9bc346ac9f5f914a0950fcfc6ae32c2c0d4d92385f3917face84a3",
+    "scripts/test-task-policies-tui.py": "682960900a7069d44abfe4a8b4241fd102cc2d50f251a93286b67bcd58bb3f50",
+    "tests/v2/context-memory.test.mjs": "3adbac723a980bf49a65c1da9152c94470cba597a3963e79dd6abd12676b81e0",
+    "tests/v2/project.test.mjs": "edf7d49bb12ad82aede773bf92a60fdec7e01e5a9035776f6341c43df7bbb2ff",
+    "docs/design/mission-control-v2/WORKSPACE-RENAME-2026-10-23.md": "5536174f2b01986898ee16e7cec2bb057048b7404aac0372633eec009c5b5a9c"
+  },
+  "findings": [
+    "Existing rename/switch baseline tests passed11/11 on Windows and WSL",
+    "New tests reproduced loss of notes mode and explicit summary routing in workspace continuations",
+    "Manual external rename leaves missing cwd and must be reversed before /project rename"
+  ],
+  "fixes": [
+    "Snapshot the standalone context-memory SQLite including WAL to the authorized continuation",
+    "Copy summary routing, diagnostics and summary-cache during migration",
+    "Remove only the newly created memory copy on rollback; preserve source notes",
+    "Give explicit recovery guidance for a manually renamed missing cwd"
+  ],
+  "checks": {
+    "windows": {
+      "command": "node scripts/test-v2.mjs",
+      "suite": {
+        "exitCode": 0,
+        "tests": 295,
+        "pass": 291,
+        "fail": 0,
+        "skipped": 4,
+        "cancelled": 0
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 38
+      }
+    },
+    "wsl": {
+      "distribution": "Debian",
+      "command": "node scripts/test-v2.mjs",
+      "suite": {
+        "exitCode": 0,
+        "tests": 295,
+        "pass": 291,
+        "fail": 0,
+        "skipped": 4,
+        "cancelled": 0
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 38
+      }
+    },
+    "focusedPi13": {
+      "command": "node scripts/test-v2.mjs tests/v2/project.test.mjs tests/v2/relocation.test.mjs tests/v2/context-memory.test.mjs",
+      "note": "Isolated preserved host package; global Pi stays1.4.0",
+      "suite": {
+        "exitCode": 0,
+        "tests": 35,
+        "pass": 35,
+        "fail": 0,
+        "skipped": 0,
+        "cancelled": 0
+      }
+    },
+    "tui": {
+      "command": "python3 scripts/test-task-policies-tui.py BASELINE CANDIDATE TEST_HOME",
+      "exitCode": 0,
+      "baseline": "2.5.2",
+      "candidate": "2.5.3",
+      "passed": true,
+      "sameProcess": true,
+      "checkCount": 84,
+      "checks": [
+        "dedicated test conversation opened and TUI input is ready",
+        "baseline goal recorded",
+        "baseline paused",
+        "candidate loaded through literal /reload in the same Pi process",
+        "same goal explicitly resumed",
+        "scope registered through the real model tool",
+        "concrete leaf focused",
+        "member created with task-appropriate default development capabilities",
+        "unlimited managed task queried its exact acceptance criteria",
+        "isolated evidence artifact written",
+        "scope and evidence accepted once",
+        "test goal paused for retention",
+        "second /reload preserved test goal, scope and acceptance",
+        "fault-test settings loaded through /reload while paused",
+        "test mission resumed for automatic recovery fault injection",
+        "separate unaccepted goal registered for fault-injection evidence",
+        "fault injection bound to the unaccepted file batch",
+        "injected upstream outage exhausted one bounded failure burst",
+        "literal /reload retained the outage in the same Pi process",
+        "upstream outage recovered automatically after cooldown and reload without a human continue",
+        "provider-side aborted response reconnected without becoming a user Escape hold",
+        "24 real tool calls continued after one aborted request without exhausting the failure allowance",
+        "second injected outage reached persisted cooldown",
+        "user pause remained authoritative during an outage",
+        "paused recovery and accepted evidence survived literal /reload",
+        "cooldown retries did not bypass a user pause, including after reload",
+        "explicit user resume continued the retained task after the provider was repaired",
+        "test mission paused after fault regressions",
+        "test mission resumed for a long RPC lifecycle",
+        "real TUI member completed four notes windows, 160 source reads and a stream retry despite an oversized cumulative RPC snapshot",
+        "long RPC regression paused without changing prior acceptance",
+        "notes mode selected in the existing Pi conversation",
+        "model-specific conservative input budget selected through the TUI command",
+        "short memory index saved",
+        "fresh handoff saved by a real model tool call",
+        "index and handoff saved in one atomic model tool call",
+        "unchanged note batches retained their versions",
+        "notes rollover installed a new context without a summary-model request",
+        "native notes checkpoint retained the exact injected index revision",
+        "model tool rollover committed at the current boundary and continued in the same Pi process",
+        "notes context survived literal /reload in the same Pi process",
+        "reload preserved the model-specific input budget",
+        "earlier public history remains searchable after rollover and reload",
+        "batched history lookup returned bounded results through the TUI",
+        "explicit input override reset without changing Pi model settings",
+        "300k notes budget selected for the wide test model",
+        "a burst beyond the 300k window handoff reserve still produced two safe windows and continued",
+        "same conversation switched back to summary mode",
+        "test mission resumed for root-identity regression",
+        "model tool completed: goal_plan",
+        "model tool completed: goal_accept",
+        "unselected root acceptance was rejected without changing either root",
+        "model tool completed: context_history",
+        "search cursor survived literal /reload in the same Pi process",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "256-token Unicode search pages retained every user hit without duplicates",
+        "model tool completed: context_history",
+        "first history search accepts empty optional fields from a model tool call",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "invented cursors and excluded memory receipts explain how to recover without exposing tool echoes",
+        "model tool completed: context_history",
+        "history placeholder compatibility and original message IDs survived literal /reload",
+        "model tool completed: context_history",
+        "batched first-page searches accept null placeholders after reload",
+        "model tool completed: goal_stop",
+        "stopped goal activity remained ended through literal /reload",
+        "stopped activity clock retained its exact receipt after reload",
+        "model tool completed: mission_reconcile",
+        "old unknown test executions were reconciled only after actual /proc inspection",
+        "model tool completed: context_mode",
+        "model tool completed: context_note",
+        "model tool completed: compaction_model",
+        "TUI renamed its isolated workspace and continued in the same Pi process",
+        "model tool completed: read",
+        "renamed workspace retained notes, goals and summary routing through literal /reload",
+        "workspace continuation preserved accepted goal, relative file tools and memory data",
+        "TUI renamed its isolated workspace and continued in the same Pi process",
+        "model tool completed: read",
+        "renamed workspace retained notes, goals and summary routing through literal /reload",
+        "workspace continuation preserved accepted goal, relative file tools and memory data",
+        "quoted CJK workspace rename and rename-back completed without restarting Pi",
+        "model tool completed: context_mode"
+      ],
+      "renameRoundTrip": true
+    }
+  },
+  "reproduction": {
+    "log": "extended-before.log",
+    "negativeCases": 2
+  },
+  "evidence": {
+    "directory": ".reference/workspace-rename-20261023",
+    "sha256": {
+      "baseline-windows.log": "913225aa6f1ba7a1e76c9e94f5a3131c39a73f481ec0646b83148e83983444f9",
+      "baseline-wsl.log": "e28b0271545ce34490c3eb9e1dc808cf75acd8bedfd3d91be540793a0e0d6c69",
+      "extended-before.log": "a819cc2901fea4ae0a9ffa35b91edd9f566ff66e65be57625dd1b2a020351e60",
+      "focused-extended-windows.log": "7a78156840801d6dbad091ab847e98af3c43a03322bf13e5a212e95070423d1b",
+      "focused-pi13.log": "f86716a08dbc5114dc29c1494e70fea3fde9d9719a59dfc437cc324735cc2b49",
+      "focused-windows.log": "418c2aa868bebff9f4c90bdd6f81513ddea4ea59539d25705c9d6b13a5940866",
+      "full-windows.log": "2ef43f70efcc60b86fa11d5f09555778431d04fba46038093949f909b794260f",
+      "full-wsl.log": "3f1525437e517d78d58435c15e5f9bbef1b88271da7caf2031cc9a0b215fb843",
+      "load-windows.json": "194c48aedcaec91cba53e5c9381579da45343af953fcca1eff76efd9765dc3ae",
+      "load-wsl.json": "944d141d6c98b246c728964ee9afa939194b1e964e5dc89c6efc02f796650a78",
+      "tui-unknown-guard.log": "6a6300dd2ad12137bc061d1179a03d23cbcb13d34d7f835f5599170f03568538",
+      "tui-wsl.log": "601d2328ccee3d8cd5fb4a5fe4f8adc0ea4ba7e2c13e89e2f6f1452e877bad53",
+      "typecheck-windows.log": "73c46a97fed3316ca787a5b4aa3360834ce366c73dd7fed6e39ba434c6ff951e",
+      "typecheck-wsl.log": "17e85010a1d10657a5e43bc4643879944f4925992c839d9ba2c7284d5df9c5e1"
+    }
+  },
+  "scope": {
+    "realProjectDirectoryRenamed": false,
+    "productionPiSessionControlled": false,
+    "realProviderRequests": false,
+    "otherPluginDatabasesRead": false,
+    "unknownProcessGuardBypassed": false,
+    "pluginReloadRequired": true
+  },
+  "usage": [
+    "/reload",
+    "/project rename \"new directory name\"",
+    "/project status",
+    "/mission resume if approved work should continue"
+  ],
+  "limitations": [
+    "Four opt-in container cases skipped on each full suite",
+    "No real 1GiB production-session migration or live-provider benchmark",
+    "Manual external rename is not inferred as an authorized same-project move; restore the old name first",
+    "Continuation uses a new session ID with original ancestry; task and goal IDs remain retained"
+  ]
+}

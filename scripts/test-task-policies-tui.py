@@ -455,6 +455,76 @@ def main():
         reload("stopped goal activity remained ended through literal /reload")
         assert query("meta", "key=?", ("goalActivityClock:" + selected,))[0] == clock
         checks.append("stopped activity clock retained its exact receipt after reload")
+        unknown_tasks = [task for task in query("tasks") if task.get("processState") == "unknown"]
+        if unknown_tasks:
+            # Inspect actual Linux processes before invoking the normal epoch-
+            # fenced reconciliation tool for leftovers from earlier test runs.
+            unknown_ids = {task["id"] for task in unknown_tasks}
+            for process_dir in Path("/proc").iterdir():
+                if not process_dir.name.isdigit():
+                    continue
+                try:
+                    if process_dir.stat().st_uid != os.getuid():
+                        continue
+                    if (process_dir / "comm").read_text().strip() not in ["node", "pi"]:
+                        continue
+                    for item in (process_dir / "environ").read_bytes().split(b"\0"):
+                        if item.startswith(b"MC_V2_MEMBER="):
+                            worker = json.loads(item.split(b"=", 1)[1])
+                            assert worker.get("taskId") not in unknown_ids, "A prior dedicated test worker is still alive; do not reconcile it as stopped"
+                except FileNotFoundError:
+                    continue
+            failed, text = call_tool("mission_reconcile", {"tasks": [
+                {"taskId": task["id"], "expectedEpoch": task["epoch"]} for task in unknown_tasks],
+                "evidence": "Inspected same-user Linux /proc node/pi environments for the exact old dedicated-test task IDs; no matching worker process remains."})
+            assert not failed, text
+            checks.append("old unknown test executions were reconciled only after actual /proc inspection")
+        # Exercise the actual user's intended flow only in the dedicated test
+        # workspace, then rename back. Each continuation keeps its ancestry.
+        failed, _ = call_tool("context_mode", {"mode": "notes", "inputLimitTokens": 300000})
+        assert not failed
+        relocation_note = "RELOCATION_NOTE_" + uuid.uuid4().hex[:8]
+        failed, _ = call_tool("context_note", {"action": "write", "notes": [
+            {"name": "index", "text": relocation_note},
+            {"name": "handoff", "text": "Next inspect decode-findings.txt line 173; unaccepted."}]})
+        assert not failed
+        failed, _ = call_tool("compaction_model", {"action": "set", "model": "mission-fixture/summary"})
+        assert not failed
+        original_workspace = workspace
+        rename_ancestry = [config["id"]]
+        for destination in [home / "workspace 中文 rename", original_workspace]:
+            source_workspace, source_session_id = workspace, config["id"]
+            line('/project rename "' + destination.name + '"')
+
+            def relocation_ready():
+                if not lifecycle_trace.exists():
+                    return False
+                newest = json.loads(lifecycle_trace.read_text().splitlines()[-1])
+                return newest["sessionId"] != source_session_id and destination.is_dir() and not source_workspace.exists()
+
+            wait(relocation_ready, "TUI renamed its isolated workspace and continued in the same Pi process")
+            quiet(.5)
+            config["id"] = json.loads(lifecycle_trace.read_text().splitlines()[-1])["sessionId"]
+            rename_ancestry.append(config["id"])
+            workspace = destination
+            database = agent / "mission-control/v2" / config["id"] / "state.sqlite"
+            memory_file = agent / "context-memory" / config["id"] / "memory.sqlite"
+            assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("notes",)]
+            assert memory_rows("SELECT text FROM notes WHERE name='index'") == [(relocation_note,)]
+            route = json.loads((database.parent / "compaction-summary.json").read_text())
+            assert route["model"] == "mission-fixture/summary"
+            retained = next(node for node in query("goal_nodes") if node["id"] == leaf["id"])
+            assert retained["state"] == "accepted" and retained["scope"] == leaf["scope"]
+            failed, text = call_tool("read", {"path": "decode-findings.txt"})
+            assert not failed and "Decoder and immediate mapping" in text, text
+            reload("renamed workspace retained notes, goals and summary routing through literal /reload")
+            assert memory_rows("SELECT text FROM notes WHERE name='index'") == [(relocation_note,)]
+            checks.append("workspace continuation preserved accepted goal, relative file tools and memory data")
+            identity.write_text(json.dumps({**config, "workspace": str(workspace)}, ensure_ascii=False, indent=2))
+        assert workspace == original_workspace and len(set(rename_ancestry)) == 3
+        checks.append("quoted CJK workspace rename and rename-back completed without restarting Pi")
+        failed, _ = call_tool("context_mode", {"mode": "summary"})
+        assert not failed
         assert len(list(sessions.glob("*_" + config["id"] + ".jsonl"))) == 1
         assert not any(error in visible for error in ["UnhandledPromiseRejection", "Error loading extension"])
         config["sessionFile"] = str(next(sessions.glob("*_" + config["id"] + ".jsonl")))

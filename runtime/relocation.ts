@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { lfLines } from "./jsonl.ts";
 import { Store } from "./store.ts";
+import { snapshotContextMemory } from "./context-memory.ts";
 import type { MissionKernel } from "./kernel.ts";
 import type { Member, Task, Delivery } from "./types.ts";
 import {
@@ -39,6 +40,7 @@ export interface Relocation {
   journal: string;
   processCwd: string;
   renamed: boolean;
+  memoryDirectory?: string;
 }
 export function inside(root: string, value: string) {
   const relative = path.relative(root, value);
@@ -60,7 +62,16 @@ export function planRelocation(
 ): RelocationPlan {
   if (!target.trim() || /[\x00-\x1f]/.test(target))
     throw new Error("Provide a workspace name or path");
-  const source = fs.realpathSync.native(cwd);
+  let source: string;
+  try {
+    source = fs.realpathSync.native(cwd);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      throw new Error(
+        "Current workspace path no longer exists. If it was renamed outside Pi, restore its previous name first, then use /project rename <new-name> while the source still exists. /project switch does not recover externally renamed workspaces.",
+      );
+    throw error;
+  }
   if (source === path.parse(source).root)
     throw new Error("A filesystem root cannot be a relocation source");
   const requested = path.resolve(
@@ -330,6 +341,46 @@ export async function prepareRelocation(
         ? (cwd) => rebase(cwd, plan.source, plan.target)
         : undefined,
     );
+    // Compaction routes/caches belong to this same plugin package. Preserve
+    // explicit lead/member routing so a continuation cannot fall back to inference.
+    for (const name of [
+      "compaction-summary.json",
+      "member-compaction-summary.json",
+      "compaction-diagnostics.json",
+      "summary-cache",
+    ]) {
+      const from = path.join(kernel.store.directory, name);
+      if (!fs.existsSync(from)) continue;
+      const stat = await fsp.lstat(from),
+        to = path.join(r.stateDirectory, name);
+      if (stat.isSymbolicLink())
+        throw new Error("Compaction state symlink cannot be relocated");
+      if (stat.isDirectory()) await copyTree(from, to);
+      else if (stat.isFile())
+        await fsp.copyFile(from, to, fs.constants.COPYFILE_EXCL);
+      else
+        throw new Error("Compaction state must be a regular file or directory");
+    }
+    const memorySource = path.join(
+      getAgentDir(),
+      "context-memory",
+      r.previousSessionId,
+      "memory.sqlite",
+    );
+    if (fs.existsSync(memorySource)) {
+      const destination = path.join(
+        getAgentDir(),
+        "context-memory",
+        r.sessionId,
+      );
+      await fsp.mkdir(destination, { mode: 0o700 });
+      r.memoryDirectory = destination;
+      await writeRelocationJournal(r, "memory-preparing");
+      snapshotContextMemory(
+        memorySource,
+        path.join(destination, "memory.sqlite"),
+      );
+    }
     const target = new Store(r.stateDirectory);
     try {
       rewriteState(kernel.store, target, r);
@@ -395,9 +446,17 @@ export async function rollbackRelocation(r: Relocation) {
     throw new Error(
       "Replacement runtime is already owned; keep recovery files",
     );
+  if (
+    r.memoryDirectory &&
+    path.resolve(r.memoryDirectory) !==
+      path.resolve(getAgentDir(), "context-memory", r.sessionId)
+  )
+    throw new Error("Unsafe rollback memory path");
   if (path.basename(r.sessionFile).endsWith(`_${r.sessionId}.jsonl`))
     await fsp.rm(r.sessionFile, { force: true });
   await fsp.rm(expected, { recursive: true, force: true });
+  if (r.memoryDirectory)
+    await fsp.rm(r.memoryDirectory, { recursive: true, force: true });
   if (r.renamed) {
     if (fs.existsSync(r.plan.source))
       throw new Error("Rollback source now exists; inspect " + r.journal);
