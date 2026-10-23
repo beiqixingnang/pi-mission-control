@@ -1,0 +1,226 @@
+{
+  "date": "2026-10-23",
+  "pluginVersion": "2.5.5",
+  "baseline": {
+    "pluginVersion": "2.5.4",
+    "commit": "a796417cfd213d22e11852be273779bdceb78d15"
+  },
+  "supportedPi": "^1.4.0",
+  "installedPi": {
+    "windows": "1.4.0",
+    "wsl": "1.4.0",
+    "allSevenPiPackagesVerified": true,
+    "hostReinstalled": false
+  },
+  "source": {
+    "version": "1.4.0",
+    "tag": "v1.4.0",
+    "commit": "4a080252f06caf63a525d7873c5d94d3c23887e0",
+    "upstream": "https://github.com/earendil-works/pi",
+    "archiveUrl": "https://codeload.github.com/earendil-works/pi/tar.gz/4a080252f06caf63a525d7873c5d94d3c23887e0",
+    "archiveSha256": "677a2912de35585d17193d7facc5f1b4e106f6b2d22a13d101b237aa324726e8",
+    "archiveBytes": 8163121,
+    "fileCount": 1987,
+    "fileBytes": 25495803,
+    "treeSha256": "5766da20d48a179ff29a0164d1a32b06f8496b87dbd2d0ed3d0ee9ba798c3478",
+    "snapshot": "pi-1.4.0",
+    "importedAt": "2026-10-23",
+    "modified": false,
+    "verification": "Archive identity and per-file bytes verified; no release signature claim",
+    "normalizedTreeSha256": "b9666116b495cc200c372e165c8f281a2a781196d0044d4577056f94f00670a3"
+  },
+  "checks": {
+    "windows": {
+      "suite": {
+        "exitCode": 0,
+        "tests": 304,
+        "pass": 300,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 4
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 39
+      },
+      "source": {
+        "version": "1.4.0",
+        "commit": "4a080252f06caf63a525d7873c5d94d3c23887e0",
+        "files": 1987,
+        "normalizedTreeSha256": "b9666116b495cc200c372e165c8f281a2a781196d0044d4577056f94f00670a3"
+      }
+    },
+    "wsl": {
+      "suite": {
+        "exitCode": 0,
+        "tests": 304,
+        "pass": 300,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 4
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 39
+      },
+      "source": {
+        "version": "1.4.0",
+        "commit": "4a080252f06caf63a525d7873c5d94d3c23887e0",
+        "files": 1987,
+        "normalizedTreeSha256": "b9666116b495cc200c372e165c8f281a2a781196d0044d4577056f94f00670a3"
+      }
+    },
+    "focusedWindows": {
+      "exitCode": 0,
+      "tests": 4,
+      "pass": 4,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "tui": {
+      "exitCode": 0,
+      "baseline": "2.5.4",
+      "candidate": "2.5.5",
+      "passed": true,
+      "sameProcess": true,
+      "checkCount": 82,
+      "checks": [
+        "dedicated test conversation opened and TUI input is ready",
+        "baseline goal recorded",
+        "baseline paused",
+        "candidate loaded through literal /reload in the same Pi process",
+        "same goal explicitly resumed",
+        "scope registered through the real model tool",
+        "concrete leaf focused",
+        "member created with task-appropriate default development capabilities",
+        "unlimited managed task queried its exact acceptance criteria",
+        "isolated evidence artifact written",
+        "scope and evidence accepted once",
+        "test goal paused for retention",
+        "second /reload preserved test goal, scope and acceptance",
+        "fault-test settings loaded through /reload while paused",
+        "test mission resumed for automatic recovery fault injection",
+        "separate unaccepted goal registered for fault-injection evidence",
+        "fault injection bound to the unaccepted file batch",
+        "injected upstream outage exhausted one bounded failure burst",
+        "literal /reload retained the outage in the same Pi process",
+        "upstream outage recovered automatically after cooldown and reload without a human continue",
+        "provider-side aborted response reconnected without becoming a user Escape hold",
+        "24 real tool calls continued after one aborted request without exhausting the failure allowance",
+        "second injected outage reached persisted cooldown",
+        "user pause remained authoritative during an outage",
+        "paused recovery and accepted evidence survived literal /reload",
+        "cooldown retries did not bypass a user pause, including after reload",
+        "explicit user resume continued the retained task after the provider was repaired",
+        "test mission paused after fault regressions",
+        "test mission resumed for a long RPC lifecycle",
+        "real TUI member completed four notes windows, 160 source reads and a stream retry despite an oversized cumulative RPC snapshot",
+        "long RPC regression paused without changing prior acceptance",
+        "notes mode selected in the existing Pi conversation",
+        "model-specific conservative input budget selected through the TUI command",
+        "short memory index saved",
+        "fresh handoff saved by a real model tool call",
+        "index and handoff saved in one atomic model tool call",
+        "unchanged note batches retained their versions",
+        "notes rollover installed a new context without a summary-model request",
+        "native notes checkpoint retained the exact injected index revision",
+        "model tool rollover committed at the current boundary and continued in the same Pi process",
+        "notes context survived literal /reload in the same Pi process",
+        "reload preserved the model-specific input budget",
+        "earlier public history remains searchable after rollover and reload",
+        "batched history lookup returned bounded results through the TUI",
+        "explicit input override reset without changing Pi model settings",
+        "300k notes budget selected for the wide test model",
+        "a burst beyond the 300k window handoff reserve still produced two safe windows and continued",
+        "same conversation switched back to summary mode",
+        "test mission resumed for root-identity regression",
+        "model tool completed: goal_plan",
+        "model tool completed: goal_accept",
+        "unselected root acceptance was rejected without changing either root",
+        "model tool completed: context_history",
+        "search cursor survived literal /reload in the same Pi process",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "256-token Unicode search pages retained every user hit without duplicates",
+        "model tool completed: context_history",
+        "first history search accepts empty optional fields from a model tool call",
+        "model tool completed: context_history",
+        "model tool completed: context_history",
+        "invented cursors and excluded memory receipts explain how to recover without exposing tool echoes",
+        "model tool completed: context_history",
+        "history placeholder compatibility and original message IDs survived literal /reload",
+        "model tool completed: context_history",
+        "batched first-page searches accept null placeholders after reload",
+        "model tool completed: goal_stop",
+        "stopped goal activity remained ended through literal /reload",
+        "stopped activity clock retained its exact receipt after reload",
+        "model tool completed: context_mode",
+        "model tool completed: context_note",
+        "model tool completed: compaction_model",
+        "natural-language request led the model to rename the isolated workspace after settlement in the same Pi process",
+        "model tool completed: read",
+        "renamed workspace retained notes, goals and summary routing through literal /reload",
+        "workspace continuation preserved accepted goal, relative file tools and memory data",
+        "natural-language request led the model to rename the isolated workspace after settlement in the same Pi process",
+        "model tool completed: read",
+        "renamed workspace retained notes, goals and summary routing through literal /reload",
+        "workspace continuation preserved accepted goal, relative file tools and memory data",
+        "natural-language CJK workspace rename and rename-back completed without user slash commands or restarting Pi",
+        "model tool completed: context_mode"
+      ]
+    },
+    "packageDryRun": {
+      "exitCode": 0,
+      "vendorExcluded": true,
+      "privateRuntimeDataExcluded": true
+    }
+  },
+  "evidence": {
+    "directory": ".reference/pi14-baseline-20261023",
+    "sha256": {
+      "focused-windows.log": "0aa369b07aa44386d6c84599dd65a11d87ef1209f9a9afa45de012432a02220a",
+      "full-windows.log": "706eaf48355909c6ff2a7b208cf874a18eaf9bdde812f5323a02115e6ebb84d3",
+      "full-wsl.log": "84194cf392fa47f65630a4f3f70a65ef47ee63eb9de2ebb9c99c15b12864e4e1",
+      "load-windows.json": "8f4c830763bbba375ad3b6974d88cfbe7f1a2d87276d75d31b07be0ce63ba84a",
+      "load-wsl.json": "245d1d218497ee390f1ff0bea6ba368cb554f0b0ac43782f37730fc92a50b83d",
+      "npm-ci-windows.log": "bb92f696e393b0f3434ff23ad2311dbd4b7cf33ebb2499cdfb163ec4e4c37cc3",
+      "npm-ci-wsl.log": "96c6b4e7e1bb198568d23a01a6acd087a3ae456103b82e5a9397b297b053b584",
+      "pack-stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack.json": "4d578376e785963b37379e752cf8d7389b938ef275369d2ebc66fc9d5c37c2ba",
+      "source-windows.json": "0972e5916d300b08d87489d11c0f807401e49166f8f2a9e9e1e5015704542a72",
+      "source-wsl.json": "0972e5916d300b08d87489d11c0f807401e49166f8f2a9e9e1e5015704542a72",
+      "tui-wsl.log": "934fe3baa36e68134a79ad93508122c8ec044a20b8abb187ca8ba0fbe8db61e1",
+      "typecheck-windows.log": "8794c52310e5792ebb7bdb3725aa27e91ad2a4ff2faa6dd048fb7175b9be1cca",
+      "typecheck-wsl.log": "7e4587e207067bda963e5a1e1b7d229d26f9dc78afbca347ec46a35e2913b973"
+    }
+  },
+  "scope": {
+    "productionPiSessionControlled": false,
+    "realProjectDirectoryRenamed": false,
+    "realProviderRequests": false,
+    "upstreamSourceModified": false
+  },
+  "limitations": [
+    "Four opt-in container tests skipped on each full suite",
+    "Reference source was verified but not built or used as the runtime",
+    "CI configuration will be exercised after push; local test results are recorded here",
+    "Old research and receipts retain their original version facts; no ongoing Pi1.3 compatibility run"
+  ]
+}

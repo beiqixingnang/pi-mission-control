@@ -1,6 +1,6 @@
 # Goal 模式与团队自动唤醒
 
-适用于当前安装的 Pi 1.3.0。扩展位于 `~/.pi/agent/extensions/goal` 与 `~/.pi/agent/extensions/team`，启动新会话会自动加载。已打开的 Pi 输入 `/reload` 后生效。
+这是历史插件 1.x 的使用说明；当前 v2 与 Pi1.4.0 请参见根目录 README。扩展位于 `~/.pi/agent/extensions/goal` 与 `~/.pi/agent/extensions/team`，启动新会话会自动加载。已打开的 Pi 输入 `/reload` 后生效。
 
 ## 开始一个目标
 

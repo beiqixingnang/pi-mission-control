@@ -104,7 +104,7 @@ export function workerPreview(event: any): WorkerEvent | undefined {
     };
   }
 }
-/** Pi 1.3 RPC sends deltas without cumulative message/partial snapshots. */
+/** Pi RPC sends deltas without cumulative message/partial snapshots. */
 export class WorkerPublicStream {
   private timestamp?: number;
   private text = new Map<number, string>();

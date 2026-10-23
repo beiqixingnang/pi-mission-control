@@ -12,9 +12,9 @@
 | 模型出站请求 | system、messages、工具 schema、provider 特定字段和转换 | 模型输入也不代表模型一定按其正确协调 |
 | 用户界面/公开 transcript | 用户和助手公开文本、工具调用与返回、可见通知 | 不能凭界面状态证明进程仍在运行、消息已消费或证据已验证 |
 
-Pi 1.3.0 的 [sessionEntryToContextMessages](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts:439) 对普通 `custom` 返回空数组；`custom_message` 则转成 custom role 消息，经 [convertToLlm](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/messages.ts:148) 变成 user role 的 content。它不会把 details 自动拼成正文。工具结果同样要区分 `content` 和扩展附加元数据。
+Pi 1.3.0 的 [sessionEntryToContextMessages](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts#L439) 对普通 `custom` 返回空数组；`custom_message` 则转成 custom role 消息，经 [convertToLlm](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/messages.ts#L148) 变成 user role 的 content。它不会把 details 自动拼成正文。工具结果同样要区分 `content` 和扩展附加元数据。
 
-[buildContextEntries](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts:476) 按当前叶子选分支，再以最近 compaction 的 firstKeptEntryId 留尾部。[buildSessionProjection](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts:543) 收集 context_edit，对目标 entry 应用 content replacement 或 omission。私有 system 和摘要、普通对话、状态快照在这个阶段的作用不同。
+[buildContextEntries](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts#L476) 按当前叶子选分支，再以最近 compaction 的 firstKeptEntryId 留尾部。[buildSessionProjection](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts#L543) 收集 context_edit，对目标 entry 应用 content replacement 或 omission。私有 system 和摘要、普通对话、状态快照在这个阶段的作用不同。
 
 ## S2：原始 1 GB 日志的体积和关联范围
 
@@ -31,7 +31,7 @@ Pi 1.3.0 的 [sessionEntryToContextMessages](../../../vendor/pi-1.3.0/packages/c
 
 重复状态快照占 98.2458%。这与 [team.persist](../../../extensions/team/index.ts:264) 每次追加 members、jobs、taskTree、deliveries、board 的完整集合相符。其最大单条原始记录约 1.3 MB；LF 流式读取仍需为单条记录分配解析对象，但不需要分配整份文件的字符串。
 
-Pi 1.3.0 本身的 [loadEntriesFromFile](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts:627) 也按缓冲块找 LF，避免读成单一字符串；**但它仍把全部解析 entries 保存在数组中**。所以“流式读文件”不等于“恢复全会话常数内存”。本轮分析程序只保留摘要、必要的当前状态、字节索引；完整原始记录不复制到新日志中。
+Pi 1.3.0 本身的 [loadEntriesFromFile](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts#L627) 也按缓冲块找 LF，避免读成单一字符串；**但它仍把全部解析 entries 保存在数组中**。所以“流式读文件”不等于“恢复全会话常数内存”。本轮分析程序只保留摘要、必要的当前状态、字节索引；完整原始记录不复制到新日志中。
 
 审计产物分为：行号/偏移 SQLite 索引、按记录类型计数、公开文本有界摘录、状态变化、活动分支、元数据上下文投影。公开文本单段截断为 16,000 字符，嵌套列表也有界；因此它们不是原日志的无损替代。
 
@@ -53,27 +53,27 @@ Pi 1.3.0 本身的 [loadEntriesFromFile](../../../vendor/pi-1.3.0/packages/codin
 
 同文件 [linesForHistory](../../../extensions/agent-monitor/history.ts:28) 使用 `content.split("\\n")` 分隔字面反斜杠 n，而上游组合常用真实换行 `"\n"`。这是静态观察到的显示路径细节；是否表现为具体换行异常取决于 wrapTextWithAnsi 的处理，本轮未运行 TUI 验证，不能直接宣布视觉故障。
 
-Pi还区分公开session事件与扩展handler事件。[`_appendCustomMessage`](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts:2361) 对API直接追加的消息先写session，再通过 `_emit` 发public message_start/end；[`_emit`](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts:1039) 只遍历公共订阅者。扩展的 `pi.on('message_end')` 由 `_handleAgentEvent → _emitExtensionEvent → emitMessageEnd` 派发，不是同一个事件出口。当前Team普通通知的triggerTurn:false路径只触发前者，所以Team的扩展级ACK监听不会在这一步执行。界面能看到消息而delivery仍false，在当前实现中可以同时成立。
+Pi还区分公开session事件与扩展handler事件。[`_appendCustomMessage`](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts#L2361) 对API直接追加的消息先写session，再通过 `_emit` 发public message_start/end；[`_emit`](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts#L1039) 只遍历公共订阅者。扩展的 `pi.on('message_end')` 由 `_handleAgentEvent → _emitExtensionEvent → emitMessageEnd` 派发，不是同一个事件出口。当前Team普通通知的triggerTurn:false路径只触发前者，所以Team的扩展级ACK监听不会在这一步执行。界面能看到消息而delivery仍false，在当前实现中可以同时成立。
 
-Pi 的自定义 event bus [createEventBus](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/event-bus.ts:12) 是 EventEmitter：emit 返回 void，handler 被包在 async safeHandler 中且异常只记录。同步监听器在第一个 await 前对 query 对象赋值，调用方马上读这个赋值可以工作；**emit 不会等待一个异步处理完成，也不会把监听器失败抛回业务调用方**。这对 team:scope、team:before-wake、history 查询和取消回收的调用顺序很关键，不能把事件广播当成可靠事务提交。
+Pi 的自定义 event bus [createEventBus](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/event-bus.ts#L12) 是 EventEmitter：emit 返回 void，handler 被包在 async safeHandler 中且异常只记录。同步监听器在第一个 await 前对 query 对象赋值，调用方马上读这个赋值可以工作；**emit 不会等待一个异步处理完成，也不会把监听器失败抛回业务调用方**。这对 team:scope、team:before-wake、history 查询和取消回收的调用顺序很关键，不能把事件广播当成可靠事务提交。
 
 ## S5：Pi 的“复制消息”“导出会话”“fork 会话”是三套机制
 
 ### 复制到剪贴板
 
-[handleCopyCommand](../../../vendor/pi-1.3.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts:6655) 优先复制全屏 TUI 的活动选择区（仅当调用参数 preferSelection 等条件满足），否则 `getLastAssistantText()` 只取最后助手的公开文本。会话树界面另有 [selector.onCopy](../../../vendor/pi-1.3.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts:5710) 复制所选消息。
+[handleCopyCommand](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts#L6655) 优先复制全屏 TUI 的活动选择区（仅当调用参数 preferSelection 等条件满足），否则 `getLastAssistantText()` 只取最后助手的公开文本。会话树界面另有 [selector.onCopy](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts#L5710) 复制所选消息。
 
-[copyToClipboard](../../../vendor/pi-1.3.0/packages/coding-agent/src/utils/clipboard.ts:86) 尝试 native clipboard、平台命令、WSL/远程 OSC52。OSC52 编码长度上限为 100,000（同文件 9–26），它只是终端 escape 发送，不能保证远端剪贴板确实已写入。Windows/WSL 还涉及 Unicode 传输和本机/终端剪贴板目标。因此复制体验问题至少分选择范围、文本生成、平台传输、终端限制四层，不能都归结为 session 存储。
+[copyToClipboard](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/utils/clipboard.ts#L86) 尝试 native clipboard、平台命令、WSL/远程 OSC52。OSC52 编码长度上限为 100,000（同文件 9–26），它只是终端 escape 发送，不能保证远端剪贴板确实已写入。Windows/WSL 还涉及 Unicode 传输和本机/终端剪贴板目标。因此复制体验问题至少分选择范围、文本生成、平台传输、终端限制四层，不能都归结为 session 存储。
 
 ### 导出 HTML
 
-[SessionData](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/export-html/index.ts:130) 含整个 entries、leaf、可选 systemPrompt 和工具 schema。`generateHtml` 在 [160 行](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/export-html/index.ts:160) 整体 JSON.stringify，再 Base64，然后替换进单个 HTML 字符串。
+[SessionData](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/export-html/index.ts#L130) 含整个 entries、leaf、可选 systemPrompt 和工具 schema。`generateHtml` 在 [160 行](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/export-html/index.ts#L160) 整体 JSON.stringify，再 Base64，然后替换进单个 HTML 字符串。
 
 因此 JSONL 读取已经按 LF 分块，也不能防止这个导出阶段对全部 entries 做巨型单字符串化。原日志 L4648 的 Invalid string length 与这条路径匹配；本轮没有重现原生导出栈，归类为强源码支持的解释。该导出还可能包含私有或工具配置正文，不能不经筛选就当“公开对话”分享。
 
 ### fork / 复制会话身份
 
-[SessionManager.forkFrom](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts:1815) 加载源全部 entries，创建新 sessionId/new header，并 parentSession 指向源文件，再逐条复制非 header entries。它复制的是**全部历史记录**，包含 custom 状态和其他分支，不是“只复制当前模型上下文”或“只复制公开文字”。它也不会自动把任务外部副作用撤销、重建团队权限或重新关联所有插件身份。这个机制仅作为复制语义的补充参考，不等于用户要求改善剪贴板功能的最终方案。
+[SessionManager.forkFrom](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts#L1815) 加载源全部 entries，创建新 sessionId/new header，并 parentSession 指向源文件，再逐条复制非 header entries。它复制的是**全部历史记录**，包含 custom 状态和其他分支，不是“只复制当前模型上下文”或“只复制公开文字”。它也不会自动把任务外部副作用撤销、重建团队权限或重新关联所有插件身份。这个机制仅作为复制语义的补充参考，不等于用户要求改善剪贴板功能的最终方案。
 
 ## S6：第三方 transcript 值得参考，但现成读取器不适合 1 GB
 

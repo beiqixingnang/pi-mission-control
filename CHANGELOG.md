@@ -1,3 +1,9 @@
+# 2.5.5 — Pi1.4 development baseline and source reference (2026-10-23)
+
+- Require Pi1.4.0 or newer within 1.x, refresh every Pi package in the dependency lock to1.4.0, and run CI only against1.4.0. Verification rejects a stale1.3 host rather than silently selecting it.
+- Replace the1.3 reference tree with the unmodified upstream v1.4.0 source at4a080252f06caf63a525d7873c5d94d3c23887e0. Record archive identity and a normalized file-tree checksum, checked in CI; source remains excluded from the plugin package.
+- Retain dated research conclusions and point old source links to the exact prior repository commit. Update active baseline and contributor documentation; keep plugin upgrades loadable through /reload.
+
 # 2.5.4 — natural-language workspace rename and switch (2026-10-23)
 
 - Recognize clear, fresh user instructions naming the current workspace's new folder name or switch destination. Create an exact one-use grant for project_status/project_apply without requiring a slash authorization command; keep existing commands available.

@@ -34,17 +34,17 @@
 
 ### 正常请求历史是投影，不是原始JSONL拼接
 
-Pi从当前branch生成context。buildContextEntries只保留最新compaction summary、firstKeptEntryId之后保留的旧条目及compaction之后新条目；buildSessionProjection再应用最新context_edit：replacement为null会移除目标内容，非空replacement会替换可编辑message。见 [session-manager.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts#L439-L572)，重点L476-L539、L543-L570。
+Pi从当前branch生成context。buildContextEntries只保留最新compaction summary、firstKeptEntryId之后保留的旧条目及compaction之后新条目；buildSessionProjection再应用最新context_edit：replacement为null会移除目标内容，非空replacement会替换可编辑message。见 [session-manager.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/session-manager.ts#L439-L572)，重点L476-L539、L543-L570。
 
-因此prepareCompaction从buildSessionProjection(pathEntries)取上下文，而不是摘要原始文件全文。已有最新checkpoint后，准备阶段只处理checkpoint后的新压缩范围；按projected token estimate和keepRecentTokens选cut point，近期尾部原样保留；切在turn中间时再为turn prefix单独生成summary。默认reserveTokens=16,384、keepRecentTokens=20,000，见 [compaction.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/compaction/compaction.ts#L872-L935)与L120-L130。
+因此prepareCompaction从buildSessionProjection(pathEntries)取上下文，而不是摘要原始文件全文。已有最新checkpoint后，准备阶段只处理checkpoint后的新压缩范围；按projected token estimate和keepRecentTokens选cut point，近期尾部原样保留；切在turn中间时再为turn prefix单独生成summary。默认reserveTokens=16,384、keepRecentTokens=20,000，见 [compaction.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/compaction/compaction.ts#L872-L935)与L120-L130。
 
-自动阈值/overflow与手工压缩会发session_before_compact；扩展可取消或提供compaction；无扩展结果时core生成默认摘要。失败发session_compact_failed。见 [agent-session.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts#L2780-L2940)与 [extensions/types.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/extensions/types.ts#L784-L823)。
+自动阈值/overflow与手工压缩会发session_before_compact；扩展可取消或提供compaction；无扩展结果时core生成默认摘要。失败发session_compact_failed。见 [agent-session.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts#L2780-L2940)与 [extensions/types.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/extensions/types.ts#L784-L823)。
 
 ### 默认摘要：取样、序列化、token cap、重试
 
-generateSummaryWithUsage先convertToLlm，再serializeConversation。serializer省略thinking/reasoning；保留可见assistant text、tool-call名称与参数、user text、tool-result文本；每个tool result摘要文本最多2,000字符，超出加截断标记。这是摘要用的人类可读transcript，不是provider tool-call wire replay，也不是完整provider request。见 [utils.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/compaction/utils.ts#L90-L155)、[messages.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/messages.ts#L140-L178)。图片不会被该serializer转成可读摘要文字。
+generateSummaryWithUsage先convertToLlm，再serializeConversation。serializer省略thinking/reasoning；保留可见assistant text、tool-call名称与参数、user text、tool-result文本；每个tool result摘要文本最多2,000字符，超出加截断标记。这是摘要用的人类可读transcript，不是provider tool-call wire replay，也不是完整provider request。见 [utils.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/compaction/utils.ts#L90-L155)、[messages.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/messages.ts#L140-L178)。图片不会被该serializer转成可读摘要文字。
 
-serializer文本包进conversation标签、summary instruction/custom focus与previous summary；buildSummarizationContext只创建一条user message并用Pi summarization system prompt。maxTokens=min(floor(0.8*reserveTokens), model.maxTokens)。摘要请求设置cacheRetention:none、已有sessionId沿用否则UUID；streamFn或completeSimple经retryAssistantCall。stopReason error/length会报失败；内容中若有toolCall也报错；成功返回text与usage。见 [compaction.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/compaction/compaction.ts#L585-L638)、L681-L765。
+serializer文本包进conversation标签、summary instruction/custom focus与previous summary；buildSummarizationContext只创建一条user message并用Pi summarization system prompt。maxTokens=min(floor(0.8*reserveTokens), model.maxTokens)。摘要请求设置cacheRetention:none、已有sessionId沿用否则UUID；streamFn或completeSimple经retryAssistantCall。stopReason error/length会报失败；内容中若有toolCall也报错；成功返回text与usage。见 [compaction.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/compaction/compaction.ts#L585-L638)、L681-L765。
 
 turn split时，history与turn prefix分别请求并合成一条checkpoint，因此一次压缩可能有两个摘要调用，见同文件L994-L1055。文件读写路径从投影消息/tool call与上一压缩details提取，作为summary附加信息。
 
@@ -56,11 +56,11 @@ turn split时，history与turn prefix分别请求并合成一条checkpoint，因
 
 无模型、model未注册、无输入、空摘要或捕获请求异常会return undefined，于是Pi core默认compaction接管；静态源码只能说明路径，不代表摘要API已实测。扩展只提取非空text blocks，没有像core默认summary generator那样检查stopReason=length。若provider complete返回非空但不完整的长度截断消息，该扩展代码可能认为它是摘要；需按具体adapter实验验证。这里fallback是Pi compaction选择回退，不是通用agent request model routing。
 
-扩展的摘要请求不走extension context hook链：它直接调用modelRegistry.complete。普通agent request的transformContext在SDK绑定到ExtensionRunner.emitContext，见 [sdk.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/sdk.ts#L430-L445)。runner先运行普通context handlers（只给conversation；Pi恢复prompt/tools），再运行context_with_system（全量消息，handler输出由其负责），见 [runner.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/extensions/runner.ts#L1300-L1366)。context_edit是session持久投影，不等同这两类请求时hook。
+扩展的摘要请求不走extension context hook链：它直接调用modelRegistry.complete。普通agent request的transformContext在SDK绑定到ExtensionRunner.emitContext，见 [sdk.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/sdk.ts#L430-L445)。runner先运行普通context handlers（只给conversation；Pi恢复prompt/tools），再运行context_with_system（全量消息，handler输出由其负责），见 [runner.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/extensions/runner.ts#L1300-L1366)。context_edit是session持久投影，不等同这两类请求时hook。
 
 ### Pi 1.3.0 实际启动顺序
 
-本版本_startRun调用_prepareRun；_prepareRun先检查pre-prompt compaction，然后emitBeforeAgentStart，合并最终prompt/tool loadout，再开始agent.prompt。见 [agent-session.ts](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts#L1831-L1940)。不得用旧注释/旧版本parent-wake流程覆盖当前1.3.0源码。
+本版本_startRun调用_prepareRun；_prepareRun先检查pre-prompt compaction，然后emitBeforeAgentStart，合并最终prompt/tool loadout，再开始agent.prompt。见 [agent-session.ts](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts#L1831-L1940)。不得用旧注释/旧版本parent-wake流程覆盖当前1.3.0源码。
 
 ## DSH：projection、compaction-basic与LLM adapters
 

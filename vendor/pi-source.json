@@ -1,0 +1,17 @@
+{
+  "version": "1.4.0",
+  "tag": "v1.4.0",
+  "commit": "4a080252f06caf63a525d7873c5d94d3c23887e0",
+  "upstream": "https://github.com/earendil-works/pi",
+  "archiveUrl": "https://codeload.github.com/earendil-works/pi/tar.gz/4a080252f06caf63a525d7873c5d94d3c23887e0",
+  "archiveSha256": "677a2912de35585d17193d7facc5f1b4e106f6b2d22a13d101b237aa324726e8",
+  "archiveBytes": 8163121,
+  "fileCount": 1987,
+  "fileBytes": 25495803,
+  "treeSha256": "5766da20d48a179ff29a0164d1a32b06f8496b87dbd2d0ed3d0ee9ba798c3478",
+  "snapshot": "pi-1.4.0",
+  "importedAt": "2026-10-23",
+  "modified": false,
+  "verification": "Archive identity and per-file bytes verified; no release signature claim",
+  "normalizedTreeSha256": "b9666116b495cc200c372e165c8f281a2a781196d0044d4577056f94f00670a3"
+}

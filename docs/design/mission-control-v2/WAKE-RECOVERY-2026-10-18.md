@@ -68,7 +68,7 @@
 
 [`extensions/mission-control/index.ts`](../../../extensions/mission-control/index.ts) 尚未订阅 `session_compact` 或 `session_compact_failed`；它把 assistant 结果压缩为一个 error 布尔值交给核心，没有把错误类别、压缩完成及恢复阶段关联起来。
 
-Pi 1.3.0 已有公开压缩事件和 `ctx.compact()`。但 `session_compact` 发出时手动压缩尚未清掉 busy 状态，见 [`agent-session.ts`](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts) 2887–2910 行。正确做法是登记恢复条件，在宿主真正 idle 且无竞争输入后申请一次回合，不能在事件回调里立即强发请求。
+Pi 1.3.0 已有公开压缩事件和 `ctx.compact()`。但 `session_compact` 发出时手动压缩尚未清掉 busy 状态，见 [`agent-session.ts`](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts) 2887–2910 行。正确做法是登记恢复条件，在宿主真正 idle 且无竞争输入后申请一次回合，不能在事件回调里立即强发请求。
 
 ### 3. 运行故障可被登记成伪用户裁决
 
@@ -100,7 +100,7 @@ Pi 1.3.0 已有公开压缩事件和 `ctx.compact()`。但 `session_compact` 发
 
 | 参考 | 已核对机制 | 可借鉴之处与限制 |
 | --- | --- | --- |
-| Pi 1.3.0 | [`agent-session.ts`](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts) 的 `_isRetryableError`、压缩及 settlement；[`types.ts`](../../../vendor/pi-1.3.0/packages/coding-agent/src/core/extensions/types.ts) 的公开事件 | 上下文超限走压缩，不是普通重连；在真正 idle 后续跑，避免与原生恢复并行 |
+| Pi 1.3.0 | [`agent-session.ts`](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/agent-session.ts) 的 `_isRetryableError`、压缩及 settlement；[`types.ts`](https://github.com/beiqixingnang/pi-mission-control/blob/a796417cfd213d22e11852be273779bdceb78d15/vendor/pi-1.3.0/packages/coding-agent/src/core/extensions/types.ts) 的公开事件 | 上下文超限走压缩，不是普通重连；在真正 idle 后续跑，避免与原生恢复并行 |
 | pi-goal-x 0.32.3 | [`goal-events.ts`](../../../.reference/published/pi-goal-x-0.32.3/package/extensions/goal-events.ts) 308–338、548–578 行；[`goal-runtime.ts`](../../../.reference/published/pi-goal-x-0.32.3/package/extensions/goal-runtime.ts) 117–143 行 | 压缩、原生恢复、目标续跑分层；恢复失败不直接伪装为用户暂停；`agent_settled` 后再安排恢复 |
 | pi-goal-x 0.32.3 | [`goal-scheduler.ts`](../../../.reference/published/pi-goal-x-0.32.3/package/extensions/goal-scheduler.ts) 的 owner/generation/dispatch claim | 恢复回合同样需要精确身份与去重；重启不盲目重放旧 claimed 执行 |
 | DeepSeek Harness `1517a4d` | [`GoalActivation`](../../../.reference/sources/deepseek-harness/packages/goal/goal/src/types.ts)、[`resume`](../../../.reference/sources/deepseek-harness/packages/goal/goal/src/index.ts) 364–382 行、[`tool authority`](../../../.reference/sources/deepseek-harness/packages/goal/tool-goal/src/authority.ts) | 目标生命周期与当前进程续跑资格分开；resume 不清历史轮次；权限来自宿主事件和精确目标版本 |

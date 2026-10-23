@@ -1,6 +1,8 @@
 # 工作区重命名与对话延续
 
-Pi Mission Control 1.4.0 新增 `/project` 和可选 Podman sandbox 执行。默认由用户手动执行；AI 只能使用用户为当前会话、指定动作和目标创建的一次性授权。需要 Pi 1.3.0，已打开的会话先 `/reload`。
+历史插件 1.x 使用说明；当前 v2 请参见根目录 README（Pi1.4.0 基线，支持自然语言改名与切换）。
+
+Pi Mission Control 1.4.0 新增 `/project` 和可选 Podman sandbox 执行。默认由用户手动执行；AI 只能使用用户为当前会话、指定动作和目标创建的一次性授权。当前宿主基线为 Pi 1.4.0，已打开的会话先 `/reload`。
 
 ## 手动使用
 

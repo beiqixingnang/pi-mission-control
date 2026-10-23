@@ -187,7 +187,7 @@ test("withdrawn patch installer rejects apply against an isolated fake Pi instal
     fs.writeFileSync(path.join(dir, "dist/index.js"), "export {};\n");
     fs.writeFileSync(
       path.join(dir, "package.json"),
-      JSON.stringify({ name: "fake-pi", version: "1.3.0" }),
+      JSON.stringify({ name: "fake-pi", version: "1.4.0" }),
     );
     const before = fs.readFileSync(path.join(dir, "dist/index.js"));
     const result = spawnSync(

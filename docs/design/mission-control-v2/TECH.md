@@ -110,7 +110,7 @@ TUI/RPC是常驻异步模式；print/json一次性模式在派工工具中join�
 
 历史使用64KiB块反向按字节LF扫描，每页40公开记录、扫描上限4MiB，单原始记录超过1MiB略过；缓存最多400记录且约2MiB。未以LF结束的尾记录等待写完再处理。暂停跟随保留视口并提示新记录，Home继续向前分页，End重新读取最新页。单项展开仍是有界摘录。
 
-Pi1.3 RPC的message_update没有累计message/partial，只有assistantMessageEvent增量；WorkerPublicStream只累加text_*，不读取thinking_*。公开预览和工具progress放在成员内存状态，不按token写SQLite或Pi主日志；完成后以原始成员日志的公开投影为准。工具没有上报进度时只展示等待及最终返回。读取日志、切页、返回不会启动模型、改变Goal、取消成员或推进delivery确认。
+Pi1.4 RPC的message_update没有累计message/partial，只有assistantMessageEvent增量；WorkerPublicStream只累加text_*，不读取thinking_*。公开预览和工具progress放在成员内存状态，不按token写SQLite或Pi主日志；完成后以原始成员日志的公开投影为准。工具没有上报进度时只展示等待及最终返回。读取日志、切页、返回不会启动模型、改变Goal、取消成员或推进delivery确认。
 
 ## 实现与核对顺序
 

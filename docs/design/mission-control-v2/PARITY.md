@@ -28,7 +28,7 @@
 
 默认10次、固定5000ms，用户可通过`/reconnect`命令修改当前会话的SQLite meta配置，或在mission-control.json中设置reconnect。成员启动时由运行核心合并这份配置，通过允许的环境项传入；不复制认证文件。用户没有明确配置enabled时，读取Pi公开SettingsManager得到持久retry.enabled，保留显式禁用意图。
 
-本机Pi1.3.0的原生回合重试在`agent-session.ts._handlePostAgentRun/_prepareRetry`执行，默认3次、2000ms起指数退避、上限60000ms。它先于扩展pre-settle运行。扩展观察每次assistant错误，计算已经使用的连续失败次数，在原生预算耗尽后继续；成功响应重置该失败段。由于扩展不能在原生批次内部强制截断，最后一个原生批次可能略超剩余预算，不把它宣称严格的全链路十次上限。
+当前基线Pi1.4.0的原生回合重试在`agent-session.ts._handlePostAgentRun/_prepareRetry`执行，默认3次、2000ms起指数退避、上限60000ms。它先于扩展pre-settle运行。扩展观察每次assistant错误，计算已经使用的连续失败次数，在原生预算耗尽后继续；成功响应重置该失败段。由于扩展不能在原生批次内部强制截断，最后一个原生批次可能略超剩余预算，不把它宣称严格的全链路十次上限。
 
 插件每次等待固定5秒，但不会自动改Pi原生参数。如果用户将原生retry设置为maxRetries=10/baseDelayMs=5000/maxAgentDelayMs=5000，原生部分也按5秒进行。`/reconnect off`关闭额外恢复，不更改原生设置；status明确显示两层。底层HTTP客户端可能另有重试，不能将一次assistant尝试当作一个网络包。
 
