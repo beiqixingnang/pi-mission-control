@@ -235,6 +235,41 @@ export default function (pi: ExtensionAPI) {
             stream.end();
             return;
           }
+          // Deterministic stand-in for the lead model's natural-language flow:
+          // inspect the real plugin grant, then apply it. It does not parse the
+          // target or issue filesystem operations itself.
+          const workspaceUser =
+            context.messages
+              .filter((m: any) => m.role === "user")
+              .map(textOf)
+              .filter(
+                (text: string) =>
+                  text.startsWith("V2_TEST:") ||
+                  /^(?:请把当前工作区文件夹改名为|把当前会话的工作区切换到|Please rename the current workspace to)/u.test(
+                    text,
+                  ),
+              )
+              .at(-1) ?? "";
+          if (
+            /^(?:请把当前工作区文件夹改名为|把当前会话的工作区切换到|Please rename the current workspace to)/u.test(
+              workspaceUser,
+            )
+          ) {
+            const last = context.messages.at(-1);
+            if (
+              last?.role === "toolResult" &&
+              last.toolName === "project_status"
+            ) {
+              const allowed = JSON.parse(textOf(last)).authorization;
+              if (allowed)
+                tool("project_apply", { authorizationId: allowed.id });
+              else answer("NO_LIVE_WORKSPACE_AUTHORIZATION");
+            } else tool("project_status", {});
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: message.stopReason, message });
+            stream.end();
+            return;
+          }
           const marker =
             context.messages
               .filter((m: any) => m.role === "user")

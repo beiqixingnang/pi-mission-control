@@ -1,3 +1,10 @@
+# 2.5.4 — natural-language workspace rename and switch (2026-10-23)
+
+- Recognize clear, fresh user instructions naming the current workspace's new folder name or switch destination. Create an exact one-use grant for project_status/project_apply without requiring a slash authorization command; keep existing commands available.
+- Reject quoted examples, historical transcripts and extension-generated input as new authorization. Invalidate natural-language grants on newer user input, cancellation, expiry and reload; fence changes cancelled while workers are settling or migration is preparing.
+- Obtain a fresh native command context through a nonce-bound internal command only after the model run has settled. Retain migration journals, rollback, member scope and process checks; a queued tool result does not claim a completed move.
+- Add Windows/WSL regressions and exercise natural-language rename/rename-back with Chinese and spaces in the dedicated same-process TUI reload scenario.
+
 # 2.5.3 — workspace continuations preserve notes and summary routing (2026-10-23)
 
 - Preserve the standalone context-memory database, mode, note revisions, learned budgets and cursor keys when renaming or switching workspace. Snapshot SQLite consistently, including committed WAL pages, before attaching the continuation; keep the source data and remove only the new snapshot on rollback.

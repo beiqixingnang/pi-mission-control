@@ -494,7 +494,7 @@ def main():
         rename_ancestry = [config["id"]]
         for destination in [home / "workspace 中文 rename", original_workspace]:
             source_workspace, source_session_id = workspace, config["id"]
-            line('/project rename "' + destination.name + '"')
+            line('请把当前工作区文件夹改名为“' + destination.name + '”，帮我执行。')
 
             def relocation_ready():
                 if not lifecycle_trace.exists():
@@ -502,7 +502,7 @@ def main():
                 newest = json.loads(lifecycle_trace.read_text().splitlines()[-1])
                 return newest["sessionId"] != source_session_id and destination.is_dir() and not source_workspace.exists()
 
-            wait(relocation_ready, "TUI renamed its isolated workspace and continued in the same Pi process")
+            wait(relocation_ready, "natural-language request led the model to rename the isolated workspace after settlement in the same Pi process")
             quiet(.5)
             config["id"] = json.loads(lifecycle_trace.read_text().splitlines()[-1])["sessionId"]
             rename_ancestry.append(config["id"])
@@ -522,7 +522,7 @@ def main():
             checks.append("workspace continuation preserved accepted goal, relative file tools and memory data")
             identity.write_text(json.dumps({**config, "workspace": str(workspace)}, ensure_ascii=False, indent=2))
         assert workspace == original_workspace and len(set(rename_ancestry)) == 3
-        checks.append("quoted CJK workspace rename and rename-back completed without restarting Pi")
+        checks.append("natural-language CJK workspace rename and rename-back completed without user slash commands or restarting Pi")
         failed, _ = call_tool("context_mode", {"mode": "summary"})
         assert not failed
         assert len(list(sessions.glob("*_" + config["id"] + ".jsonl"))) == 1

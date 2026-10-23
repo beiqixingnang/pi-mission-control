@@ -1891,7 +1891,7 @@ export default function (pi: ExtensionAPI) {
         },
         userControls: [
           "Explicit user pause/stop and budget renewal: /mission",
-          "Workspace authorization: /project allow; project_apply consumes the exact grant",
+          "Workspace authorization: direct natural-language rename/switch request or /project allow; project_status exposes the exact one-use grant for project_apply",
           "Interactive display/editor/copy UI remains user-owned",
         ],
       };
