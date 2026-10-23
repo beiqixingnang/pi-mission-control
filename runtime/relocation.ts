@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { finished } from "node:stream/promises";
+import { finished, pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import {
   SessionManager,
@@ -13,10 +13,12 @@ import {
 import { lfLines } from "./jsonl.ts";
 import { Store } from "./store.ts";
 import { snapshotContextMemory } from "./context-memory.ts";
+import { SessionCatalog } from "./session-catalog.ts";
 import type { MissionKernel } from "./kernel.ts";
 import type { Member, Task, Delivery } from "./types.ts";
 import {
   getProjectIdentity,
+  getRecoveryProjectIdentity,
   lookupProject,
   associateProjectSession,
   registerProject,
@@ -24,7 +26,7 @@ import {
 } from "../extensions/project/identity.ts";
 
 export interface RelocationPlan {
-  action: "rename" | "switch";
+  action: "rename" | "switch" | "restore";
   source: string;
   target: string;
 }
@@ -41,7 +43,17 @@ export interface Relocation {
   processCwd: string;
   renamed: boolean;
   memoryDirectory?: string;
+  sourceSessionFile?: string;
 }
+export type RelocationSource = Pick<
+  ExtensionContext["sessionManager"],
+  | "getSessionFile"
+  | "getSessionId"
+  | "getSessionDir"
+  | "getLeafId"
+  | "getHeader"
+  | "getEntries"
+>;
 export class RelocationPreparationError extends Error {
   code?: string;
   journal: string;
@@ -146,41 +158,54 @@ export async function copySession(
   headerPatch: Record<string, unknown>,
 ) {
   const check = await fsp.open(source, "r");
+  let header: Record<string, unknown>, start: number, size: number;
   try {
     const stat = await check.stat(),
       tail = Buffer.alloc(1);
+    size = stat.size;
     if (!stat.size) throw new Error("Session log is empty");
     await check.read(tail, 0, 1, stat.size - 1);
     if (tail[0] !== 10)
       throw new Error(
         "Session has an incomplete LF tail; wait for it to settle before relocating",
       );
+    const prefix = Buffer.alloc(Math.min(stat.size, 65536));
+    await check.read(prefix, 0, prefix.length, 0);
+    const lf = prefix.indexOf(10);
+    if (lf < 0) throw new Error("Session header exceeds 64 KiB");
+    header = JSON.parse(
+      prefix
+        .subarray(0, lf)
+        .toString("utf8")
+        .replace(/^\uFEFF/, ""),
+    );
+    if (header.type !== "session") throw new Error("Session header missing");
+    start = lf + 1;
   } finally {
     await check.close();
   }
   await fsp.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
-  const input = fs.createReadStream(source),
-    output = fs.createWriteStream(destination, { flags: "wx", mode: 0o600 });
+  const output = fs.createWriteStream(destination, {
+    flags: "wx",
+    mode: 0o600,
+  });
   const completed = finished(output);
   void completed.catch(() => {});
-  let first = true;
   try {
-    for await (const line of lfLines(input)) {
-      let text = line;
-      if (first) {
-        const header = JSON.parse(line);
-        if (header.type !== "session")
-          throw new Error("Session header missing");
-        text = JSON.stringify({ ...header, ...headerPatch });
-        first = false;
-      }
-      if (!output.write(text + "\n")) await once(output, "drain");
-    }
-    if (first) throw new Error("Session log is empty");
-    output.end();
+    if (!output.write(JSON.stringify({ ...header, ...headerPatch }) + "\n"))
+      await once(output, "drain");
+    if (start < size)
+      await pipeline(
+        fs.createReadStream(source, {
+          start,
+          end: size - 1,
+          highWaterMark: 65536,
+        }),
+        output,
+      );
+    else output.end();
     await completed;
   } catch (error) {
-    input.destroy();
     output.destroy();
     await completed.catch(() => {});
     throw error;
@@ -221,24 +246,56 @@ function rewriteState(source: Store, target: Store, r: Relocation) {
   const statePath = (value: string) =>
     rebase(value, source.directory, target.directory);
   const workspacePath = (value: string) =>
-    r.plan.action === "rename"
+    r.plan.action !== "switch"
       ? rebase(value, r.plan.source, r.plan.target)
       : value;
+  const rewriteMember = (m: Member) => {
+    m.workspace.root = workspacePath(m.workspace.root);
+    m.workspace.extraReadRoots = m.workspace.extraReadRoots.map(workspacePath);
+    if (m.sessionFile) m.sessionFile = statePath(workspacePath(m.sessionFile));
+    return m;
+  };
+  const rewriteTask = (t: Task) => {
+    t.inputPath = statePath(workspacePath(t.inputPath));
+    if (t.resultPath) t.resultPath = statePath(workspacePath(t.resultPath));
+    if (t.sessionFile) t.sessionFile = statePath(workspacePath(t.sessionFile));
+    if (
+      r.plan.action === "restore" &&
+      (["running", "waiting"].includes(t.state) || t.processState === "running")
+    ) {
+      t.state = "interrupted";
+      t.processState = "unknown";
+      t.epoch++;
+      t.error =
+        "Conversation restored to a new workspace; inspect and reconcile the old execution before a new attempt. No command was replayed.";
+      t.updatedAt = Date.now();
+    }
+    return t;
+  };
   target.transaction(() => {
     for (const row of target.db.prepare("SELECT data FROM members").iterate()) {
       const m = JSON.parse(String(row.data)) as Member;
-      m.workspace.root = workspacePath(m.workspace.root);
-      m.workspace.extraReadRoots =
-        m.workspace.extraReadRoots.map(workspacePath);
-      if (m.sessionFile) m.sessionFile = statePath(m.sessionFile);
-      target.putMember(m);
+      target.putMember(rewriteMember(m));
     }
     for (const row of target.db.prepare("SELECT data FROM tasks").iterate()) {
       const t = JSON.parse(String(row.data)) as Task;
-      t.inputPath = statePath(t.inputPath);
-      if (t.resultPath) t.resultPath = statePath(t.resultPath);
-      if (t.sessionFile) t.sessionFile = statePath(t.sessionFile);
-      target.putTask(t);
+      target.putTask(rewriteTask(t));
+    }
+    for (const row of target.db
+      .prepare(
+        "SELECT kind,id,data FROM lifecycle_archive WHERE kind IN ('member','task')",
+      )
+      .iterate()) {
+      const value = JSON.parse(String(row.data));
+      target.db
+        .prepare("UPDATE lifecycle_archive SET data=? WHERE kind=? AND id=?")
+        .run(
+          JSON.stringify(
+            row.kind === "member" ? rewriteMember(value) : rewriteTask(value),
+          ),
+          row.kind,
+          row.id,
+        );
     }
     for (const row of target.db
       .prepare("SELECT data FROM deliveries")
@@ -252,21 +309,36 @@ function rewriteState(source: Store, target: Store, r: Relocation) {
       target.putDelivery(d);
     }
     target.set("relocationHold", true);
+    if (r.plan.action === "restore") target.unset("projectRelocationFailure");
+    const restoredMission = target.mission();
+    if (
+      r.plan.action === "restore" &&
+      restoredMission &&
+      !["complete", "stopped"].includes(restoredMission.status)
+    ) {
+      restoredMission.status = "paused";
+      restoredMission.humanPaused = true;
+      restoredMission.reason =
+        "Workspace restored; review retained work before resuming";
+      target.set("mission", restoredMission);
+    }
     target.set("relocation", r);
     target.set("projectId", r.projectId);
     const mappings =
       target.get<Array<{ source: string; target: string }>>("pathMappings") ??
       [];
-    if (r.plan.action === "rename")
+    if (r.plan.action !== "switch")
       mappings.push({ source: r.plan.source, target: r.plan.target });
+    mappings.push({ source: source.directory, target: target.directory });
     target.set("pathMappings", mappings);
     target.event("project.relocated", r.id, r.plan);
   });
 }
 export async function prepareRelocation(
   plan: RelocationPlan,
-  ctx: ExtensionContext,
-  kernel: MissionKernel,
+  ctx: { sessionManager: RelocationSource },
+  kernel: Pick<MissionKernel, "store">,
+  destinationSessionDir?: string,
 ): Promise<Relocation> {
   const manager = ctx.sessionManager,
     sourceFile = manager.getSessionFile();
@@ -274,9 +346,17 @@ export async function prepareRelocation(
     throw new Error(
       "A persistent conversation is required; --no-session cannot be relocated",
     );
-  const project = getProjectIdentity(plan.source);
+  const project =
+    plan.action === "restore"
+      ? (lookupProject(plan.source, true) ??
+        getRecoveryProjectIdentity(plan.target))
+      : getProjectIdentity(plan.source);
   const targetProject =
-    plan.action === "switch" ? getProjectIdentity(plan.target) : project;
+    plan.action === "restore"
+      ? getRecoveryProjectIdentity(plan.target)
+      : plan.action === "switch"
+        ? getProjectIdentity(plan.target)
+        : project;
   const owner = lookupProject(plan.target);
   if (plan.action === "rename" && owner && owner.id !== project.id)
     throw new Error("The rename target belongs to another recorded project");
@@ -288,11 +368,14 @@ export async function prepareRelocation(
   const previousDir = manager.getSessionDir(),
     defaultDir = SessionManager.create(plan.source).getSessionDir();
   const sessionDir =
-    path.relative(previousDir, defaultDir) === ""
-      ? SessionManager.create(plan.target).getSessionDir()
-      : plan.action === "rename"
-        ? rebase(previousDir, plan.source, plan.target)
-        : previousDir;
+    plan.action === "restore"
+      ? (destinationSessionDir ??
+        SessionManager.create(plan.target).getSessionDir())
+      : path.relative(previousDir, defaultDir) === ""
+        ? SessionManager.create(plan.target).getSessionDir()
+        : plan.action === "rename"
+          ? rebase(previousDir, plan.source, plan.target)
+          : previousDir;
   const r: Relocation = {
     id,
     plan,
@@ -313,10 +396,13 @@ export async function prepareRelocation(
     journal: path.join(storage, "migration.json"),
     processCwd: process.cwd(),
     renamed: false,
+    ...(plan.action === "restore" ? { sourceSessionFile: sourceFile } : {}),
   };
   if (fs.existsSync(sourceFile))
     await fsp.copyFile(sourceFile, r.backup, fs.constants.COPYFILE_EXCL);
   else {
+    if (plan.action === "restore")
+      throw new Error("The selected session file disappeared; select it again");
     // A new persistent session may not have flushed its first assistant reply yet.
     const header = manager.getHeader();
     if (!header) throw new Error("Session header is unavailable");
@@ -348,7 +434,7 @@ export async function prepareRelocation(
     await copyTree(
       path.join(kernel.store.directory, "sessions"),
       path.join(r.stateDirectory, "sessions"),
-      plan.action === "rename"
+      plan.action !== "switch"
         ? (cwd) => rebase(cwd, plan.source, plan.target)
         : undefined,
     );
@@ -412,6 +498,12 @@ export async function prepareRelocation(
       cwd: plan.target,
       parentSession: sourceFile,
     });
+    // The host loads a restored conversation once, after this streamed copy.
+    // Do not load the source or destination history into a second manager here.
+    if (plan.action === "restore") {
+      await writeRelocationJournal(r, "ready");
+      return r;
+    }
     const continuation = SessionManager.open(r.sessionFile);
     const leaf = manager.getLeafId();
     if (leaf) continuation.branch(leaf);
@@ -443,6 +535,14 @@ export async function commitRelocation(r: Relocation) {
   if (r.plan.action === "rename")
     relocateProject(r.projectId, r.plan.source, r.plan.target, r.sessionFile);
   else registerProject(r.projectId, r.plan.target, r.sessionFile);
+  if (r.plan.action === "restore" && r.sourceSessionFile) {
+    const catalog = new SessionCatalog();
+    try {
+      catalog.bind(r.sourceSessionFile, r.sessionFile);
+    } finally {
+      catalog.close();
+    }
+  }
   await writeRelocationJournal(r, "completed");
 }
 export async function rollbackRelocation(r: Relocation) {

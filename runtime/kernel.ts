@@ -1383,6 +1383,25 @@ export class MissionKernel {
       }
       throw new Error("No mission");
     }
+    if (
+      action === "resume" &&
+      this.store.get("relocationHold") &&
+      ["complete", "stopped"].includes(m.status)
+    ) {
+      // Confirm the recovered workspace without reopening an accepted/stopped
+      // goal or resetting its usage and acceptance receipts.
+      this.store.set("relocationHold", false);
+      this.store.unset("escapeHold");
+      this.userHold = false;
+      this.relocating = false;
+      this.recovery.succeeded();
+      this.store.event("user.workspace-resumed", m.id, {
+        retainedStatus: m.status,
+      });
+      this.changed();
+      await this.tick();
+      return;
+    }
     if (action === "resume" && m.status === "complete")
       throw new Error(
         "This mission is complete. Start a new objective instead of replaying it.",

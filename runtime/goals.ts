@@ -13,6 +13,7 @@ import type {
   Mission,
 } from "./types.ts";
 import { cleanText } from "./public.ts";
+import { mappedPath, type PathMapping } from "./path-mapping.ts";
 
 const excluded = (goal: GoalNode) =>
   goal.state === "cancelled" || goal.state === "skipped";
@@ -584,6 +585,11 @@ export class GoalLedger {
     return goal;
   }
   private fingerprint(file: string) {
+    file = mappedPath(
+      file,
+      this.store.get<PathMapping[]>("pathMappings") ?? [],
+      this.cwd,
+    );
     const stat = fs.statSync(file);
     if (!stat.isFile()) throw new Error("Evidence must refer to a file");
     return {
@@ -701,7 +707,13 @@ export class GoalLedger {
       for (const item of acceptance?.evidence ?? [])
         if (item.path && item.fingerprint) {
           try {
-            const stat = fs.statSync(item.path);
+            const stat = fs.statSync(
+              mappedPath(
+                item.path,
+                this.store.get<PathMapping[]>("pathMappings") ?? [],
+                this.cwd,
+              ),
+            );
             if (
               stat.isFile() &&
               stat.size === item.fingerprint.size &&

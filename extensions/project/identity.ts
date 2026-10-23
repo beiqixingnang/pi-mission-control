@@ -415,6 +415,34 @@ export function getProjectIdentity(cwd: string): ProjectIdentity {
   });
 }
 
+/** Explicit recovery may claim a reused historical directory as a fresh
+ * workspace. Never change another project's current root or session records.
+ */
+export function getRecoveryProjectIdentity(cwd: string): ProjectIdentity {
+  const currentPath = directory(cwd),
+    file = registryFile();
+  externalStorage(file, currentPath);
+  return mutateRegistry(file, (registry) => {
+    const existing = registry.projects.find((project) =>
+      samePath(project.currentPath, currentPath),
+    );
+    if (existing) return copy(existing);
+    for (const project of registry.projects)
+      project.previousPaths = project.previousPaths.filter(
+        (alias) => !samePath(alias, currentPath),
+      );
+    const created: ProjectIdentity = {
+      id: randomUUID(),
+      currentPath,
+      previousPaths: [],
+      sessions: [],
+    };
+    registry.projects.push(created);
+    writeRegistry(file, registry);
+    return copy(created);
+  });
+}
+
 /** Commit only after the directory rename AND host session switch succeed. Preparation never calls this. */
 export function relocateProject(
   id: string,
@@ -504,7 +532,10 @@ export function resolveProjectPath(id: string, oldPath: string): string {
 }
 
 /** Look up a registry-issued UUID or an exact current/historical root; never creates an identity. */
-export function lookupProject(query: string): ProjectIdentity | undefined {
+export function lookupProject(
+  query: string,
+  recordedOnly = false,
+): ProjectIdentity | undefined {
   const registry = readRegistry(registryFile());
   if (typeof query !== "string" || !query.trim() || query.includes("\0"))
     return undefined;
@@ -516,11 +547,22 @@ export function lookupProject(query: string): ProjectIdentity | undefined {
   let project = registry.projects.find((project) =>
     aliases(project).some((alias) => samePath(alias, location)),
   );
-  if (!project && pathSyntax(location) === nativePaths) {
+  if (!project && !recordedOnly && pathSyntax(location) === nativePaths) {
     const canonical = canonicalLocation(location);
     project = registry.projects.find((project) =>
       aliases(project).some((alias) => samePath(alias, canonical)),
     );
   }
   return project ? copy(project) : undefined;
+}
+
+/** Explicitly associated custom session locations, without walking workspaces. */
+export function projectSessionFiles(): string[] {
+  return [
+    ...new Set(
+      readRegistry(registryFile()).projects.flatMap(
+        (project) => project.sessions,
+      ),
+    ),
+  ];
 }

@@ -16,6 +16,22 @@ let notesCycle: any;
 let bulkRun: any;
 let previousPayload = "";
 export default function (pi: ExtensionAPI) {
+  pi.registerCommand("fixture-ready", {
+    description: "Test-only editor readiness handshake",
+    handler: async (nonce, ctx) => {
+      if (process.env.MC_FIXTURE_LIFECYCLE_TRACE)
+        fs.appendFileSync(
+          process.env.MC_FIXTURE_LIFECYCLE_TRACE,
+          JSON.stringify({
+            event: "fixture_ready",
+            nonce,
+            pid: process.pid,
+            sessionId: ctx.sessionManager.getSessionId(),
+            cwd: ctx.cwd,
+          }) + "\n",
+        );
+    },
+  });
   pi.registerTool({
     name: "fixture_large_read",
     label: "Read synthetic source batch",
@@ -44,8 +60,11 @@ export default function (pi: ExtensionAPI) {
         process.env.MC_FIXTURE_LIFECYCLE_TRACE,
         JSON.stringify({
           event: "session_start",
+          reason: _event.reason,
           pid: process.pid,
           sessionId: ctx.sessionManager.getSessionId(),
+          sessionFile: ctx.sessionManager.getSessionFile(),
+          cwd: ctx.cwd,
           at: Date.now(),
         }) + "\n",
       );

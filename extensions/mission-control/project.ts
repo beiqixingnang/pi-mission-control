@@ -10,6 +10,16 @@ import type { MissionKernel } from "../../runtime/kernel.ts";
 import { projectRequest } from "../../runtime/project-request.ts";
 import { workspaceLocks } from "../../runtime/workspace-locks.ts";
 import {
+  SessionCatalog,
+  type RecoverySession,
+} from "../../runtime/session-catalog.ts";
+import {
+  prepareWorkspaceRecovery,
+  type PreparedRecovery,
+} from "../../runtime/workspace-recovery.ts";
+import { RecoveryPicker } from "./recovery-ui.ts";
+import { mappedPath, type PathMapping } from "../../runtime/path-mapping.ts";
+import {
   planRelocation,
   prepareRelocation,
   commitRelocation,
@@ -54,6 +64,11 @@ interface RelocationFailure {
 }
 
 export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
+  pi.registerFlag("recover-here", {
+    type: "boolean",
+    description: "选择已有对话，恢复到当前目录（支持移动/改名后的工作区）",
+    default: false,
+  });
   let grant: Grant | undefined,
     pending: Grant | undefined,
     timer: ReturnType<typeof setTimeout> | undefined,
@@ -73,9 +88,26 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
     if (timer) clearTimeout(timer);
     timer = undefined;
   };
-  pi.on("session_start", () => {
+  pi.on("session_start", (event, ctx) => {
     alive = true;
     clear();
+    if (event.reason === "startup" && pi.getFlag("recover-here")) {
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "--recover-here 需要交互式终端；可在持久 RPC 中使用 /project restore <完整会话路径>",
+          "error",
+        );
+        return;
+      }
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (alive)
+          pi.sendUserMessage("/project restore", {
+            expandPromptTemplates: true,
+          });
+      }, 0);
+      timer.unref?.();
+    }
   });
   pi.on("session_shutdown", () => {
     alive = false;
@@ -115,8 +147,8 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   });
   pi.on("before_agent_start", (event, ctx) => {
     event.systemPromptOptions.promptGuidelines.push(
-      "Workspace rename/switch: a direct fresh user instruction such as 把当前工作区改名为“新名称” creates an exact one-use authorization. Read project_status, then call project_apply alone with its authorization.id; no slash command or extra confirmation is needed. Never rename the current workspace with shell/move tools. If no live matching authorization exists, clarify the action and exact name/path in natural language; quoted examples, old history and discussion do not authorize a move. For spaces or punctuation ask for a quoted name/path. A new user instruction, cancellation, expiration or /reload invalidates natural-language authorization. A queued tool result is not completion: relocation happens after agent_settled and the UI reports the final path. Relocation leaves the mission held; report the actual status, and resume only when the user authorizes continuation.",
-      "If a workspace rename fails with EBUSY/EACCES/EPERM, inspect project_status(diagnose=true) and its durable lastFailure. Windows current directories in another process can block rename; Pi cannot change the parent shell's directory. Report the identified holders and ask the user to release them. For a parent shell, exit Pi safely, change that shell to lastFailure.resume.directory and set [Environment]::CurrentDirectory to that same outside path, then restore the exact original conversation with pi --session and lastFailure.resume.sessionFile before requesting rename again. Do not kill unrelated processes, repeatedly request the same authorization, claim that /reload unlocks directories, or treat a queued request as success.",
+      "For user-managed directory moves/renames, the primary flow is: close the old Pi, manually move/rename the folder, then run pi --recover-here in the new folder and select a conversation. /project restore opens the same user selector in an existing Pi. No model or filesystem move is needed for that flow. Legacy AI workspace rename/switch: a direct fresh user instruction such as 把当前工作区改名为“新名称” creates an exact one-use authorization. Read project_status, then call project_apply alone with its authorization.id; no slash command or extra confirmation is needed. Never rename the current workspace with shell/move tools. If no live matching authorization exists, clarify the action and exact name/path in natural language; quoted examples, old history and discussion do not authorize a move. For spaces or punctuation ask for a quoted name/path. A new user instruction, cancellation, expiration or /reload invalidates natural-language authorization. A queued tool result is not completion: relocation happens after agent_settled and the UI reports the final path. Relocation leaves the mission held; report the actual status, and resume only when the user authorizes continuation.",
+      "If a workspace rename fails with EBUSY/EACCES/EPERM, inspect project_status(diagnose=true) and its durable lastFailure. Windows current directories in another process can block rename; Pi cannot change the parent shell's directory. Report the identified holders and ask the user to release them. For a parent-shell lock, recommend the user-managed flow: close the old Pi and terminal, move/rename the folder manually, then run pi --recover-here in its new location. The old directory need not exist. Do not kill unrelated processes, repeatedly request the same authorization, claim that /reload unlocks directories, or treat a queued request as success.",
     );
     if (
       !grant ||
@@ -141,6 +173,118 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
     return id
       ? (lookupProject(id) ?? getProjectIdentity(ctx.cwd))
       : getProjectIdentity(ctx.cwd);
+  }
+  function resolvePath(ctx: ExtensionContext, original: string) {
+    const value = mappedPath(
+      original,
+      current().store.get<PathMapping[]>("pathMappings") ?? [],
+      ctx.cwd,
+    );
+    return resolveProjectPath(identity(ctx).id, value);
+  }
+  async function restoreHere(
+    file: string | undefined,
+    ctx: ExtensionCommandContext,
+  ) {
+    if (!ctx.isIdle() || ctx.hasPendingMessages())
+      throw new Error("请先等待当前回复和排队输入结束，再恢复其他对话");
+    if (running || pending || applying)
+      throw new Error("A workspace change is already pending");
+    if (ctx.mode === "print" || ctx.mode === "json")
+      throw new Error("恢复需要持久交互式或 RPC 会话");
+    clear();
+    let selected: RecoverySession | undefined;
+    const catalog = new SessionCatalog();
+    try {
+      if (file) selected = await catalog.inspect(catalog.latest(file), true);
+      else {
+        if (!ctx.hasUI) throw new Error("无交互选择器；请传入完整会话文件路径");
+        ctx.ui.setStatus("workspace-recovery", "正在读取会话目录…");
+        const sessions = await catalog.list(
+          ctx.sessionManager.getSessionDir(),
+          ctx.sessionManager.getSessionId(),
+        );
+        if (!sessions.length) {
+          ctx.ui.notify("没有可恢复的已有对话", "info");
+          return;
+        }
+        selected = await ctx.ui.custom<RecoverySession | undefined>(
+          (tui, _theme, _keys, done) =>
+            new RecoveryPicker(
+              sessions,
+              ctx.cwd,
+              () => tui.requestRender(),
+              done,
+              () => tui.terminal.rows,
+            ),
+        );
+      }
+    } finally {
+      catalog.close();
+      try {
+        ctx.ui.setStatus("workspace-recovery", undefined);
+      } catch {
+        /* replaced session */
+      }
+    }
+    if (!selected) {
+      if (file) throw new Error("不是有效的 Pi 会话文件");
+      return;
+    }
+    if (!alive || !ctx.isIdle() || ctx.hasPendingMessages())
+      throw new Error("恢复已取消或收到新输入，请重新选择");
+    running = true;
+    let prepared: PreparedRecovery | undefined,
+      attempted = false;
+    const kernel = current();
+    try {
+      prepared = await prepareWorkspaceRecovery(selected, ctx, async () => {
+        await suspend(kernel);
+        if (!alive || ctx.hasPendingMessages())
+          throw new Error("恢复已取消或有新输入，请重新选择");
+      });
+      if (!alive) throw new Error("恢复期间原会话已关闭");
+      if (ctx.hasPendingMessages())
+        throw new Error("恢复期间收到新输入，请重新选择");
+      attempted = true;
+      const r = prepared.relocation;
+      const changed = await ctx.switchSession(r.sessionFile, {
+        withSession: async (next) => {
+          await commitRelocation(r);
+          await next.sendMessage({
+            customType: "project-location",
+            content: `用户已将旧对话从 ${r.plan.source} 恢复到当前工作区 ${r.plan.target}。历史正文和目标证据保留；旧项目内成员工作区已映射，外部权限不变。旧绝对路径可用 project_resolve 查询。目标与提醒保持暂停，旧命令没有自动重放。`,
+            display: true,
+          });
+          next.ui.notify(
+            `已恢复到当前工作区：${r.plan.target}\n备份与恢复日志：${r.journal}`,
+            "info",
+          );
+        },
+      });
+      if (changed.cancelled) {
+        attempted = false;
+        await rollbackRelocation(r);
+        ctx.ui.notify("已取消恢复，原记录和当前目录保留", "info");
+      }
+    } catch (error) {
+      if (prepared && !attempted) await rollbackRelocation(prepared.relocation);
+      if (prepared && attempted) {
+        await writeRelocationJournal(
+          prepared.relocation,
+          "switch-failed",
+          String(error),
+        );
+        console.error(
+          `恢复会话：pi --session ${JSON.stringify(prepared.relocation.sessionFile)} ; journal ${prepared.relocation.journal}`,
+        );
+      }
+      throw error;
+    } finally {
+      prepared?.release();
+      if (!attempted) kernel.finishRelocation();
+      running = false;
+    }
   }
   const status = (ctx: ExtensionContext) => {
     if (grant && Date.now() >= grant.expiresAt) grant = undefined;
@@ -199,6 +343,8 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
         throw new Error(
           "Finish /project recover before another workspace change",
         );
+      if (plan.action === "restore")
+        throw new Error("Use /project restore for recovery");
       const fresh = planRelocation(plan.action, plan.target, ctx.cwd);
       if (fresh.source !== plan.source || fresh.target !== plan.target)
         throw new Error("Workspace changed since authorization");
@@ -305,7 +451,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
           { triggerTurn: false },
         );
         ctx.ui.notify(
-          `${failure.message}${["EBUSY", "EACCES", "EPERM"].includes(code) ? "\n工作区改名未完成：目录可能被其他进程占用，或权限不足。可用 project_status(diagnose=true) 查询当前目录占用者。若为启动 Pi 的父 Shell，需安全退出 Pi、让父 Shell 切到源目录之外，再用原会话文件恢复；/reload 本身不能解除外部占用。" : ""}${failure.rolledBack ? "\n迁移准备已回滚，原会话和原路径保留。" : ""}${relocation && attempted ? `\nRecovery session: ${relocation.sessionFile}\nJournal: ${relocation.journal}` : ""}`,
+          `${failure.message}${["EBUSY", "EACCES", "EPERM"].includes(code) ? "\n工作区改名未完成：目录可能被其他进程占用，或权限不足。可用 project_status(diagnose=true) 查询当前目录占用者。若为父 Shell 占用，可关闭旧 Pi 和该终端，手工移动/改名目录，再在新目录执行 pi --recover-here；/reload 本身不能解除外部占用。" : ""}${failure.rolledBack ? "\n迁移准备已回滚，原会话和原路径保留。" : ""}${relocation && attempted ? `\nRecovery session: ${relocation.sessionFile}\nJournal: ${relocation.journal}` : ""}`,
           "error",
         );
       } catch {
@@ -378,7 +524,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
       try {
         return result({
           original: args.path,
-          resolved: resolveProjectPath(identity(ctx).id, args.path),
+          resolved: resolvePath(ctx, args.path),
         });
       } catch (error) {
         return result(String(error), true);
@@ -442,12 +588,19 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   });
   pi.registerCommand("project", {
     description:
-      "Workspace: status | rename <name> | switch <path> | allow rename/switch <target> | revoke | resolve <old-path> | recover",
+      "Workspace: restore [session-file] | status | rename <name> | switch <path> | allow rename/switch <target> | revoke | resolve <old-path> | recover",
     handler: async (args, ctx) => {
       try {
         const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args.trim());
         const command = match?.[1] ?? "status";
         let target = (match?.[2] ?? "").trim();
+        if (command === "restore") {
+          await restoreHere(
+            target ? target.replace(/^(["'])(.*)\1$/, "$2") : undefined,
+            ctx,
+          );
+          return;
+        }
         if (command === "_settled") {
           const op = pending;
           if (!settlementToken || target !== settlementToken || !op)
@@ -478,10 +631,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
         }
         if (command === "resolve") {
           ctx.ui.notify(
-            resolveProjectPath(
-              identity(ctx).id,
-              target.replace(/^(["'])(.*)\1$/, "$2"),
-            ),
+            resolvePath(ctx, target.replace(/^(["'])(.*)\1$/, "$2")),
             "info",
           );
           return;

@@ -555,6 +555,135 @@ def main():
         (reports / "task-policies-tui.ansi").write_bytes(transcript)
         os.close(master)
 
+    # The user exits Pi before moving the directory. Then one new CLI command
+    # must recover the same dedicated conversation without any model request.
+    manual_recovery_round_trip(home, config, checks, reports, environment, fixture, leaf["id"], relocation_note)
+
+
+def manual_recovery_round_trip(home, config, checks, reports, environment, fixture, accepted_leaf, note):
+    agent = home / "agent"
+    sessions = agent / "sessions"
+    destinations = [home / "workspace 用户移动", home / "workspace"] if Path(config["workspace"]) == home / "workspace" else [home / "workspace"]
+    for cycle, destination in enumerate(destinations):
+        source = Path(config["workspace"])
+        assert source.is_dir() and not destination.exists()
+        source.rename(destination)
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 140, 0, 0))
+        trace = reports / ("restore-lifecycle-" + uuid.uuid4().hex[:8] + ".jsonl")
+        calls = reports / ("restore-model-calls-" + uuid.uuid4().hex[:8] + ".jsonl")
+        env = {**environment, "MC_FIXTURE_LIFECYCLE_TRACE": str(trace), "MC_FIXTURE_CACHE_TRACE": str(calls)}
+        process = subprocess.Popen([shutil.which("pi"), "--recover-here", "--offline", "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates", "--tools", "*", "-e", str(fixture), "--provider", "mission-fixture", "--model", "model", "--thinking", "off", "--session-dir", str(sessions)],
+            cwd=destination, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+        os.close(slave)
+        data, visible = bytearray(), ""
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+
+        def drain():
+            nonlocal visible
+            if select.select([master], [], [], .1)[0]:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:
+                    return
+                data.extend(chunk)
+                visible += decoder.decode(chunk)
+                if b"\x1b[c" in chunk:
+                    os.write(master, b"\x1b[?1;2c")
+
+        def wait(predicate, label, timeout=60):
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
+                drain()
+                if predicate():
+                    checks.append(label)
+                    return
+                assert process.poll() is None, "Recovery Pi exited: " + visible[-2000:]
+            raise AssertionError(label + "\n" + visible[-3000:])
+
+        def line(text):
+            drain()
+            os.write(master, text.encode())
+            drain()
+            os.write(master, b"\r")
+
+        def events():
+            return [json.loads(row) for row in trace.read_text().splitlines()] if trace.exists() else []
+
+        old_id = config["id"]
+        try:
+            wait(lambda: "恢复对话到当前工作区" in visible, "one-command --recover-here opened its searchable selector without a prompt")
+            assert not calls.exists(), "The recovery picker must not call a model"
+            line(old_id)
+            wait(lambda: any(e["reason"] == "resume" and e["cwd"] == str(destination) for e in events()), "selecting the old conversation restored it despite its missing original directory")
+            assert not calls.exists(), "Restoring must not call a model"
+            selected = next(e for e in reversed(events()) if e["reason"] == "resume")
+            assert selected["pid"] == process.pid
+            config.update(id=selected["sessionId"], sessionFile=selected["sessionFile"], workspace=str(destination))
+            assert config["id"] != old_id
+            database = agent / "mission-control/v2" / config["id"] / "state.sqlite"
+            with sqlite3.connect(database) as db:
+                relocation = json.loads(db.execute("SELECT data FROM meta WHERE key='relocation'").fetchone()[0])
+                assert relocation["previousSessionId"] == old_id and relocation["plan"]["action"] == "restore"
+                goal = json.loads(db.execute("SELECT data FROM goal_nodes WHERE id=?", (accepted_leaf,)).fetchone()[0])
+                assert goal["state"] == "accepted"
+            wait(lambda: json.loads(Path(relocation["journal"]).read_text())["state"] == "completed" and not (agent / "mission-control/v2" / old_id / "owner.lock").exists(), "native recovery completed and released the old ledger before the next command")
+            with sqlite3.connect(agent / "context-memory" / config["id"] / "memory.sqlite") as db:
+                assert db.execute("SELECT text FROM notes WHERE name='index'").fetchone() == (note,)
+            assert json.loads((database.parent / "compaction-summary.json").read_text())["model"] == "mission-fixture/summary"
+            checks.append("manual recovery retained accepted evidence, notes and explicit summary routing without replay")
+            (home / "test-session.json").write_text(json.dumps(config, ensure_ascii=False, indent=2))
+            previous = len(events())
+            line("/reload")
+            wait(lambda: len(events()) > previous and events()[-1]["reason"] == "reload", "literal /reload kept the restored conversation in the same Pi process")
+            assert events()[-1]["sessionId"] == config["id"] and events()[-1]["pid"] == process.pid
+            # session_start precedes Pi's final editor restoration. Use a
+            # public test command to acknowledge input readiness, without a
+            # model call or relying on a transient redraw notice.
+            nonce = uuid.uuid4().hex
+            end = time.monotonic() + 20
+            ready = False
+            while time.monotonic() < end and not ready:
+                line("/fixture-ready " + nonce)
+                quiet_until = time.monotonic() + .5
+                while time.monotonic() < quiet_until:
+                    drain()
+                ready = any(e.get("event") == "fixture_ready" and e.get("nonce") == nonce for e in events())
+            assert ready, "Reload did not restore its editor or reopened the startup selector"
+            assert not calls.exists(), "UI readiness must not call a model"
+            checks.append("restored editor acknowledged input after reload without a model request")
+            line('V2_TEST:{"op":"tool","name":"read","args":{"path":"decode-findings.txt"},"noRepeatWake":true}')
+
+            def read_finished():
+                if not Path(config["sessionFile"]).exists():
+                    return False
+                for row in reversed(Path(config["sessionFile"]).read_text().splitlines()[-12:]):
+                    message = json.loads(row).get("message", {})
+                    if message.get("role") == "toolResult" and message.get("toolName") == "read":
+                        return not message.get("isError") and "Decoder and immediate mapping" in json.dumps(message)
+                return False
+
+            wait(read_finished, "restored workspace accepted a model file read after reload instead of reopening the startup picker")
+        finally:
+            if process.poll() is None:
+                line("/quit")
+                end = time.monotonic() + 8
+                while process.poll() is None and time.monotonic() < end:
+                    drain()
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+            (reports / ("manual-recovery-" + str(cycle) + ".ansi")).write_bytes(data)
+            os.close(master)
+    launcher = home / "open-test-session.sh"
+    launcher.write_text("#!/bin/sh\nexport PI_CODING_AGENT_DIR='" + str(agent) + "'\ncd '" + config["workspace"] + "'\nexec pi --offline --no-mcp --no-skills -e '" + str(fixture) + "' --provider mission-fixture --model model --thinking off --session '" + config["sessionFile"] + "'\n")
+    launcher.chmod(0o700)
+    report_file = reports / "task-policies-tui.json"
+    report = json.loads(report_file.read_text())
+    report.update(session=config, checks=checks, manualRestoreRoundTrip=True, recoveryModelRequests=0)
+    report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    print("MANUAL_RECOVERY_RESULT " + json.dumps({"passed": True, "checks": len(checks), "session": config, "modelRequestsDuringRecovery": 0}, ensure_ascii=False))
+
 
 if __name__ == "__main__":
     main()

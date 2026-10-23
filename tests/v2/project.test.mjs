@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { hostDir } from "../../scripts/host.mjs";
+import { Store } from "../../runtime/store.ts";
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -166,6 +167,8 @@ async function harness(fn, options = {}) {
       restart: async () => {
         const cwd = runtime.cwd,
           file = runtime.session.sessionFile;
+        await runtime.session.abort();
+        await runtime.session.waitForIdle();
         await runtime.dispose();
         runtime = await createAgentSessionRuntime(factory, {
           cwd,
@@ -174,6 +177,25 @@ async function harness(fn, options = {}) {
         });
         runtime.setRebindSession(bind);
         await bind(runtime.session);
+      },
+      moveAndOpen: async () => {
+        const oldFile = runtime.session.sessionFile;
+        await runtime.session.abort();
+        await runtime.session.waitForIdle();
+        await runtime.dispose();
+        process.chdir(base);
+        fs.renameSync(source, target);
+        const file = oldFile.startsWith(source + path.sep)
+          ? path.join(target, path.relative(source, oldFile))
+          : oldFile;
+        runtime = await createAgentSessionRuntime(factory, {
+          cwd: target,
+          agentDir: agent,
+          sessionManager: SessionManager.create(target),
+        });
+        runtime.setRebindSession(bind);
+        await bind(runtime.session);
+        return file;
       },
     });
     assert.deepEqual(errors, []);
@@ -280,6 +302,437 @@ test(
       await busy;
     }),
 );
+
+for (const customStorage of [false, true]) {
+  test(
+    `manual directory move restores the old conversation, goals, member history and notes (custom storage=${customStorage})`,
+    { timeout: 30000 },
+    () =>
+      harness(
+        async (h) => {
+          h.runtime.session.sessionManager.appendSessionInfo("恢复测试 中文");
+          fs.writeFileSync(
+            path.join(h.source, "marker.txt"),
+            "RESTORED_ROOT_FILE",
+          );
+          await h.command("/mission start Recovery goal | Keep evidence");
+          const rootGoal = (await h.state()).mission.id;
+          const leafPlan = JSON.parse(
+            (
+              await h.tool("goal_plan", {
+                goals: [
+                  {
+                    parentId: rootGoal,
+                    objective: "Inspect marker file",
+                    criteria: ["Marker read"],
+                  },
+                ],
+              })
+            ).content[0].text,
+          );
+          const leafId = leafPlan.created[0].id;
+          await h.tool("goal_focus", { goalId: leafId });
+          await h.tool("team_spawn", {
+            name: "recovery-reader",
+            role: "read",
+            workspace: {
+              root: h.source,
+              access: "read-only",
+              execution: "files",
+            },
+          });
+          const lead = h.command('V2_TEST:{"op":"hang"}');
+          await until(() => h.runtime.session.isStreaming);
+          const response = await h.tool("team_send", {
+            to: "recovery-reader",
+            message:
+              "V2_TEST:" +
+              JSON.stringify({
+                op: "read",
+                file: path.join(h.source, "marker.txt"),
+              }),
+            wait: true,
+          });
+          assert.ok(!response.isError, response.content[0].text);
+          const acceptance = JSON.parse(
+            (
+              await h.tool("goal_accept", {
+                goalId: leafId,
+                revision: 0,
+                evidence: [
+                  {
+                    criterion: 1,
+                    source: "artifact",
+                    summary: "Marker exists",
+                    path: path.join(h.source, "marker.txt"),
+                  },
+                ],
+              })
+            ).content[0].text,
+          );
+          await h.runtime.session.abort();
+          await lead;
+          await h.tool("context_note", {
+            action: "write",
+            name: "index",
+            text: "RECOVER_INDEX_SNAPSHOT",
+          });
+          await h.tool("context_mode", {
+            mode: "notes",
+            inputLimitTokens: 300000,
+          });
+          await h.tool("compaction_model", {
+            action: "set",
+            model: "mission-fixture/summary",
+          });
+          const oldId = h.runtime.session.sessionId,
+            before = await h.state();
+          const file = await h.moveAndOpen();
+          assert.equal(fs.existsSync(h.source), false);
+          const original = fs.readFileSync(file);
+          await h.command('/project restore "' + file + '"');
+          assert.equal(h.runtime.cwd, h.target, JSON.stringify(h.notices));
+          assert.notEqual(h.runtime.session.sessionId, oldId);
+          const restored = await h.state();
+          assert.equal(restored.mission.id, rootGoal);
+          const restoredLeaf = JSON.stringify(
+            (
+              await h.tool("goal_tree", {
+                goalId: leafId,
+                section: "acceptance",
+              })
+            ).content,
+          );
+          assert.ok(restoredLeaf.includes(leafId));
+          assert.ok(acceptance.id, JSON.stringify(acceptance));
+          assert.ok(restoredLeaf.includes(acceptance.id));
+          assert.equal(restored.members[0].id, before.members[0].id);
+          assert.equal(restored.members[0].workspace.root, h.target);
+          assert.equal(restored.members[0].workspace.access, "read-only");
+          assert.equal(restored.members[0].workspace.execution, "files");
+          assert.match(
+            fs.readFileSync(restored.members[0].sessionFile, "utf8"),
+            /RESTORED_ROOT_FILE/,
+          );
+          assert.equal(fs.readFileSync(file).equals(original), true);
+          const status = JSON.parse(
+            (await h.tool("project_status")).content[0].text,
+          );
+          assert.equal(status.held, true);
+          assert.equal(status.relocation.plan.action, "restore");
+          const restoredId = h.runtime.session.sessionId;
+          await h.command('/project restore "' + file + '"');
+          assert.equal(
+            h.runtime.session.sessionId,
+            restoredId,
+            "An old path must resolve to its already-current restored conversation",
+          );
+          assert.ok(fs.readFileSync(status.relocation.backup).equals(original));
+          assert.equal(
+            JSON.parse(
+              (await h.tool("context_note", { action: "read", name: "index" }))
+                .content[0].text,
+            ).text,
+            "RECOVER_INDEX_SNAPSHOT",
+          );
+          assert.equal(
+            JSON.parse((await h.tool("context_mode", {})).content[0].text).mode,
+            "notes",
+          );
+          assert.equal(
+            JSON.parse(
+              (
+                await h.tool("compaction_model", {
+                  action: "status",
+                  target: "lead",
+                })
+              ).content[0].text,
+            ).model,
+            "mission-fixture/summary",
+          );
+          assert.equal(
+            JSON.parse(
+              (
+                await h.tool("project_resolve", {
+                  path: path.join(h.source, "marker.txt"),
+                })
+              ).content[0].text,
+            ).resolved,
+            path.join(h.target, "marker.txt"),
+          );
+          assert.equal(
+            SessionManager.continueRecent(h.target).getSessionId(),
+            h.runtime.session.sessionId,
+          );
+          await h.command("/mission resume");
+          fs.writeFileSync(
+            path.join(h.target, "marker.txt"),
+            "CHANGED_RESTORE_EVIDENCE",
+          );
+          const changedEvidence = await h.tool("goal_accept", {
+            goalId: rootGoal,
+            revision: 0,
+            evidence: [
+              {
+                criterion: 1,
+                source: "acceptance",
+                summary: "Changed evidence must fail verification",
+                acceptanceId: acceptance.id,
+              },
+            ],
+          });
+          assert.equal(changedEvidence.isError, true);
+          assert.match(
+            changedEvidence.content[0].text,
+            /Evidence file changed/,
+          );
+          fs.writeFileSync(
+            path.join(h.target, "marker.txt"),
+            "RESTORED_ROOT_FILE",
+          );
+          const parent = await h.tool("goal_accept", {
+            goalId: rootGoal,
+            revision: 0,
+            evidence: [
+              {
+                criterion: 1,
+                source: "acceptance",
+                summary: "Retained child evidence verified after move",
+                acceptanceId: acceptance.id,
+              },
+            ],
+          });
+          assert.ok(!parent.isError, parent.content[0].text);
+          await h.restart();
+          assert.equal((await h.state()).mission.id, rootGoal);
+          await h.command(
+            'V2_TEST:{"op":"tool","name":"read","args":{"path":"marker.txt"}}',
+          );
+          assert.match(
+            h.runtime.session.getLastAssistantText(),
+            /RESTORED_ROOT_FILE/,
+          );
+        },
+        { customStorage, targetName: "moved 中文 workspace" },
+      ),
+  );
+}
+
+test("manual recovery cancellation keeps the user's moved directory and original records", () =>
+  harness(async (h) => {
+    fs.writeFileSync(path.join(h.source, "keep.txt"), "KEEP_MOVED_FILES");
+    const file = await h.moveAndOpen();
+    const id = h.runtime.session.sessionId;
+    h.runtime.session.resourceLoader
+      .getExtensions()
+      .extensions[0].handlers.set("session_before_switch", [
+        async () => ({ cancel: true }),
+      ]);
+    await h.command('/project restore "' + file + '"');
+    assert.equal(h.runtime.session.sessionId, id);
+    assert.equal(fs.existsSync(h.source), false);
+    assert.equal(
+      fs.readFileSync(path.join(h.target, "keep.txt"), "utf8"),
+      "KEEP_MOVED_FILES",
+    );
+    assert.ok(fs.existsSync(file));
+    assert.ok(h.notices.some(([text]) => text.includes("已取消恢复")));
+  }));
+
+test("confirming a recovered completed goal clears only the workspace hold", () =>
+  harness(async (h) => {
+    const plan = JSON.parse(
+      (
+        await h.tool("goal_plan", {
+          goals: [
+            {
+              objective: "Finished recovery fixture",
+              criteria: ["Completion already verified"],
+            },
+          ],
+        })
+      ).content[0].text,
+    );
+    const id = plan.created[0].id;
+    await h.tool("goal_activate", { goalId: id });
+    const accepted = await h.tool("goal_accept", {
+      goalId: id,
+      revision: 0,
+      evidence: [
+        {
+          criterion: 1,
+          source: "statement",
+          summary: "Original completed fixture receipt",
+        },
+      ],
+    });
+    assert.ok(!accepted.isError, accepted.content[0].text);
+    const before = (await h.state()).mission;
+    assert.equal(before.status, "complete");
+    const file = await h.moveAndOpen();
+    await h.command('/project restore "' + file + '"');
+    assert.equal(
+      JSON.parse((await h.tool("project_status")).content[0].text).held,
+      true,
+    );
+    await h.command("/mission resume");
+    assert.equal(
+      JSON.parse((await h.tool("project_status")).content[0].text).held,
+      false,
+    );
+    assert.deepEqual((await h.state()).mission, before);
+    const detail = JSON.parse(
+      (await h.tool("goal_tree", { goalId: id })).content[0].text,
+    );
+    assert.equal(detail.acceptance.id, JSON.parse(accepted.content[0].text).id);
+  }));
+
+for (const reason of ["owner", "unknown-worker"]) {
+  test(`manual recovery handles ${reason} without replaying old work`, () =>
+    harness(async (h) => {
+      const id = crypto.randomUUID(),
+        file = path.join(h.base, "blocked.jsonl");
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id,
+          cwd: path.join(h.base, "missing-old-workspace"),
+          timestamp: new Date().toISOString(),
+        }) + "\n",
+      );
+      const store = new Store(path.join(h.agent, "mission-control/v2", id));
+      try {
+        if (reason === "unknown-worker") {
+          store.db.prepare("INSERT INTO tasks VALUES(?,?,?,?,?,?)").run(
+            "unknown-task",
+            "reader",
+            null,
+            "interrupted",
+            1,
+            JSON.stringify({
+              id: "unknown-task",
+              member: "reader",
+              memberId: "member-id",
+              missionId: "old-goal",
+              epoch: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              inputPath: path.join(store.directory, "artifacts/input.txt"),
+              timeoutMs: 0,
+              reviewDeliveryIds: [],
+              state: "interrupted",
+              processState: "unknown",
+            }),
+          );
+          store.close();
+        }
+        const currentId = h.runtime.session.sessionId;
+        await h.command('/project restore "' + file + '"');
+        if (reason === "owner") {
+          assert.equal(h.runtime.session.sessionId, currentId);
+          assert.ok(
+            h.notices.some(([text]) => text.includes("already has")),
+            JSON.stringify(h.notices),
+          );
+          assert.equal(
+            JSON.parse((await h.tool("project_status")).content[0].text).held,
+            false,
+          );
+        } else {
+          assert.notEqual(
+            h.runtime.session.sessionId,
+            currentId,
+            JSON.stringify(h.notices),
+          );
+          assert.equal(
+            JSON.parse((await h.tool("project_status")).content[0].text).held,
+            true,
+          );
+          const recovered = await h.state();
+          assert.equal(recovered.tasks.length, 1);
+          assert.equal(recovered.tasks[0].processState, "unknown");
+          assert.equal(recovered.tasks[0].state, "interrupted");
+        }
+      } finally {
+        store.close();
+      }
+    }));
+}
+
+test("plain Pi history without a plugin ledger can be restored from a missing workspace", () =>
+  harness(async (h) => {
+    const id = crypto.randomUUID(),
+      file = path.join(h.base, "plain.jsonl"),
+      now = new Date().toISOString();
+    fs.writeFileSync(
+      file,
+      [
+        {
+          type: "session",
+          version: 3,
+          id,
+          cwd:
+            process.platform === "win32"
+              ? "Q:\\__pi_recovery_absent_volume__\\project"
+              : path.join(h.base, "gone"),
+          timestamp: now,
+        },
+        {
+          type: "message",
+          id: "u",
+          parentId: null,
+          timestamp: now,
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "PLAIN_OLD_USER" }],
+            timestamp: Date.now(),
+          },
+        },
+        {
+          type: "message",
+          id: "a",
+          parentId: "u",
+          timestamp: now,
+          message: {
+            role: "assistant",
+            api: model.api,
+            provider: model.provider,
+            model: model.id,
+            stopReason: "stop",
+            content: [{ type: "text", text: "PLAIN_OLD_ANSWER" }],
+            timestamp: Date.now(),
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: 0,
+              },
+            },
+          },
+        },
+      ]
+        .map(JSON.stringify)
+        .join("\n") + "\n",
+    );
+    await h.command('/project restore "' + file + '"');
+    assert.notEqual(h.runtime.session.sessionId, id);
+    assert.equal(h.runtime.session.getLastAssistantText(), "PLAIN_OLD_ANSWER");
+    assert.equal(h.runtime.cwd, h.source);
+    assert.equal(
+      JSON.parse((await h.tool("project_status")).content[0].text).relocation
+        .previousSessionId,
+      id,
+    );
+  }));
 test(
   "switch changes main file tools while preserving members' original workspace permissions",
   { timeout: 20000 },

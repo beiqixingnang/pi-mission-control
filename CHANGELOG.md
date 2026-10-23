@@ -1,3 +1,11 @@
+# 2.6.0 — restore a conversation after moving its workspace (2026-10-23)
+
+- Add pi --recover-here and /project restore: search existing main conversations, select one and recover it into the current directory after a user-managed move or rename. The original directory need not exist; recovery requires no model turn and never moves user project files.
+- Preserve history, goals, acceptance records, member history, standalone notes and summary routing through a backed-up continuation. Keep the source ledger reserved while preparing/attaching, reject a live owner, and retain uncertain executions as interrupted/unknown under a workspace hold rather than replaying them.
+- Use an append-aware metadata catalog with bounded LF prefixes and a searchable TUI. Stream opaque history bodies without a per-record copy limit; only the header changes. Completed recovery bindings hide superseded originals in the picker.
+- Resolve explicit workspace/state migrations when checking accepted artifacts and old paths, including round trips. Changed evidence still fails verification. Confirming a recovered closed goal clears the workspace hold without reopening it or resetting its receipt/usage.
+- Verify Windows and WSL, ordinary/custom/plain Pi history, source ownership, rollback, oversized records and actual CLI selection/reload in the dedicated WSL conversation.
+
 # 2.5.6 — actionable Windows workspace lock failures (2026-10-23)
 
 - Record failed relocation outcomes, original error codes and rollback journals in the existing session store and transcript. A queued request no longer leaves the model without the final failure evidence; retain the record across reload and clear it on the next migration attempt.
