@@ -178,20 +178,21 @@ async function harness(fn, options = {}) {
         runtime.setRebindSession(bind);
         await bind(runtime.session);
       },
-      moveAndOpen: async () => {
+      moveAndOpen: async (destination = target) => {
         const oldFile = runtime.session.sessionFile;
+        const previousWorkspace = runtime.cwd;
         await runtime.session.abort();
         await runtime.session.waitForIdle();
         await runtime.dispose();
         process.chdir(base);
-        fs.renameSync(source, target);
-        const file = oldFile.startsWith(source + path.sep)
-          ? path.join(target, path.relative(source, oldFile))
+        fs.renameSync(previousWorkspace, destination);
+        const file = oldFile.startsWith(previousWorkspace + path.sep)
+          ? path.join(destination, path.relative(previousWorkspace, oldFile))
           : oldFile;
         runtime = await createAgentSessionRuntime(factory, {
-          cwd: target,
+          cwd: destination,
           agentDir: agent,
-          sessionManager: SessionManager.create(target),
+          sessionManager: SessionManager.create(destination),
         });
         runtime.setRebindSession(bind);
         await bind(runtime.session);
@@ -243,6 +244,9 @@ test(
       await h.command("/project rename target");
       await running;
       assert.equal(h.runtime.cwd, h.target, JSON.stringify(h.notices));
+      assert.ok(
+        h.notices.some(([text]) => text.includes("手动执行 /mission resume")),
+      );
       assert.notEqual(h.runtime.session.sessionId, previousId);
       assert.ok(
         fs.readFileSync(oldFile).subarray(0, original.length).equals(original),
@@ -517,6 +521,113 @@ for (const customStorage of [false, true]) {
       ),
   );
 }
+
+for (const hasMission of [false, true]) {
+  test(`restored workspace explicitly requests one manual resume before actual model writes (mission=${hasMission})`, () =>
+    harness(async (h) => {
+      if (hasMission)
+        await h.command(
+          "/mission start Resume restored README | Actual write succeeds",
+        );
+      const file = await h.moveAndOpen();
+      await h.command('/project restore "' + file + '"');
+      const status = JSON.parse(
+        (await h.tool("project_status")).content[0].text,
+      );
+      assert.equal(status.relocationState, "completed");
+      assert.equal(status.relocation.renamed, false);
+      assert.equal(status.userCommand, "/mission resume");
+      assert.ok(
+        h.notices.some(([text]) => text.includes("手动执行 /mission resume")),
+      );
+      assert.ok(
+        h.runtime.session.sessionManager
+          .getEntries()
+          .some(
+            (e) =>
+              e.customType === "project-location" &&
+              e.content.includes("手动执行 /mission resume"),
+          ),
+      );
+      const write =
+        "V2_TEST:" +
+        JSON.stringify({
+          op: "tool",
+          name: "write",
+          args: { path: "README.md", content: "Resumed README" },
+          noRepeatWake: true,
+        });
+      await h.command(write);
+      const blocked = JSON.parse(h.runtime.session.getLastAssistantText());
+      assert.equal(blocked.isError, true);
+      assert.match(blocked.text, /手动执行 \/mission resume/);
+      assert.equal(fs.existsSync(path.join(h.target, "README.md")), false);
+      assert.equal(
+        (await h.tool("goal_start", { objective: "New work while paused" }))
+          .isError,
+        true,
+      );
+      const recovered = JSON.parse(
+        (await h.tool("project_recover")).content[0].text,
+      );
+      assert.equal(recovered.held, true);
+      assert.equal(recovered.userCommand, "/mission resume");
+      if (hasMission) {
+        const goal = (await h.state()).mission;
+        const tagged = await h.tool("goal_edit", {
+          goalId: goal.id,
+          revision: goal.revision ?? 0,
+          state: "blocked",
+          reason: blocked.text,
+        });
+        assert.ok(!tagged.isError, tagged.content[0].text);
+      }
+      await h.restart();
+      assert.equal((await h.state()).workspaceHeld, true);
+      await h.command("/mission resume");
+      assert.equal((await h.state()).workspaceHeld, false);
+      await h.command(write);
+      const resumed = JSON.parse(h.runtime.session.getLastAssistantText());
+      assert.equal(resumed.isError, false, resumed.text);
+      assert.equal(
+        fs.readFileSync(path.join(h.target, "README.md"), "utf8"),
+        "Resumed README",
+      );
+      await h.restart();
+      assert.equal((await h.state()).workspaceHeld, false);
+    }));
+}
+
+test("a second manual move carries the identified workspace blocker so one resume still permits a write", () =>
+  harness(async (h) => {
+    await h.command("/mission start Move twice | Keep one confirmation");
+    let file = await h.moveAndOpen();
+    await h.command('/project restore "' + file + '"');
+    const mission = (await h.state()).mission;
+    const block = await h.tool("goal_edit", {
+      goalId: mission.id,
+      revision: 0,
+      state: "blocked",
+      blockedBy: "workspace",
+      reason: "Waiting for migration confirmation",
+    });
+    assert.ok(!block.isError, block.content[0].text);
+    file = await h.moveAndOpen(h.source);
+    await h.command('/project restore "' + file + '"');
+    const status = JSON.parse((await h.tool("project_status")).content[0].text);
+    const goal = JSON.parse(
+      (await h.tool("goal_tree", { goalId: mission.id })).content[0].text,
+    ).goal;
+    assert.equal(goal.workspaceBlock.relocationId, status.relocation.id);
+    await h.command("/mission resume");
+    await h.command(
+      'V2_TEST:{"op":"tool","name":"write","args":{"path":"twice.txt","content":"Confirmed once"},"noRepeatWake":true}',
+    );
+    assert.equal(
+      fs.readFileSync(path.join(h.source, "twice.txt"), "utf8"),
+      "Confirmed once",
+    );
+  }));
 
 test("manual recovery cancellation keeps the user's moved directory and original records", () =>
   harness(async (h) => {

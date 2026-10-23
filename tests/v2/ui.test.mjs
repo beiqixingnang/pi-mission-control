@@ -79,6 +79,31 @@ async function withRoster(run) {
   }
 }
 
+test("workspace pause has one accurate status and a manual resume command in compact, table and detailed views", () =>
+  withRoster(async ({ kernel, panel }) => {
+    kernel.setGoal("Recovered workspace fixture");
+    kernel.store.set("relocationHold", true);
+    for (const width of [70, 160]) {
+      const rendered = board(kernel, width, false, undefined, 42).join("\n");
+      assert.match(rendered, /迁移后待恢复/);
+      assert.match(rendered, /\/mission resume/);
+      assert.doesNotMatch(rendered, /推进中/);
+    }
+    const goals = new GoalPanel(
+      kernel,
+      () => {},
+      () => {},
+      () => 30,
+    );
+    assert.match(
+      goals.render(120).join("\n"),
+      /迁移后待恢复.*\/mission resume/,
+    );
+    assert.match(panel.render(140).join("\n"), /迁移后待恢复/);
+    await kernel.userControl("resume");
+    assert.doesNotMatch(board(kernel, 160).join("\n"), /迁移后待恢复/);
+  }));
+
 test("compact goal counts and the detailed keyboard board share the acceptance ledger", () =>
   withRoster(async ({ kernel }) => {
     const nodes = kernel.planGoals([

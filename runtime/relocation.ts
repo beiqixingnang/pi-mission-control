@@ -14,6 +14,7 @@ import { lfLines } from "./jsonl.ts";
 import { Store } from "./store.ts";
 import { snapshotContextMemory } from "./context-memory.ts";
 import { SessionCatalog } from "./session-catalog.ts";
+import { rebindWorkspaceGoalBlocks } from "./workspace-control.ts";
 import type { MissionKernel } from "./kernel.ts";
 import type { Member, Task, Delivery } from "./types.ts";
 import {
@@ -309,6 +310,12 @@ function rewriteState(source: Store, target: Store, r: Relocation) {
       target.putDelivery(d);
     }
     target.set("relocationHold", true);
+    const previousRelocation = source.get<Relocation>("relocation");
+    if (
+      source.get("relocationHold") &&
+      previousRelocation?.sessionId === r.previousSessionId
+    )
+      rebindWorkspaceGoalBlocks(target, previousRelocation.id, r.id);
     if (r.plan.action === "restore") target.unset("projectRelocationFailure");
     const restoredMission = target.mission();
     if (

@@ -114,6 +114,14 @@ export interface GoalNode {
   revision: number;
   reason?: string;
   nextStep?: string;
+  workspaceBlock?: {
+    relocationId: string;
+    revision: number;
+    reason?: string;
+    previousState: "planned" | "active" | "review";
+    previousReason?: string;
+    previousNextStep?: string;
+  };
   estimateMs?: [number, number];
   acceptanceId?: string;
   createdAt: number;

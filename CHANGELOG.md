@@ -1,3 +1,10 @@
+# 2.6.1 — one manual resume after workspace migration (2026-10-23)
+
+- Tell the user to manually run /mission resume after restore, rename or switch, and retain that instruction in the restored history, reload notice, status and compact/detail views. Show a workspace pause instead of an active goal while that control is held.
+- Distinguish workspace-only goal blockers with blockedBy:workspace. The user's one resume releases blockers belonging to that exact migration and retains independent business blockers, goal revisions and acceptance evidence. Support the exact reported legacy pause record only when its durable update follows the matching migration event; unclassified or older blockers remain intact.
+- Block actual model writes and commands under a workspace hold, including flat or absent goals; reject starting a new objective until the user resumes. Status explicitly reports the persisted migration journal state so renamed=false during manual restore cannot be mistaken for a failed registration.
+- Verify existing-session reload, manual recovery notifications, held writes and a successful file write after one user resume in the dedicated WSL TUI, plus Windows and WSL regression suites.
+
 # 2.6.0 — restore a conversation after moving its workspace (2026-10-23)
 
 - Add pi --recover-here and /project restore: search existing main conversations, select one and recover it into the current directory after a user-managed move or rename. The original directory need not exist; recovery requires no model turn and never moves user project files.

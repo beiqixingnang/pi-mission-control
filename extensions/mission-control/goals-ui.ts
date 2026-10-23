@@ -7,7 +7,7 @@ import type { MissionKernel } from "../../runtime/kernel.ts";
 import type { GoalNode } from "../../runtime/types.ts";
 import { cleanText } from "../../runtime/public.ts";
 import { panelLine, type UiTheme } from "./presentation.ts";
-import { stateNames } from "./ui.ts";
+import { stateNames, missionState } from "./ui.ts";
 
 export const goalStateNames: Record<string, string> = {
   planned: "待推进",
@@ -80,11 +80,12 @@ export class GoalPanel {
       height = Math.max(4, this.height());
     try {
       const current = this.kernel.store.mission(),
+        workspaceHeld = Boolean(this.kernel.store.get("relocationHold")),
         progress = this.kernel.goals.summary(),
         { nodes, rows } = this.tree();
       const heading = [
         "目标 / GOALS",
-        `当前：${current ? `${stateNames[current.status]} · ${current.objective}` : "尚未激活主目标"}`,
+        `当前：${workspaceHeld ? "迁移后待恢复 · 请手动执行 /mission resume" : current ? `${stateNames[current.status]} · ${current.objective}` : "尚未激活主目标"}`,
         `二级 ${progress.level2.completed}/${progress.level2.total} 已验收 · 三级 ${progress.level3.completed}/${progress.level3.total} 已验收 · 深度上限 ${progress.maxDepth}`,
       ];
       let body: string[], footer: string;
@@ -106,7 +107,7 @@ export class GoalPanel {
           `ID ${goal.id} · 第${goal.depth}级 · 版本 ${goal.revision}`,
           ...(runtime
             ? [
-                `运行状态：${stateNames[runtime.status]}${goal.id === current?.id ? " · 当前主目标" : " · 未激活"}${runtime.reason ? " · " + runtime.reason : ""}`,
+                `运行状态：${missionState(runtime, undefined, workspaceHeld && goal.id === current?.id)}${goal.id === current?.id ? " · 当前主目标" : " · 未激活"}${runtime.reason ? " · " + runtime.reason : ""}`,
                 `累计活动 ${Math.floor((activity?.activeMs ?? 0) / 1000)}秒 · 自动接续 ${runtime.turns}回合 · 主输出 ${runtime.outputTokens} tokens`,
               ]
             : []),

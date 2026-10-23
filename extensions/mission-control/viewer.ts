@@ -548,7 +548,7 @@ export class MissionPanel {
         m = s.mission;
       const head = [
         bold(this.theme, color(this.theme, "accent", "AGENTS / TEAM STATUS")),
-        `${missionState(m, s.recovery)} · 成员 ${s.members.length} · 执行中 ${counts.running} · 等待 ${counts.waiting}${counts.attention ? ` · 需要处理 ${counts.attention}` : ""}`,
+        `${missionState(m, s.recovery, s.workspaceHeld)} · 成员 ${s.members.length} · 执行中 ${counts.running} · 等待 ${counts.waiting}${counts.attention ? ` · 需要处理 ${counts.attention}` : ""}`,
         m
           ? `目标：${cleanText(m.objective.replace(/\s+/g, " "), Math.max(20, width - 8))}`
           : "派工后自动维护；Enter 进入成员对话",
@@ -593,7 +593,7 @@ export class MissionPanel {
             ? m
               ? [
                   m.objective,
-                  `状态：${missionState(m, s.recovery)}${m.reason ? " · " + m.reason : ""}`,
+                  `状态：${missionState(m, s.recovery, s.workspaceHeld)}${s.workspaceHeld ? " · 请手动执行 /mission resume" : m.reason ? " · " + m.reason : ""}`,
                   ...(s.recovery
                     ? [
                         `恢复原因：${s.recovery.reason}`,

@@ -20,7 +20,12 @@ export const stateNames: Record<string, string> = {
   cancelled: "取消",
   interrupted: "中断待核对",
 };
-export function missionState(m?: Mission, recovery?: Recovery) {
+export function missionState(
+  m?: Mission,
+  recovery?: Recovery,
+  workspaceHeld = false,
+) {
+  if (workspaceHeld) return "迁移后待恢复";
   if (!m && !recovery) return "就绪";
   if (m && m.status !== "active")
     return m.blocker?.kind === "budget"
@@ -96,8 +101,8 @@ export function board(
   const goal = {
     category: "目标",
     name: m?.objective ?? "首次派工自动建立",
-    status: missionState(m, s.recovery),
-    detail: goalDetail,
+    status: missionState(m, s.recovery, s.workspaceHeld),
+    detail: s.workspaceHeld ? "/mission resume 手动恢复" : goalDetail,
   };
   const reminderRows = schedules.map((r) => ({
     category: "定时任务",
@@ -175,7 +180,7 @@ export function board(
     const compactShown = memberRows.slice(0, Math.max(0, limit - 5));
     lines = [
       `目标 · ${goal.status} · ${goal.name}`,
-      `${goalDetail} 已验收`,
+      s.workspaceHeld ? "请手动执行 /mission resume" : `${goalDetail} 已验收`,
       `定时 · ${reminderCount}项${reminderCount ? " · " + reminderRows[0].detail + " " + reminderRows[0].name : " · 无"}`,
       `成员 · ${memberRows.length}名 · 执行 ${running} · 等待 ${waiting}`,
       ...compactShown.map(memberLine),

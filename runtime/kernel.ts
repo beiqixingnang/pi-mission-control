@@ -7,6 +7,11 @@ import { LeadRecovery } from "./recovery.ts";
 import { contextLimitError } from "./reconnect.ts";
 import { MissionActivityClock } from "./activity-clock.ts";
 import { GoalLedger } from "./goals.ts";
+import {
+  workspaceResumeInstruction,
+  isWorkspacePauseReason,
+  releaseWorkspaceGoalBlocks,
+} from "./workspace-control.ts";
 import { taskTiming, executionDeadline } from "./task-policy.ts";
 import {
   resolveSettings,
@@ -479,6 +484,8 @@ export class MissionKernel {
   }
   setGoal(objective: string, criteria: string[] = []) {
     return this.store.transaction(() => {
+      if (this.store.get("relocationHold"))
+        throw new Error(workspaceResumeInstruction);
       if (!objective.trim()) throw new Error("Goal objective is required");
       const previous = this.store.mission();
       if (previous && !["complete", "stopped"].includes(previous.status))
@@ -581,6 +588,7 @@ export class MissionKernel {
     node.revision = m.revision ?? 0;
     node.acceptanceId = undefined;
     node.state = "planned";
+    delete node.workspaceBlock;
     node.updatedAt = this.now();
     this.store.putGoal(node);
   }
@@ -671,12 +679,45 @@ export class MissionKernel {
   }
   editGoal(
     id: string,
-    patch: Parameters<GoalLedger["edit"]>[1],
+    patch: Parameters<GoalLedger["edit"]>[1] & { blockedBy?: "workspace" },
     revision?: number,
     allowExclusion = false,
   ): Mission | GoalNode {
     return this.store.transaction(() => {
       const node = this.goals.node(id);
+      const { blockedBy, ...goalPatch } = patch;
+      const workspaceBlock =
+        blockedBy === "workspace" ||
+        (this.store.get("relocationHold") &&
+          patch.state === "blocked" &&
+          isWorkspacePauseReason(patch.reason));
+      const relocation = this.store.get<{ id: string; sessionId: string }>(
+        "relocation",
+      );
+      if (workspaceBlock) {
+        if (
+          !this.store.get("relocationHold") ||
+          relocation?.sessionId !== this.options.sessionId ||
+          patch.state !== "blocked" ||
+          patch.objective !== undefined ||
+          patch.criteria !== undefined ||
+          patch.scope !== undefined ||
+          patch.dependsOn !== undefined
+        )
+          throw new Error(
+            "A workspace blocker requires this session's active relocation hold and a state-only goal update",
+          );
+        if (
+          !["planned", "active", "review"].includes(node.state) &&
+          !(
+            node.state === "blocked" &&
+            node.workspaceBlock?.relocationId === relocation.id
+          )
+        )
+          throw new Error(
+            "Preserve the existing business blocker; a workspace pause cannot replace it",
+          );
+      }
       if (
         !node.parentId &&
         (patch.objective !== undefined || patch.criteria !== undefined) &&
@@ -697,7 +738,28 @@ export class MissionKernel {
           this.goals.edit(id, metadata, this.goals.node(id).revision);
         return updated;
       }
-      const result = this.goals.edit(id, patch, revision, allowExclusion);
+      const result = this.goals.edit(id, goalPatch, revision, allowExclusion);
+      if (workspaceBlock) {
+        result.workspaceBlock = {
+          ...(node.workspaceBlock ?? {
+            previousState: node.state as "planned" | "active" | "review",
+            previousReason: node.reason,
+            previousNextStep: node.nextStep,
+          }),
+          relocationId: relocation!.id,
+          revision: result.revision,
+          reason: result.reason,
+        };
+        this.store.putGoal(result);
+      } else if (
+        result.workspaceBlock &&
+        (patch.state !== undefined ||
+          patch.reason !== undefined ||
+          result.revision !== node.revision)
+      ) {
+        delete result.workspaceBlock;
+        this.store.putGoal(result);
+      }
       const root = this.goals.node(result.rootId),
         saved = this.store.savedMission(root.id);
       if (saved) {
@@ -1373,11 +1435,24 @@ export class MissionKernel {
   }
   async userControl(action: "pause" | "resume" | "stop") {
     const m = this.store.mission();
+    if (action === "resume" && this.store.get("relocationHold")) {
+      const relocation = this.store.get<{ id: string; sessionId: string }>(
+        "relocation",
+      );
+      if (relocation?.sessionId === this.options.sessionId)
+        this.store.transaction(() =>
+          releaseWorkspaceGoalBlocks(this.store, relocation.id, this.now()),
+        );
+    }
     if (!m) {
       if (action === "resume" && this.store.get("relocationHold")) {
         this.store.set("relocationHold", false);
         this.userHold = false;
         this.relocating = false;
+        this.store.unset("escapeHold");
+        this.recovery.succeeded();
+        this.store.event("user.workspace-resumed", this.options.sessionId);
+        this.changed();
         await this.tick();
         return;
       }
@@ -1948,7 +2023,17 @@ export class MissionKernel {
           }
         : {}),
     };
-    if (this.userHold || m?.humanPaused || this.store.get("relocationHold"))
+    if (this.store.get("relocationHold"))
+      return {
+        ...base,
+        state: "user_control_required",
+        control: "workspace",
+        userCommand: "/mission resume",
+        instruction:
+          workspaceResumeInstruction +
+          " Ordinary chat, goal edits, project_recover and runtime recovery do not release it. Do not create another business blocker for this pause.",
+      };
+    if (this.userHold || m?.humanPaused)
       return {
         ...base,
         state: "user_control_required",
@@ -2127,6 +2212,7 @@ export class MissionKernel {
       lifecycle: this.store.archiveCounts(),
       maintenance: !this.closing,
       held: this.userHold,
+      workspaceHeld: Boolean(this.store.get("relocationHold")),
       nextReportAt: m
         ? m.lastReportAt + this.settings.progressIntervalMs
         : undefined,

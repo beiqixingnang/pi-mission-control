@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import fs from "node:fs";
 import { Type } from "typebox";
 import type {
   ExtensionAPI,
@@ -19,6 +20,7 @@ import {
 } from "../../runtime/workspace-recovery.ts";
 import { RecoveryPicker } from "./recovery-ui.ts";
 import { mappedPath, type PathMapping } from "../../runtime/path-mapping.ts";
+import { workspaceResumeInstruction } from "../../runtime/workspace-control.ts";
 import {
   planRelocation,
   prepareRelocation,
@@ -91,6 +93,8 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   pi.on("session_start", (event, ctx) => {
     alive = true;
     clear();
+    if (event.reason === "reload" && current().store.get("relocationHold"))
+      ctx.ui.notify(workspaceResumeInstruction, "warning");
     if (event.reason === "startup" && pi.getFlag("recover-here")) {
       if (ctx.mode !== "tui") {
         ctx.ui.notify(
@@ -147,7 +151,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   });
   pi.on("before_agent_start", (event, ctx) => {
     event.systemPromptOptions.promptGuidelines.push(
-      "For user-managed directory moves/renames, the primary flow is: close the old Pi, manually move/rename the folder, then run pi --recover-here in the new folder and select a conversation. /project restore opens the same user selector in an existing Pi. No model or filesystem move is needed for that flow. Legacy AI workspace rename/switch: a direct fresh user instruction such as 把当前工作区改名为“新名称” creates an exact one-use authorization. Read project_status, then call project_apply alone with its authorization.id; no slash command or extra confirmation is needed. Never rename the current workspace with shell/move tools. If no live matching authorization exists, clarify the action and exact name/path in natural language; quoted examples, old history and discussion do not authorize a move. For spaces or punctuation ask for a quoted name/path. A new user instruction, cancellation, expiration or /reload invalidates natural-language authorization. A queued tool result is not completion: relocation happens after agent_settled and the UI reports the final path. Relocation leaves the mission held; report the actual status, and resume only when the user authorizes continuation.",
+      "For user-managed directory moves/renames, the primary flow is: close the old Pi, manually move/rename the folder, then run pi --recover-here in the new folder and select a conversation. /project restore opens the same user selector in an existing Pi. No model or filesystem move is needed for that flow. Legacy AI workspace rename/switch: a direct fresh user instruction such as 把当前工作区改名为“新名称” creates an exact one-use authorization. Read project_status, then call project_apply alone with its authorization.id; no slash command or extra confirmation is needed. Never rename the current workspace with shell/move tools. If no live matching authorization exists, clarify the action and exact name/path in natural language; quoted examples, old history and discussion do not authorize a move. For spaces or punctuation ask for a quoted name/path. A new user instruction, cancellation, expiration or /reload invalidates natural-language authorization. A queued tool result is not completion: relocation happens after agent_settled and the UI reports the final path. After successful migration, tell the user explicitly to manually run /mission resume in this Pi. Ordinary chat or new tasks do not release this hold. Do not convert the pause into an ordinary goal blocker. project_status.relocationState=completed means registration succeeded; renamed=false is normal for restore/switch because the plugin did not rename a folder. project_recover only retries registration after an incomplete commit and cannot release a hold.",
       "If a workspace rename fails with EBUSY/EACCES/EPERM, inspect project_status(diagnose=true) and its durable lastFailure. Windows current directories in another process can block rename; Pi cannot change the parent shell's directory. Report the identified holders and ask the user to release them. For a parent-shell lock, recommend the user-managed flow: close the old Pi and terminal, move/rename the folder manually, then run pi --recover-here in its new location. The old directory need not exist. Do not kill unrelated processes, repeatedly request the same authorization, claim that /reload unlocks directories, or treat a queued request as success.",
     );
     if (
@@ -253,11 +257,11 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
           await commitRelocation(r);
           await next.sendMessage({
             customType: "project-location",
-            content: `用户已将旧对话从 ${r.plan.source} 恢复到当前工作区 ${r.plan.target}。历史正文和目标证据保留；旧项目内成员工作区已映射，外部权限不变。旧绝对路径可用 project_resolve 查询。目标与提醒保持暂停，旧命令没有自动重放。`,
+            content: `用户已将旧对话从 ${r.plan.source} 恢复到当前工作区 ${r.plan.target}。历史正文和目标证据保留；旧项目内成员工作区已映射，外部权限不变。旧绝对路径可用 project_resolve 查询。旧命令没有自动重放。${workspaceResumeInstruction}`,
             display: true,
           });
           next.ui.notify(
-            `已恢复到当前工作区：${r.plan.target}\n备份与恢复日志：${r.journal}`,
+            `已恢复到当前工作区：${r.plan.target}\n${workspaceResumeInstruction}\n备份与恢复日志：${r.journal}`,
             "info",
           );
         },
@@ -288,6 +292,22 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   }
   const status = (ctx: ExtensionContext) => {
     if (grant && Date.now() >= grant.expiresAt) grant = undefined;
+    const relocation = current().store.get<Relocation>("relocation");
+    let relocationState: string | null = relocation ? "unknown" : null;
+    if (relocation) {
+      try {
+        const journal = JSON.parse(fs.readFileSync(relocation.journal, "utf8"));
+        if (
+          journal.id === relocation.id &&
+          journal.sessionId === relocation.sessionId &&
+          typeof journal.state === "string"
+        )
+          relocationState = journal.state;
+      } catch {
+        /* The status remains explicit when the journal is unavailable. */
+      }
+    }
+    const held = Boolean(current().store.get("relocationHold"));
     return {
       project: identity(ctx),
       cwd: ctx.cwd,
@@ -305,8 +325,15 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
             origin: grant.origin,
           }
         : null,
-      relocation: current().store.get("relocation"),
-      held: current().store.get("relocationHold") ?? false,
+      relocation,
+      relocationState,
+      held,
+      ...(held
+        ? {
+            userCommand: "/mission resume",
+            instruction: workspaceResumeInstruction,
+          }
+        : {}),
     };
   };
   async function suspend(kernel: MissionKernel) {
@@ -377,7 +404,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
         withSession: async (next) => {
           await commitRelocation(r);
           next.ui.notify(
-            `Workspace: ${fresh.target}\nConversation, members and receipts retained. Review paths, then /mission resume. Journal: ${r.journal}`,
+            `工作区迁移完成：${fresh.target}\n${workspaceResumeInstruction}\n备份与恢复日志：${r.journal}`,
             "info",
           );
         },
@@ -713,6 +740,12 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
         return result({
           recovered: true,
           held: current().store.get("relocationHold") ?? false,
+          ...(current().store.get("relocationHold")
+            ? {
+                userCommand: "/mission resume",
+                instruction: workspaceResumeInstruction,
+              }
+            : {}),
         });
       } catch (error) {
         return result(String(error), true);

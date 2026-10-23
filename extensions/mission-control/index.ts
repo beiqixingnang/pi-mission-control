@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { finished } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
+import { workspaceResumeInstruction } from "../../runtime/workspace-control.ts";
 import { Type, type TSchema } from "typebox";
 import {
   getAgentDir,
@@ -589,6 +590,8 @@ export default function (pi: ExtensionAPI) {
       !["write", "edit", "bash", "powershell"].includes(event.toolName)
     )
       return;
+    if (kernel.store.get("relocationHold"))
+      return { block: true, reason: workspaceResumeInstruction };
     const mission = kernel.store.mission();
     if (!mission || ["complete", "stopped"].includes(mission.status)) return;
     try {
@@ -1472,7 +1475,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_edit",
     "Update goal progress",
-    "Update a goal's definition, concrete scope, blockers, next step or estimate. Scope changes revise the goal and invalidate affected acceptances. Keep code leaves at explicit file or batch level. state:planned reopens accepted work. Cannot accept or silently exclude scope; holds and budgets remain authoritative.",
+    "Update a goal's definition, concrete scope, blockers, next step or estimate. Scope changes revise the goal and invalidate affected acceptances. Keep code leaves at explicit file or batch level. state:planned reopens accepted work. A workspace pause belongs to runtime control: ask the user to manually run /mission resume; do not create an ordinary business blocker for it. If recording this pause is necessary, pair state:blocked with blockedBy:workspace so the same user resume can release it. Independent business blockers omit blockedBy. Cannot accept or silently exclude scope; holds and budgets remain authoritative.",
     Type.Object({
       goalId: Type.String(),
       revision: Type.Integer({ minimum: 0 }),
@@ -1494,6 +1497,7 @@ export default function (pi: ExtensionAPI) {
       ),
       reason: Type.Optional(Type.String({ maxLength: 2000 })),
       nextStep: Type.Optional(Type.String({ maxLength: 2000 })),
+      blockedBy: Type.Optional(Type.Literal("workspace")),
       estimateMs: Type.Optional(
         Type.Tuple([
           Type.Integer({ minimum: 0 }),
@@ -2256,13 +2260,19 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (["pause", "resume", "stop"].includes(command)) {
+          const workspaceHeld = Boolean(k.store.get("relocationHold"));
           if (command !== "resume")
             pi.events.emit("mission-control:interrupt", {
               reason: `User ${command}`,
             });
           await k.userControl(command as any);
           if (command !== "resume" && !context.isIdle()) context.abort();
-          context.ui.notify(`Mission ${command}`, "info");
+          context.ui.notify(
+            command === "resume" && workspaceHeld
+              ? "已解除迁移暂停；原有业务阻塞和待核对任务仍按实际状态处理。"
+              : `Mission ${command}`,
+            "info",
+          );
           return;
         }
         if (command === "report") {

@@ -144,6 +144,15 @@ def main():
         wait(lambda: mission() and mission()["objective"] == run_goal, "baseline goal recorded")
         line("/mission pause")
         wait(lambda: mission()["humanPaused"], "baseline paused")
+        legacy_workspace_block = query("meta", "key='relocationHold'") == [True]
+        if legacy_workspace_block:
+            tool("goal_edit", {"goalId": mission()["id"], "revision": mission().get("revision", 0), "state": "blocked",
+                "reason": "实际配置与验证已完成；工作区迁移hold仍由用户控制，不能通过运行时no-progress恢复工具解除。"})
+            wait(lambda: any(node["id"] == mission()["id"] and node["state"] == "blocked" for node in query("goal_nodes")),
+                "installed baseline reproduced the legacy migration-only goal blocker")
+            end = time.monotonic() + .5
+            while time.monotonic() < end:
+                drain()
         original = mission().copy()
         copy_package(candidate, package)
         reload("candidate loaded through literal /reload in the same Pi process")
@@ -151,6 +160,10 @@ def main():
         assert mission()["outputTokens"] == original["outputTokens"]
         line("/mission resume")
         wait(lambda: not mission()["humanPaused"], "same goal explicitly resumed")
+        if legacy_workspace_block:
+            assert next(node for node in query("goal_nodes") if node["id"] == original["id"])["state"] != "blocked"
+            assert query("meta", "key='relocationHold'") == [False]
+            checks.append("one manual resume released the baseline legacy goal blocker after same-process reload")
         previous_goals = {node["id"] for node in query("goal_nodes")}
         tool("goal_plan", {"goals": [
             {"key": "stage", "parentId": original["id"], "objective": "Dedicated scope test stage", "criteria": ["File batch accepted"]},
@@ -632,6 +645,8 @@ def manual_recovery_round_trip(home, config, checks, reports, environment, fixtu
                 assert db.execute("SELECT text FROM notes WHERE name='index'").fetchone() == (note,)
             assert json.loads((database.parent / "compaction-summary.json").read_text())["model"] == "mission-fixture/summary"
             checks.append("manual recovery retained accepted evidence, notes and explicit summary routing without replay")
+            wait(lambda: "手动执行 /mission resume" in visible and "迁移后待恢复" in visible,
+                "recovery completion explicitly showed the manual resume command and accurate held status")
             (home / "test-session.json").write_text(json.dumps(config, ensure_ascii=False, indent=2))
             previous = len(events())
             line("/reload")
@@ -664,6 +679,50 @@ def manual_recovery_round_trip(home, config, checks, reports, environment, fixtu
                 return False
 
             wait(read_finished, "restored workspace accepted a model file read after reload instead of reopening the startup picker")
+
+            def last_tool(name):
+                for row in reversed(Path(config["sessionFile"]).read_text().splitlines()[-15:]):
+                    message = json.loads(row).get("message", {})
+                    if message.get("role") == "toolResult" and message.get("toolName") == name:
+                        return message
+                return None
+
+            marker = "RESTORED_WRITE_" + uuid.uuid4().hex
+            write_args = {"path": "resume-confirmation.txt", "content": marker}
+            line("V2_TEST:" + json.dumps({"op": "tool", "name": "write", "args": write_args, "noRepeatWake": True}))
+            wait(lambda: last_tool("write") and last_tool("write").get("isError") and "/mission resume" in json.dumps(last_tool("write")),
+                "a real model write remained blocked by migration control before manual resume")
+            assert not (destination / "resume-confirmation.txt").exists() or (destination / "resume-confirmation.txt").read_text() != marker
+            with sqlite3.connect(database) as db:
+                row = db.execute("SELECT data FROM meta WHERE key='mission'").fetchone()
+                current_goal = json.loads(row[0]) if row else None
+            if current_goal and current_goal["status"] not in ["complete", "stopped"]:
+                line("V2_TEST:" + json.dumps({"op": "tool", "name": "goal_edit", "args": {
+                    "goalId": current_goal["id"], "revision": current_goal.get("revision", 0), "state": "blocked",
+                    "blockedBy": "workspace", "reason": "等待本次迁移确认"}, "noRepeatWake": True}))
+                wait(lambda: last_tool("goal_edit") and not last_tool("goal_edit").get("isError"),
+                    "workspace-only blocker was recorded through the real model schema")
+            line("/mission resume")
+
+            def resumed():
+                with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
+                    row = db.execute("SELECT data FROM meta WHERE key='relocationHold'").fetchone()
+                    if row != ("false",):
+                        return False
+                    if not current_goal:
+                        return True
+                    row = db.execute("SELECT data FROM goal_nodes WHERE id=?", (current_goal["id"],)).fetchone()
+                    return not row or json.loads(row[0])["state"] != "blocked"
+
+            wait(resumed, "one literal user resume released the migration hold and its associated goal blocker")
+            if not current_goal or current_goal["status"] in ["complete", "stopped"]:
+                line("V2_TEST:" + json.dumps({"op": "tool", "name": "goal_start", "args": {
+                    "objective": "Verify recovered workspace manual resume " + str(cycle), "criteria": ["README-style write succeeds"]}, "noRepeatWake": True}))
+                wait(lambda: last_tool("goal_start") and not last_tool("goal_start").get("isError"),
+                    "a new authorized goal could start after the manual workspace confirmation")
+            line("V2_TEST:" + json.dumps({"op": "tool", "name": "write", "args": write_args, "noRepeatWake": True}))
+            wait(lambda: (destination / "resume-confirmation.txt").exists() and (destination / "resume-confirmation.txt").read_text() == marker,
+                "the same restored Pi could write an actual project file after one manual resume")
         finally:
             if process.poll() is None:
                 line("/quit")
