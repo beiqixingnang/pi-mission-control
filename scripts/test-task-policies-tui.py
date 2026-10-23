@@ -494,7 +494,7 @@ def main():
         rename_ancestry = [config["id"]]
         for destination in [home / "workspace 中文 rename", original_workspace]:
             source_workspace, source_session_id = workspace, config["id"]
-            line('请把当前工作区文件夹改名为“' + destination.name + '”，帮我执行。')
+            line('请把当前本地工作区文件夹改名为“' + destination.name + '”，并保留当前对话。')
 
             def relocation_ready():
                 if not lifecycle_trace.exists():
@@ -519,6 +519,11 @@ def main():
             assert not failed and "Decoder and immediate mapping" in text, text
             reload("renamed workspace retained notes, goals and summary routing through literal /reload")
             assert memory_rows("SELECT text FROM notes WHERE name='index'") == [(relocation_note,)]
+            failed, text = call_tool("project_status", {"diagnose": True})
+            project_status = json.loads(text)
+            assert not failed and project_status["cwd"] == str(workspace), text
+            assert project_status["locks"]["supported"] is False and project_status["locks"]["exhaustive"] is False
+            checks.append("reloaded project_status accepts diagnose from the model and degrades explicitly on non-Windows")
             checks.append("workspace continuation preserved accepted goal, relative file tools and memory data")
             identity.write_text(json.dumps({**config, "workspace": str(workspace)}, ensure_ascii=False, indent=2))
         assert workspace == original_workspace and len(set(rename_ancestry)) == 3

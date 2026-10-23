@@ -42,6 +42,17 @@ export interface Relocation {
   renamed: boolean;
   memoryDirectory?: string;
 }
+export class RelocationPreparationError extends Error {
+  code?: string;
+  journal: string;
+  rolledBack = true;
+  constructor(cause: unknown, journal: string) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "RelocationPreparationError";
+    this.code = (cause as NodeJS.ErrnoException)?.code;
+    this.journal = journal;
+  }
+}
 export function inside(root: string, value: string) {
   const relative = path.relative(root, value);
   return (
@@ -420,7 +431,12 @@ export async function prepareRelocation(
     return r;
   } catch (error) {
     await rollbackRelocation(r);
-    throw error;
+    await writeRelocationJournal(
+      r,
+      "rolled-back",
+      error instanceof Error ? error.message : String(error),
+    );
+    throw new RelocationPreparationError(error, r.journal);
   }
 }
 export async function commitRelocation(r: Relocation) {

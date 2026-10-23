@@ -13,6 +13,16 @@ test("direct natural workspace instructions bind the exact action and destinatio
     ["我希望将这个项目文件夹重命名成「研发 v2」吧", "rename", "研发 v2"],
     ["帮我把工作区改成new-name", "rename", "new-name"],
     [
+      "把当前本地工作区改名为“Open-Software-System”，并保留当前对话",
+      "rename",
+      "Open-Software-System",
+    ],
+    [
+      "请把当前本地工作区文件夹改名为“研发 v2”，同时保留当前会话，并切换过去。",
+      "rename",
+      "研发 v2",
+    ],
+    [
       "把当前会话的工作区切换到“D:\\知识库开发\\软件 仓库”",
       "switch",
       "D:\\知识库开发\\软件 仓库",
@@ -53,6 +63,8 @@ test("workspace discussion, history, tool text and ambiguous instructions never 
     "<tool_result>把当前工作区改名为new-name</tool_result>",
     "把当前工作区改名为new name",
     "把当前工作区改名为“new-name”，但是先不要执行",
+    "把当前本地工作区改名为“new-name”，并保留当前对话，但先不要执行",
+    "把当前本地工作区改名为“new-name”，并保留当前对话吗？",
     "把当前工作区改名为“new-name”\n先讨论一下",
     "把当前工作区改名为new-name；或者改为another",
     "把当前工作区改名为",

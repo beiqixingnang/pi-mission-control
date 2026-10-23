@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { Type } from "typebox";
 import type {
   ExtensionAPI,
@@ -7,12 +8,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { MissionKernel } from "../../runtime/kernel.ts";
 import { projectRequest } from "../../runtime/project-request.ts";
+import { workspaceLocks } from "../../runtime/workspace-locks.ts";
 import {
   planRelocation,
   prepareRelocation,
   commitRelocation,
   rollbackRelocation,
   writeRelocationJournal,
+  RelocationPreparationError,
   type RelocationPlan,
   type Relocation,
 } from "../../runtime/relocation.ts";
@@ -38,6 +41,16 @@ interface Grant {
   expiresAt: number;
   ctx: ExtensionContext;
   origin: "command" | "human-input";
+}
+interface RelocationFailure {
+  code: string;
+  message: string;
+  at: string;
+  plan: RelocationPlan;
+  outcome: "not-applied" | "recovery-required";
+  rolledBack: boolean;
+  journal?: string;
+  resume?: { directory: string; sessionFile?: string };
 }
 
 export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
@@ -103,6 +116,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   pi.on("before_agent_start", (event, ctx) => {
     event.systemPromptOptions.promptGuidelines.push(
       "Workspace rename/switch: a direct fresh user instruction such as 把当前工作区改名为“新名称” creates an exact one-use authorization. Read project_status, then call project_apply alone with its authorization.id; no slash command or extra confirmation is needed. Never rename the current workspace with shell/move tools. If no live matching authorization exists, clarify the action and exact name/path in natural language; quoted examples, old history and discussion do not authorize a move. For spaces or punctuation ask for a quoted name/path. A new user instruction, cancellation, expiration or /reload invalidates natural-language authorization. A queued tool result is not completion: relocation happens after agent_settled and the UI reports the final path. Relocation leaves the mission held; report the actual status, and resume only when the user authorizes continuation.",
+      "If a workspace rename fails with EBUSY/EACCES/EPERM, inspect project_status(diagnose=true) and its durable lastFailure. Windows current directories in another process can block rename; Pi cannot change the parent shell's directory. Report the identified holders and ask the user to release them. For a parent shell, exit Pi safely, change that shell to lastFailure.resume.directory and set [Environment]::CurrentDirectory to that same outside path, then restore the exact original conversation with pi --session and lastFailure.resume.sessionFile before requesting rename again. Do not kill unrelated processes, repeatedly request the same authorization, claim that /reload unlocks directories, or treat a queued request as success.",
     );
     if (
       !grant ||
@@ -136,6 +150,9 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
       sessionId: ctx.sessionManager.getSessionId(),
       sessionFile: ctx.sessionManager.getSessionFile(),
       busy: running || applying || Boolean(pending),
+      lastFailure:
+        current().store.get<RelocationFailure>("projectRelocationFailure") ??
+        null,
       authorization: grant
         ? {
             id: grant.id,
@@ -166,6 +183,8 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   ) {
     if (running) throw new Error("Workspace relocation already running");
     const kernel = current();
+    const originalSessionId = ctx.sessionManager.getSessionId();
+    const sourceSessionFile = ctx.sessionManager.getSessionFile();
     running = true;
     let relocation: Relocation | undefined,
       attempted = false,
@@ -183,6 +202,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
       const fresh = planRelocation(plan.action, plan.target, ctx.cwd);
       if (fresh.source !== plan.source || fresh.target !== plan.target)
         throw new Error("Workspace changed since authorization");
+      kernel.store.unset("projectRelocationFailure");
       await suspend(kernel);
       if (!ctx.isIdle()) {
         ctx.abort();
@@ -226,8 +246,11 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
         );
       }
     } catch (error) {
-      if (relocation && !attempted && !cancelled)
+      let rolledBack = error instanceof RelocationPreparationError;
+      if (relocation && !attempted && !cancelled) {
         await rollbackRelocation(relocation);
+        rolledBack = true;
+      }
       if (relocation && attempted) {
         await writeRelocationJournal(
           relocation,
@@ -238,9 +261,51 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
           `Workspace recovery: pi --session ${JSON.stringify(relocation.sessionFile)} ; journal ${relocation.journal}`,
         );
       }
+      const code =
+        (error as NodeJS.ErrnoException)?.code ?? "RELOCATION_FAILED";
+      const failure: RelocationFailure = {
+        code,
+        message: error instanceof Error ? error.message : String(error),
+        at: new Date().toISOString(),
+        plan,
+        outcome: attempted ? "recovery-required" : "not-applied",
+        rolledBack,
+        journal:
+          relocation?.journal ??
+          (error instanceof RelocationPreparationError
+            ? error.journal
+            : undefined),
+        ...(["EBUSY", "EACCES", "EPERM"].includes(code)
+          ? {
+              resume: {
+                directory: path.dirname(plan.source),
+                sessionFile: sourceSessionFile,
+              },
+            }
+          : {}),
+      };
       try {
+        kernel.store.set("projectRelocationFailure", failure);
+        kernel.store.event(
+          "project.relocation-failed",
+          originalSessionId,
+          failure,
+        );
+      } catch {
+        // A failed replacement may already have disposed the original store.
+        // Its switch-failed journal remains the recovery authority.
+      }
+      try {
+        pi.sendMessage(
+          {
+            customType: "project-relocation-result",
+            content: JSON.stringify({ ok: false, ...failure }),
+            display: false,
+          },
+          { triggerTurn: false },
+        );
         ctx.ui.notify(
-          `${String(error)}${relocation && attempted ? `\nRecovery session: ${relocation.sessionFile}\nJournal: ${relocation.journal}` : ""}`,
+          `${failure.message}${["EBUSY", "EACCES", "EPERM"].includes(code) ? "\n工作区改名未完成：目录可能被其他进程占用，或权限不足。可用 project_status(diagnose=true) 查询当前目录占用者。若为启动 Pi 的父 Shell，需安全退出 Pi、让父 Shell 切到源目录之外，再用原会话文件恢复；/reload 本身不能解除外部占用。" : ""}${failure.rolledBack ? "\n迁移准备已回滚，原会话和原路径保留。" : ""}${relocation && attempted ? `\nRecovery session: ${relocation.sessionFile}\nJournal: ${relocation.journal}` : ""}`,
           "error",
         );
       } catch {
@@ -286,10 +351,21 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
     name: "project_status",
     label: "Project status",
     description:
-      "Read workspace identity, relocation hold and one-use user authorization.",
-    parameters: Type.Object({}),
-    async execute(_id, _args, _signal, _update, ctx) {
-      return result(status(ctx));
+      "Read workspace identity, relocation hold, one-use authorization and the last failed migration. diagnose=true performs a bounded read-only Windows process-directory probe after EBUSY; it does not unlock directories, change parent-shell state or kill processes. A holder list is best-effort, not a full file-handle scan.",
+    parameters: Type.Object({ diagnose: Type.Optional(Type.Boolean()) }),
+    async execute(_id, args, signal, _update, ctx) {
+      const state = status(ctx);
+      return result(
+        args.diagnose
+          ? {
+              ...state,
+              locks: await workspaceLocks(
+                state.lastFailure?.plan.source ?? ctx.cwd,
+                signal,
+              ),
+            }
+          : state,
+      );
     },
   });
   pi.registerTool({

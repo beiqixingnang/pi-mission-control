@@ -25,7 +25,7 @@ export function projectRequest(text: string): ProjectRequest | undefined {
   const prefix =
     "(?:(?:请你|请|麻烦你|麻烦|帮我|我希望|我想)(?:帮我)?)?(?:把|将)?";
   const workspace =
-    "(?:当前|这个|本)?(?:工作区(?:文件夹|目录)?|项目文件夹|项目目录|仓库文件夹|仓库目录|文件夹|目录)";
+    "(?:当前|这个|本)?(?:本地)?(?:工作区(?:文件夹|目录)?|项目文件夹|项目目录|仓库文件夹|仓库目录|文件夹|目录)";
   const rename = new RegExp(
     `^${prefix}${workspace}(?:的名字|的名称)?(?:重命名为|重命名成|重命名叫|改名为|改名成|改名叫|改为|改成)(.+)$`,
     "u",
@@ -44,13 +44,17 @@ export function projectRequest(text: string): ProjectRequest | undefined {
 
   // Sentence suffixes are outside quoted targets. Quoting preserves spaces and
   // punctuation in names, and makes a following discussion fail closed.
-  const targetText = raw
-    .trim()
-    .replace(
-      /(?:[，,]\s*)?(?:帮我执行|直接执行|请执行|并切换过去|并切换到新目录|谢谢|吧)[。！!]?$/u,
-      "",
-    )
-    .trim();
+  let targetText = raw.trim();
+  for (let i = 0; i < 5; i++) {
+    const next = targetText
+      .replace(
+        /(?:[，,]\s*)?(?:(?:并|同时)?保留当前(?:对话|会话)|帮我执行|直接执行|请执行|并切换过去|并切换到新目录|谢谢|吧)[。！!]?$/u,
+        "",
+      )
+      .trim();
+    if (next === targetText) break;
+    targetText = next;
+  }
   const quoted =
     /^(?:"([^"\r\n]+)"|'([^'\r\n]+)'|“([^“”\r\n]+)”|「([^「」\r\n]+)」)[。！!.]?$/u.exec(
       targetText,

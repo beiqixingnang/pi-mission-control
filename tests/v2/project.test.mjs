@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { hostDir } from "../../scripts/host.mjs";
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -612,6 +614,96 @@ test(
     }),
 );
 
+test(
+  "Windows external cwd lock is diagnosed without losing the session and a later retry succeeds",
+  {
+    skip: process.platform !== "win32",
+    timeout: 30000,
+  },
+  () =>
+    harness(async (h) => {
+      await h.tool("context_note", {
+        action: "write",
+        name: "index",
+        text: "BUSY_ORIGINAL_NOTE",
+      });
+      const original = h.runtime.session.sessionId;
+      const blocker = spawn(
+        process.execPath,
+        ["-e", "process.stdout.write('READY'); process.stdin.resume()"],
+        {
+          cwd: h.source,
+          windowsHide: true,
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+      try {
+        await once(blocker.stdout, "data");
+        process.chdir(h.source);
+        await h.command("/project rename target");
+        assert.equal(h.runtime.cwd, h.source);
+        assert.equal(h.runtime.session.sessionId, original);
+        assert.equal(fs.existsSync(h.target), false);
+        const status = JSON.parse(
+          (await h.tool("project_status", { diagnose: true })).content[0].text,
+        );
+        assert.equal(status.lastFailure.code, "EBUSY");
+        assert.equal(status.lastFailure.rolledBack, true);
+        assert.equal(status.lastFailure.outcome, "not-applied");
+        assert.equal(status.locks.supported, true);
+        assert.ok(
+          status.locks.holders.some(
+            (holder) => holder.pid === blocker.pid && holder.cwd === h.source,
+          ),
+        );
+        assert.equal(
+          blocker.exitCode,
+          null,
+          "Diagnosis must not kill the external process",
+        );
+        assert.equal(
+          JSON.parse(
+            (await h.tool("context_note", { action: "read", name: "index" }))
+              .content[0].text,
+          ).text,
+          "BUSY_ORIGINAL_NOTE",
+        );
+        const journal = JSON.parse(fs.readFileSync(status.lastFailure.journal));
+        assert.equal(journal.state, "rolled-back");
+        assert.match(journal.error, /EBUSY/);
+        assert.ok(
+          h.runtime.session.sessionManager
+            .getEntries()
+            .some((entry) => entry.customType === "project-relocation-result"),
+        );
+        await h.restart();
+        assert.equal(
+          JSON.parse((await h.tool("project_status")).content[0].text)
+            .lastFailure.code,
+          "EBUSY",
+        );
+      } finally {
+        const stopped = once(blocker, "exit");
+        blocker.kill();
+        await stopped;
+      }
+      await h.command("/project rename target");
+      assert.equal(h.runtime.cwd, h.target, JSON.stringify(h.notices));
+      assert.equal(
+        JSON.parse((await h.tool("project_status")).content[0].text)
+          .lastFailure,
+        null,
+      );
+      assert.equal(
+        JSON.parse(
+          (await h.tool("context_note", { action: "read", name: "index" }))
+            .content[0].text,
+        ).text,
+        "BUSY_ORIGINAL_NOTE",
+      );
+    }),
+);
+
 for (const action of ["rename", "switch"]) {
   test(
     `natural-language ${action} is applied by the lead after settlement without user slash commands`,
@@ -632,7 +724,7 @@ for (const action of ["rename", "switch"]) {
           });
           await h.input(
             action === "rename"
-              ? "请把当前工作区文件夹改名为“软件 仓库-新”，帮我执行。"
+              ? "请把当前本地工作区文件夹改名为“软件 仓库-新”，并保留当前对话"
               : `把当前会话的工作区切换到“${h.target}”`,
             action === "switch" ? "rpc" : "interactive",
           );

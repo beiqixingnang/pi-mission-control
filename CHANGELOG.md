@@ -1,3 +1,10 @@
+# 2.5.6 — actionable Windows workspace lock failures (2026-10-23)
+
+- Record failed relocation outcomes, original error codes and rollback journals in the existing session store and transcript. A queued request no longer leaves the model without the final failure evidence; retain the record across reload and clear it on the next migration attempt.
+- Add project_status(diagnose=true), an optional bounded, read-only Windows current-directory probe. Report matching processes, including a parent shell, without changing their directories or terminating them. Directory locks still require their owner to release them.
+- Accept direct requests containing 当前本地工作区 and the benign suffix 并保留当前对话/会话, while retaining the discussion, quote and cancellation boundaries.
+- Reproduce EBUSY with an actual Windows process holding the test directory; verify rollback, durable failure, diagnosis, preserved notes and successful retry after that test process exits. Keep the dedicated WSL same-process reload and rename round trip.
+
 # 2.5.5 — Pi1.4 development baseline and source reference (2026-10-23)
 
 - Require Pi1.4.0 or newer within 1.x, refresh every Pi package in the dependency lock to1.4.0, and run CI only against1.4.0. Verification rejects a stale1.3 host rather than silently selecting it.

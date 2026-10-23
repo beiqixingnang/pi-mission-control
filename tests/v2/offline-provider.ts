@@ -245,13 +245,13 @@ export default function (pi: ExtensionAPI) {
               .filter(
                 (text: string) =>
                   text.startsWith("V2_TEST:") ||
-                  /^(?:请把当前工作区文件夹改名为|把当前会话的工作区切换到|Please rename the current workspace to)/u.test(
+                  /^(?:(?:请)?把当前(?:本地)?工作区(?:文件夹)?改名为|把当前会话的工作区切换到|Please rename the current workspace to)/u.test(
                     text,
                   ),
               )
               .at(-1) ?? "";
           if (
-            /^(?:请把当前工作区文件夹改名为|把当前会话的工作区切换到|Please rename the current workspace to)/u.test(
+            /^(?:(?:请)?把当前(?:本地)?工作区(?:文件夹)?改名为|把当前会话的工作区切换到|Please rename the current workspace to)/u.test(
               workspaceUser,
             )
           ) {
