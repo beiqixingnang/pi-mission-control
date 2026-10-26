@@ -18,6 +18,41 @@ const success = {
     },
   ],
 };
+
+test("wrapped summary outages retry the same bounded block instead of being subdivided as context overflow", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wrapped-summary-"));
+  const wrapper =
+    "Context overflow recovery failed: Turn prefix summarization failed: upstream_error: Upstream service temporarily unavailable";
+  let requests = 0;
+  const progress = [],
+    retries = [];
+  assert.equal(summaryFailureKind(wrapper), "provider");
+  try {
+    const result = await summarizeChunks(
+      ["Synthetic audit evidence. ".repeat(120)],
+      {
+        model: "fixture/model",
+        directory,
+        maxInputChars: 8000,
+        maxOutputChars: 500,
+        retryBudget: { remaining: 1, used: 0 },
+        wait: async () => {},
+        onRetry: (event) => retries.push(event),
+        onProgress: (event) => progress.push(event),
+        complete: async () =>
+          ++requests === 1
+            ? { stopReason: "error", errorMessage: wrapper, content: [] }
+            : success,
+      },
+    );
+    assert.match(result, /Complete factual checkpoint/);
+    assert.equal(requests, 2);
+    assert.equal(retries.length, 1);
+    assert.ok(!progress.some((event) => event.stage === "split"));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 const streamError =
   "OpenAI Responses stream ended before a terminal response event";
 

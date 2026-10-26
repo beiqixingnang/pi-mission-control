@@ -2,13 +2,17 @@ import { randomUUID } from "node:crypto";
 import type { Store } from "./store.ts";
 import type { Recovery, Settings } from "./types.ts";
 import { cleanText } from "./public.ts";
-import { providerFailureKind } from "./reconnect.ts";
+import {
+  providerFailureKind,
+  compactionFailureKind,
+  compactionFailureCause,
+} from "./reconnect.ts";
 
 // Custom summary failures are reported separately from Pi's generic cancel
 // receipt. Only an explicit compaction cancellation represents user intent.
 const cancelledCompaction = (reason: string) =>
   /^Compaction (?:cancelled|canceled)(?: by\b.*)?$|^Compaction failed or was cancelled$/i.test(
-    reason,
+    compactionFailureCause(reason),
   );
 
 /** Durable failure bursts; exhausted bursts cool down rather than abandoning approved work. */
@@ -238,7 +242,8 @@ export class LeadRecovery {
     value.reason = cleanText(reason, 1500);
     value.phase = "compaction_failed";
     value.nextAt =
-      cancelledCompaction(reason) || providerFailureKind(reason) !== "transient"
+      cancelledCompaction(reason) ||
+      compactionFailureKind(reason) !== "transient"
         ? undefined
         : this.now() + this.delay(value);
     if (value.nextAt !== undefined)
@@ -265,7 +270,7 @@ export class LeadRecovery {
         (value.phase === "exhausted" ||
           (value.phase === "compaction_failed" &&
             !cancelledCompaction(value.reason) &&
-            providerFailureKind(value.reason) === "transient")) &&
+            compactionFailureKind(value.reason) === "transient")) &&
         value.nextAt === undefined
       )
         value.nextAt = this.now() + this.delay(value);
@@ -290,6 +295,16 @@ export class LeadRecovery {
           ? "Previous compaction did not complete. Inspect compaction_model diagnostics and run /compact to resume cached work."
           : value.reason;
       this.save(value, "compaction-interrupted");
+    }
+    if (
+      value?.phase === "compaction_failed" &&
+      value.nextAt === undefined &&
+      !cancelledCompaction(value.reason) &&
+      compactionFailureKind(value.reason) === "transient"
+    ) {
+      value.nextAt = this.now() + this.delay(value);
+      value.cooldowns = (value.cooldowns ?? 0) + 1;
+      this.save(value, "compaction-retry-restored");
     }
     if (value?.phase === "probing") {
       value.phase = "cooldown";

@@ -1,5 +1,9 @@
 import type { SummaryResponse } from "./summarize.ts";
-import { contextLimitError, providerFailureKind } from "./reconnect.ts";
+import {
+  contextLimitError,
+  providerFailureKind,
+  compactionFailureCause,
+} from "./reconnect.ts";
 
 export interface SummaryRetryBudget {
   remaining: number;
@@ -17,6 +21,7 @@ export interface SummaryRetryEvent {
 export function summaryFailureKind(
   reason: string,
 ): SummaryRetryEvent["kind"] | undefined {
+  reason = compactionFailureCause(reason);
   if (
     contextLimitError(reason) ||
     providerFailureKind(reason) === "external" ||

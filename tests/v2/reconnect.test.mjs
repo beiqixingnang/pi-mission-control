@@ -8,7 +8,48 @@ import {
   contextLimitError,
   waitForReconnect,
   providerFailureKind,
+  compactionFailureKind,
 } from "../../runtime/reconnect.ts";
+
+test("compaction wrappers expose the nested failure without hiding genuine context or account errors", () => {
+  for (const wrapper of [
+    "",
+    "Context overflow recovery failed: ",
+    "Auto-compaction failed: ",
+    "Context overflow recovery failed: Turn prefix summarization failed: ",
+    "Context overflow recovery failed: Summarization failed: ",
+    "Summary request was truncated after bounded subdivision: Error: Context overflow recovery failed: Summarization failed: ",
+  ]) {
+    assert.equal(
+      compactionFailureKind(
+        wrapper + "upstream_error: Upstream service temporarily unavailable",
+      ),
+      "transient",
+    );
+    assert.equal(
+      compactionFailureKind(wrapper + "429 Too many requests"),
+      "transient",
+    );
+    assert.equal(
+      compactionFailureKind(
+        wrapper + "Your input exceeds the context window of this model",
+      ),
+      "context",
+    );
+    assert.equal(
+      compactionFailureKind(wrapper + "401 invalid API key"),
+      "external",
+    );
+    assert.equal(
+      compactionFailureKind(wrapper + "insufficient_quota"),
+      "external",
+    );
+  }
+  assert.equal(
+    contextLimitError("Your input exceeds the context window of this model"),
+    true,
+  );
+});
 const { loadExtensions, createExtensionRuntime } = await import(
   pathToFileURL(path.join(hostDir, "dist/core/extensions/loader.js"))
 );

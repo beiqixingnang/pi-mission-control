@@ -68,8 +68,10 @@ def main():
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 140, 0, 0))
     environment = {key: value for key, value in os.environ.items() if not any(secret in key.upper() for secret in ["API_KEY", "AUTH_TOKEN", "ACCESS_TOKEN"])}
     lifecycle_trace = reports / ("tui-lifecycle-" + uuid.uuid4().hex[:8] + ".jsonl")
+    summary_control = reports / ("summary-control-" + uuid.uuid4().hex[:8] + ".json")
+    summary_trace = reports / ("summary-requests-" + uuid.uuid4().hex[:8] + ".jsonl")
     environment.update(PI_CODING_AGENT_DIR=str(agent), PI_OFFLINE="1", TERM="xterm-256color", COLUMNS="140", LINES="42",
-        MC_FIXTURE_LIFECYCLE_TRACE=str(lifecycle_trace))
+        MC_FIXTURE_LIFECYCLE_TRACE=str(lifecycle_trace), MC_FIXTURE_SUMMARY_CONTROL=str(summary_control), MC_FIXTURE_SUMMARY_TRACE=str(summary_trace))
     process = subprocess.Popen([shutil.which("pi"), "--offline", "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates",
         "--tools", "*",
         "-e", str(fixture), "--provider", "mission-fixture", "--model", "model", "--thinking", "off", *arguments],
@@ -449,6 +451,46 @@ def main():
 
         line("/mission resume")
         wait(lambda: not mission()["humanPaused"], "test mission resumed for root-identity regression")
+
+        # Only the dedicated test agent's summary preferences are reset. This
+        # reproduces an existing main conversation with no model override.
+        for summary_config in [database.parent / "compaction-summary.json", agent / "compaction-summary.json"]:
+            summary_config.unlink(missing_ok=True)
+        summary_control.write_text(json.dumps({"mode": "success"}))
+        failed, text = call_tool("compaction_model", {"action": "status", "target": "lead"})
+        summary_status = json.loads(text)
+        assert not failed and summary_status["engine"] == "chunked" and summary_status["modelSelection"] == "current-model"
+        compaction_salt = uuid.uuid4().hex
+        for batch in range(3):
+            failed, text = call_tool("fixture_large_read", {"index": batch + 5000, "salt": compaction_salt})
+            assert not failed
+        summary_before = len(attempts(summary_trace))
+        before_checkpoint = len(compactions())
+        line("/compact")
+        wait(lambda: len(compactions()) == before_checkpoint + 1, "an existing unconfigured conversation compacted through the default chunked path")
+        requests = attempts(summary_trace)[summary_before:]
+        assert len(requests) > 1 and all(request["inputChars"] <= summary_status["maxInputChars"] for request in requests)
+        checks.append("default compaction sent multiple bounded requests without a summary-model configuration")
+        quiet(.4)
+        editor_ready("editor acknowledged input after default chunked compaction")
+        for batch in range(3):
+            failed, text = call_tool("fixture_large_read", {"index": batch + 6000, "salt": uuid.uuid4().hex})
+            assert not failed
+        before_checkpoint = len(compactions())
+        summary_control.write_text(json.dumps({"mode": "wrapped-outage"}))
+        overflow_trace = reports / ("summary-overflow-" + uuid.uuid4().hex[:8] + ".jsonl")
+        line("V2_TEST:" + json.dumps({"op": "flaky", "key": uuid.uuid4().hex, "failures": 1,
+            "traceFile": str(overflow_trace), "error": "Your input exceeds the context window of this model. Please adjust your input and try again."}, separators=(",", ":")))
+        wait(lambda: recovery() and recovery()["phase"] == "compaction_failed" and "Context overflow recovery failed:" in recovery()["reason"],
+            "the screenshot's exact wrapped upstream outage reached persistent compaction recovery")
+        saved_summary_fault = recovery().copy()
+        assert saved_summary_fault["nextAt"] > 0
+        reload("wrapped compaction failure retained its automatic retry through literal /reload")
+        summary_control.write_text(json.dumps({"mode": "success"}))
+        wait(lambda: len(compactions()) > before_checkpoint and not recovery(), "healthy default compaction resumed automatically after the wrapped outage without a user continue", timeout=40)
+        assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)]
+        checks.append("compaction recovery preserved summary mode and existing goal acceptance")
+        summary_control.unlink()
         selected = mission()["id"]
         marker = "Unselected root identity regression " + uuid.uuid4().hex[:8]
         failed, text = call_tool("goal_plan", {"goals": [{"objective": marker, "criteria": ["Evidence belongs to this exact root"]}]})

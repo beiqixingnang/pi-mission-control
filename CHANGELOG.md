@@ -1,3 +1,9 @@
+# 2.6.3 — chunked summary compaction by default (2026-10-26)
+
+- Use bounded chunked summaries in unconfigured summary-mode conversations with their current model. Explicit summary routes remain authoritative, notes mode stays independent, and an explicit off setting retains Pi native compaction.
+- Classify the nested summary error behind Pi overflow/auto-compaction wrappers so temporary upstream outages retry cached compaction after a durable cooldown. Genuine summary context rejection, account errors and user cancellation stay stopped.
+- Reload re-arms older wrapped transient failures that lost their retry schedule, preserving the recovery identity, goal budget and user pause.
+
 # 2.6.2 — user-controlled context modes (2026-10-23)
 
 - Default new lead conversations to summary and new managed members to notes, preserving existing session selections across reload and migration.

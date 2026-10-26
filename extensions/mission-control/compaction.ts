@@ -214,7 +214,12 @@ export default function (pi: ExtensionAPI) {
           "This member has no summary-model route while the lead uses a custom summary model. Configure compaction_model target=member; inference-model fallback is blocked.",
         );
     }
-    return model;
+    if (model) return model;
+    if (!ctx.model?.provider || !ctx.model?.id)
+      throw new Error(
+        "No current model is available for default chunked compaction. Select a model or configure compaction_model.",
+      );
+    return `${ctx.model.provider}/${ctx.model.id}`;
   };
   let diagnostic: Record<string, unknown> = {};
   const debug = (
@@ -467,9 +472,16 @@ export default function (pi: ExtensionAPI) {
     const budgets = model ? summaryBudgets(model, r.config) : undefined;
     return {
       target: scope,
+      engine: r.config.disabled ? "native" : "chunked",
+      modelSelection:
+        spec && !r.exists && !process.env.PI_COMPACTION_SUMMARY_MODEL?.trim()
+          ? "current-model"
+          : "configured",
       model:
         spec ??
-        (routingError ? "Blocked: summary route missing" : "Pi default"),
+        (routingError
+          ? "Blocked: summary route missing"
+          : "Pi native (explicitly disabled chunking)"),
       routingError,
       maxTokens: budgets?.maxTokens ?? r.config.maxTokens ?? 4096,
       maxInputChars: budgets?.maxInputChars ?? r.config.maxInputChars ?? 24000,
@@ -513,7 +525,7 @@ export default function (pi: ExtensionAPI) {
             ? "environment"
             : r.config.model
               ? "legacy config file"
-              : "Pi default"
+              : "current model (chunked default)"
           : "scoped config file",
     };
   }
@@ -619,7 +631,7 @@ export default function (pi: ExtensionAPI) {
       label: "Summary model settings",
       executionMode: "sequential",
       description:
-        "Inspect or set this lead session's summary model, or defaults for future member sessions. target=lead/member; action=status/set/off. Configured provider/model-id only; scopes remain separate. This does not compact history or alter the main inference model.",
+        "Inspect or set this lead session's summary model, or defaults for future member sessions. Summary mode uses bounded chunked compaction by default with the current model when no independent route is configured. Explicit configured routes remain authoritative; their failures never fall back to the inference model. target=lead/member; action=status/set/off. off explicitly opts out of chunking into Pi native compaction. This does not compact history, select summary/notes mode or alter the main inference model.",
       parameters: Type.Object({
         action: Type.Optional(
           Type.Union([

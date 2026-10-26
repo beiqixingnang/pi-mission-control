@@ -120,6 +120,109 @@ const until = async (fn) => {
   throw Error("Timed out waiting for notes fixture");
 };
 
+test(
+  "an unconfigured real Pi conversation uses bounded chunked compaction and retains that default after reload",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const previous = process.env.MC_FIXTURE_SUMMARY;
+      const previousTrace = process.env.MC_FIXTURE_SUMMARY_TRACE;
+      const trace = path.join(h.cwd, "default-chunked-requests.jsonl");
+      process.env.MC_FIXTURE_SUMMARY = "success";
+      process.env.MC_FIXTURE_SUMMARY_TRACE = trace;
+      try {
+        h.session.settingsManager.applyOverrides({
+          compaction: { enabled: true, keepRecentTokens: 256 },
+        });
+        for (let i = 0; i < 4; i++)
+          await h.session.prompt(
+            "V2_TEST:" +
+              JSON.stringify({
+                op: "answer",
+                text:
+                  `SYNTHETIC_BATCH_${i} ` +
+                  "function reviewed_file() { return 173; }\n".repeat(3000),
+              }),
+          );
+        const status = JSON.parse(
+          (
+            await h.tool("compaction_model", {
+              action: "status",
+              target: "lead",
+            })
+          ).content[0].text,
+        );
+        assert.equal(status.engine, "chunked");
+        assert.equal(status.model, "mission-fixture/model");
+        assert.equal(status.modelSelection, "current-model");
+        const result = await h.session.compact();
+        assert.match(result.summary, /Summary retained/);
+        const checkpoints = h.session.sessionManager
+          .getBranch()
+          .filter((e) => e.type === "compaction");
+        assert.equal(checkpoints.at(-1).fromHook, true);
+        const requests = fs
+          .readFileSync(trace, "utf8")
+          .trim()
+          .split("\n")
+          .map(JSON.parse);
+        assert.ok(requests.length > 1);
+        assert.ok(
+          requests.every(
+            (request) => request.inputChars <= status.maxInputChars,
+          ),
+        );
+        assert.ok(requests.every((request) => request.model === "model"));
+        assert.equal(
+          fs.existsSync(status.file),
+          false,
+          "the default needs no generated model configuration",
+        );
+        await h.session.reload();
+        const reloaded = JSON.parse(
+          (
+            await h.tool("compaction_model", {
+              action: "status",
+              target: "lead",
+            })
+          ).content[0].text,
+        );
+        assert.equal(reloaded.engine, "chunked");
+        assert.equal(reloaded.modelSelection, "current-model");
+        assert.equal((await h.status()).mode, "summary");
+        assert.equal(reloaded.diagnostics.stage, "compact:success");
+      } finally {
+        if (previous === undefined) delete process.env.MC_FIXTURE_SUMMARY;
+        else process.env.MC_FIXTURE_SUMMARY = previous;
+        if (previousTrace === undefined)
+          delete process.env.MC_FIXTURE_SUMMARY_TRACE;
+        else process.env.MC_FIXTURE_SUMMARY_TRACE = previousTrace;
+      }
+    }),
+);
+
+test("an explicit opt-out still reports native compaction while configured failures never select another model", () =>
+  harness(async (h) => {
+    const off = JSON.parse(
+      (await h.tool("compaction_model", { action: "off", target: "lead" }))
+        .content[0].text,
+    );
+    assert.equal(off.engine, "native");
+    assert.equal(off.source, "disabled");
+    const route = JSON.parse(
+      (
+        await h.tool("compaction_model", {
+          action: "set",
+          target: "lead",
+          model: "mission-fixture/summary",
+        })
+      ).content[0].text,
+    );
+    assert.equal(route.engine, "chunked");
+    assert.equal(route.modelSelection, "configured");
+    assert.equal(route.model, "mission-fixture/summary");
+  }));
+
 test("offline provider selects the new command in a batched wake and does not replay healthy faults on maintenance", () =>
   harness(async (h) => {
     const trace = path.join(h.cwd, "batched-fixture.jsonl");

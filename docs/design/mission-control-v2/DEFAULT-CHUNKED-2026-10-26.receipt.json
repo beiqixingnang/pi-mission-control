@@ -1,0 +1,127 @@
+{
+  "date": "2026-10-26",
+  "pluginVersion": "2.6.3",
+  "baseline": {
+    "version": "2.6.2",
+    "commit": "cad18ee"
+  },
+  "checks": {
+    "windows": {
+      "suite": {
+        "exitCode": 0,
+        "tests": 340,
+        "pass": 336,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 4
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 46
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      }
+    },
+    "wsl": {
+      "suite": {
+        "exitCode": 0,
+        "tests": 340,
+        "pass": 335,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 5
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "sourceFiles": 46
+      },
+      "load": {
+        "exitCode": 0,
+        "hostVersion": "1.4.0",
+        "node": "v24.16.0",
+        "entrypoints": 2,
+        "tools": 55,
+        "errors": []
+      }
+    },
+    "testedSourceMatch": {
+      "files": 106,
+      "differences": []
+    },
+    "tui": {
+      "passed": true,
+      "sameProcessReload": true,
+      "checkCount": 149,
+      "manualRestoreRoundTrip": true,
+      "recoveryModelRequests": 0,
+      "scriptSha256": "8deb716623b4a346399673c761b6129cf7faa904f23ae57d36effa7a95f9b088",
+      "checks": [
+        "same conversation switched back to summary mode",
+        "summary mode note receipts explicitly identify manual storage without changing modes",
+        "summary mode and manual notes survive literal /reload in the same Pi process",
+        "model tool completed: compaction_model",
+        "an existing unconfigured conversation compacted through the default chunked path",
+        "default compaction sent multiple bounded requests without a summary-model configuration",
+        "editor acknowledged input after default chunked compaction",
+        "the screenshot's exact wrapped upstream outage reached persistent compaction recovery",
+        "wrapped compaction failure retained its automatic retry through literal /reload",
+        "healthy default compaction resumed automatically after the wrapped outage without a user continue",
+        "compaction recovery preserved summary mode and existing goal acceptance",
+        "model tool completed: compaction_model"
+      ]
+    },
+    "existingSessionOfflineReplay": {
+      "passed": true,
+      "sourceBytes": 41765960,
+      "sourceMessages": 892,
+      "splitTurnMessages": 22,
+      "priorSummaryChars": 101951,
+      "engine": "chunked",
+      "modelSelection": "current-model",
+      "requests": 13,
+      "maxRequestChars": 142458,
+      "limitChars": 192000,
+      "networkRequests": 0,
+      "productionConversationControlled": false,
+      "semanticSummaryQualityEvaluated": false
+    }
+  },
+  "scope": {
+    "productionConversationControlled": false,
+    "defaultSummaryEngine": "chunked",
+    "unconfiguredSummaryModel": "current conversation model",
+    "configuredRoutesRemainAuthoritative": true,
+    "explicitNativeOptOutPreserved": true,
+    "contextModeSelectionUnchanged": true,
+    "oldUnscheduledTransientFailuresRearmedOnReload": true
+  },
+  "limitations": [
+    "Four container cases require an explicitly configured container environment and were skipped.",
+    "WSL additionally skips the Windows-only current-directory lock test.",
+    "The actual-session replay uses a local summary stub, sends no network requests and does not evaluate semantic summary quality.",
+    "Upstream availability is external; failures retain history and completed chunk caches rather than promising a successful request."
+  ],
+  "evidence": {
+    "directory": ".reference/default-chunked-20261026",
+    "sha256": {
+      "full-windows.log": "0860d7c6da4e41cb5e28689a3bcb1d116b250f859e74de29da136fc6988b186b",
+      "full-wsl.log": "417049864354c8a76536420fa032edbf358427d9884e33e91bee6b0c5dad46fb",
+      "typecheck-windows.log": "545851da7688ce9a5934fd22161d12209f3747e3af73c4dcc9b56fba0ffcfcb9",
+      "typecheck-wsl.log": "8e72226d39c8acca2cf3874d29d3f46713ae5ea97f7fe752ca38ad46fd6e8c76",
+      "load-windows.json": "31113083be2ecc4a6d12449d764f041ea94fbad129e615c8fcbc78c458fdb909",
+      "load-wsl.json": "02d4627016d96732cd59f1d020c86c2db09c596af5c850491da71e13793a2bee",
+      "tui-report.json": "00bef9fc184fcf94e405388b78c3a188d86b2176f014aeff4b736a27a943c4ea",
+      "tui-wsl.log": "c4ddb5925d087ce1c1ca473c20ff8b022cc9ddc821fbf27a53a00f8fa397a0d2",
+      "tested-source-files.json": "727f4930ed01819f2611aebbec1cf8969ea5c5ca3207f5c4c5866d3ee1c78bea",
+      "tested-source-match.json": "d47cfa5bb68af594d4249990d2cc0d00ef6fa991539a2997878ef69a6ed93086",
+      "recovery-final-windows.log": "151af11fe1f645383b2206413d5f6029b69ec468aba6b63fc346d23272ea26ba",
+      "existing-session-offline-replay.json": "e119236335c4cef5b195bad729b0097371f4d085e3f825df385b73b7231d0cf2"
+    }
+  }
+}

@@ -47,6 +47,26 @@ export function providerFailureKind(
     return "external";
   return "transient";
 }
+
+/** Pi's overflow recovery wrapper describes the operation, not the failed
+ * summary request. Classify the nested cause before deciding whether to retry
+ * compaction; a genuine context rejection still requires smaller inputs.
+ */
+export function compactionFailureCause(text: string) {
+  let cause = text.trim().replace(/^Error:\s*/i, "");
+  for (let i = 0; i < 8; i++) {
+    const next = cause.replace(
+      /^(?:Error:\s*)?(?:Context overflow recovery failed|Auto-compaction failed|Manual compaction failed|Turn prefix summarization failed|Summarization failed|Custom compaction stopped|Summary request was truncated after bounded subdivision|Summary request failed or was truncated):\s*/i,
+      "",
+    );
+    if (next === cause) break;
+    cause = next;
+  }
+  return cause.replace(/^Error:\s*/i, "");
+}
+export function compactionFailureKind(text: string) {
+  return providerFailureKind(compactionFailureCause(text));
+}
 export function waitForReconnect(
   ms: number,
   signal: AbortSignal,

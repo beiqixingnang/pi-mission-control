@@ -195,6 +195,26 @@ test("a lead-only custom summary cannot silently send a member summary to GPT", 
     assert.match(h.notifications.join("\n"), /fallback is blocked/);
   }));
 
+test("unconfigured member summary mode also uses current-model chunking while budget-only misconfiguration stays blocked", () =>
+  using(async (h) => {
+    fs.unlinkSync(path.join(h.directory, "member-compaction-summary.json"));
+    h.ctx.model = {
+      id: "flash",
+      provider: "summary-provider",
+      contextWindow: 64000,
+      maxTokens: 4096,
+      reasoning: false,
+    };
+    assert.ok((await h.compact()).compaction);
+    assert.equal(h.calls[0].id, "flash");
+    fs.mkdirSync(path.dirname(h.own), { recursive: true });
+    fs.writeFileSync(h.own, JSON.stringify({ maxInputChars: 4000 }));
+    const result = await h.compact();
+    assert.equal(result.cancel, true);
+    assert.equal(h.calls.length, 1);
+    assert.match(h.notifications.join("\n"), /Summary model is missing/);
+  }));
+
 test(
   "real Pi member RPC compaction uses the shared independent route and recovers a truncated stream",
   { timeout: 20000 },

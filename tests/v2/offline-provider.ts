@@ -37,7 +37,10 @@ export default function (pi: ExtensionAPI) {
     label: "Read synthetic source batch",
     description:
       "Test-only generated public source, never reads production files.",
-    parameters: Type.Object({ index: Type.Integer() }),
+    parameters: Type.Object({
+      index: Type.Integer(),
+      salt: Type.Optional(Type.String({ maxLength: 64 })),
+    }),
     async execute(_id, args) {
       return {
         content: [
@@ -45,9 +48,10 @@ export default function (pi: ExtensionAPI) {
             type: "text" as const,
             text:
               `SYNTHETIC_SOURCE_${args.index}\n` +
-              "export const public_value = 173; // synthetic source only\n".repeat(
-                1200,
-              ),
+              (args.salt
+                ? `export const public_value = 173; // synthetic source ${args.salt}\n`
+                : "export const public_value = 173; // synthetic source only\n"
+              ).repeat(1200),
           },
         ],
         details: undefined,
@@ -191,7 +195,17 @@ export default function (pi: ExtensionAPI) {
               "Summarize this coding-session excerpt",
             )
           ) {
-            const summaryMode = process.env.MC_FIXTURE_SUMMARY;
+            const control =
+              process.env.MC_FIXTURE_SUMMARY_CONTROL &&
+              fs.existsSync(process.env.MC_FIXTURE_SUMMARY_CONTROL)
+                ? JSON.parse(
+                    fs.readFileSync(
+                      process.env.MC_FIXTURE_SUMMARY_CONTROL,
+                      "utf8",
+                    ),
+                  )
+                : undefined;
+            const summaryMode = control?.mode ?? process.env.MC_FIXTURE_SUMMARY;
             if (process.env.MC_FIXTURE_SUMMARY_TRACE)
               fs.appendFileSync(
                 process.env.MC_FIXTURE_SUMMARY_TRACE,
@@ -213,9 +227,14 @@ export default function (pi: ExtensionAPI) {
                 "stream-once",
                 "stream-always",
                 "rate-limit",
+                "wrapped-outage",
               ].includes(summaryMode ?? "")
             )
               throw new Error("Intentional summary-provider failure");
+            if (summaryMode === "wrapped-outage")
+              throw new Error(
+                "Context overflow recovery failed: Turn prefix summarization failed: upstream_error: Upstream service temporarily unavailable",
+              );
             summaryCalls++;
             const summaryKey = "summary:" + textOf(context.messages.at(-1));
             const summaryAttempt = (requestAttempts.get(summaryKey) ?? 0) + 1;

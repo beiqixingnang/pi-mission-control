@@ -326,8 +326,11 @@ test("transient compaction failures retry cached work after a durable cooldown, 
 test("cancelled and externally blocked compactions remain stopped until repaired", async () => {
   for (const reason of [
     "Compaction cancelled",
+    "Context overflow recovery failed: Compaction cancelled by its initiating user",
     "401 invalid API key",
     "429 insufficient_quota",
+    "Context overflow recovery failed: Summarization failed: 401 invalid API key",
+    "Context overflow recovery failed: Turn prefix summarization failed: Your input exceeds the context window of this model",
   ]) {
     await using(async (h) => {
       h.delivery("result");
@@ -343,6 +346,75 @@ test("cancelled and externally blocked compactions remain stopped until repaired
     });
   }
 });
+
+test("the screenshot's wrapped summary outage retries compaction after reload and preserves budgets", () =>
+  using(async (h) => {
+    h.delivery("result");
+    await h.kernel.tick();
+    h.settle(true, "Your input exceeds the context window of this model");
+    await h.kernel.tick();
+    const mission = h.kernel.store.mission();
+    const reason =
+      "Context overflow recovery failed: Turn prefix summarization failed: upstream_error: Upstream service temporarily unavailable";
+    h.kernel.compactionSettled(undefined, reason);
+    const saved = h.kernel.snapshot().recovery;
+    assert.ok(saved.nextAt > h.now);
+    assert.equal(saved.reason, reason);
+    await h.restart();
+    assert.equal(h.kernel.snapshot().recovery.nextAt, saved.nextAt);
+    h.advance(saved.nextAt - h.now);
+    await h.kernel.tick();
+    assert.equal(h.compactions, 2);
+    assert.equal(
+      h.wakes.length,
+      1,
+      "no unchanged oversized inference request is replayed",
+    );
+    h.kernel.compactionSettled("chunked-repair-checkpoint");
+    await h.kernel.tick();
+    assert.equal(h.wakes.length, 2);
+    h.settle();
+    assert.equal(h.kernel.snapshot().recovery, undefined);
+    assert.equal(
+      h.kernel.store.mission().budgetStartedAt,
+      mission.budgetStartedAt,
+    );
+  }));
+
+test("reload repairs an old unscheduled wrapped failure but still respects user pause", () =>
+  using(async (h) => {
+    h.delivery("result");
+    await h.kernel.tick();
+    h.settle(true, "maximum context exceeded");
+    await h.kernel.tick();
+    h.kernel.compactionSettled(undefined, "Summary provider failed");
+    const legacy = h.kernel.store.get("leadRecovery");
+    legacy.reason =
+      "Context overflow recovery failed: Summarization failed: upstream_error: Upstream service temporarily unavailable";
+    legacy.nextAt = undefined;
+    h.kernel.store.set("leadRecovery", legacy);
+    await h.kernel.userControl("pause");
+    await h.restart();
+    const repaired = h.kernel.snapshot().recovery;
+    assert.equal(repaired.id, legacy.id);
+    assert.equal(repaired.requests, legacy.requests);
+    assert.ok(repaired.nextAt > h.now);
+    h.advance(repaired.nextAt - h.now);
+    await h.kernel.tick();
+    assert.equal(
+      h.compactions,
+      1,
+      "reloading never bypasses an explicit pause",
+    );
+    const due = h.kernel.snapshot().recovery.nextAt;
+    await h.restart();
+    assert.equal(
+      h.kernel.snapshot().recovery.nextAt,
+      due,
+      "reload cannot postpone a scheduled retry",
+    );
+    await h.kernel.userControl("resume");
+  }));
 
 test("a repeated compaction checkpoint cannot rearm an already failed recovery probe", () =>
   using(async (h) => {
