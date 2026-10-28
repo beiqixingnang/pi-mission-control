@@ -24,9 +24,8 @@ const jiti = createJiti(import.meta.url, {
     "@earendil-works/pi-coding-agent": path.join(hostDir, "dist/index.js"),
   },
 });
-const { exportTransfer, prepareTransferImport } = await jiti.import(
-  path.resolve("runtime/transfer/session.ts"),
-);
+const { exportTransfer, prepareTransferImport, inspectTransfer } =
+  await jiti.import(path.resolve("runtime/transfer/session.ts"));
 const { SessionManager } = await import(
   pathToFileURL(path.join(hostDir, "dist/index.js"))
 );
@@ -67,7 +66,7 @@ if (operation === "export") {
     const goal = kernel.setGoal("Cross platform migration", [
       "Keep acceptance and evidence",
     ]);
-    const proof = path.join(workspace, "proof.txt");
+    const proof = path.join(workspace, "Proof.TXT");
     fs.writeFileSync(proof, "CROSS_EVIDENCE_173");
     const acceptance = kernel.goals.accept(
       goal.id,
@@ -96,6 +95,7 @@ if (operation === "export") {
       stateDirectory: kernel.store.directory,
       settings: kernel.settings,
     });
+    await inspectTransfer(bundle);
     fs.writeFileSync(
       path.join(root, "cross-expected.json"),
       JSON.stringify({

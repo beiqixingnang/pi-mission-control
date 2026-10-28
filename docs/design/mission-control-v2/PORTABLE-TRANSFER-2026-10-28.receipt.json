@@ -1,9 +1,9 @@
 {
   "date": "2026-10-28",
-  "pluginVersion": "2.7.0",
+  "pluginVersion": "2.7.1",
   "baseline": {
-    "version": "2.6.3",
-    "commit": "ec027ac"
+    "version": "2.7.0",
+    "commit": "4783368"
   },
   "checks": {
     "windows": {
@@ -78,6 +78,20 @@
       "contextAndAcceptanceRetained": true,
       "repositoryUnchanged": true,
       "modelRequests": 0
+    },
+    "actualSnapshotImport": {
+      "files": 1561,
+      "bytes": 1751550778,
+      "verified": true,
+      "isolatedImportVerified": true,
+      "counts": {
+        "goal_nodes": 565,
+        "goal_acceptances": 269,
+        "tasks": 590,
+        "members": 12
+      },
+      "productionConversationControlled": false,
+      "modelRequests": 0
     }
   },
   "scope": {
@@ -98,18 +112,19 @@
   "evidence": {
     "directory": ".reference/portable-transfer-20261028",
     "sha256": {
-      "full-windows.log": "593972f78f748d7dd3a28037fe4179dadbc63ae681d7981f0d7b8795eac75823",
-      "full-wsl.log": "bb747707310dadc2059aee781644533234da935b787fb55999f6c93017e61b81",
+      "full-windows.log": "0ae029a5a7e8c9acecdde64e09d7f1a8cf90bcba6def29d5ddcaf1f3b1aa8e3b",
+      "full-wsl.log": "3dd908d6e4a0beb50c513564ba9cc11ed0685b65130454964fd2355e1308a59d",
       "typecheck-windows.log": "9c3c833278848c8a7069995c6142356bd18d418eec27511b3a1e1102bbb13ca6",
       "typecheck-wsl.log": "aebe3af086bb1199f21c5962530b31807743576075997e7a8426bde9183d97c6",
-      "load-windows.json": "79b50d79624326e344e8941e3aa9a50c7af75fb9f5b60def137fba29a0827868",
-      "load-wsl.json": "590cdda2b049e1be6aee3aea593a36def44049702d991d859feffaae388d55e9",
-      "tui-report.json": "95864196c2bc134a8059395f8ba8115620ee282da8be4c0a458eb2741beb6029",
-      "tui-wsl.log": "ae61b29715d240dc8208bdb75bac2392dbf3c833db2133a37cea3b8d492d8d4a",
-      "tested-source-files.json": "8639efe179d386c0348465606f0402eb36be99a1307783c92b0d2527aeb3c9cd",
+      "load-windows.json": "7750a301b2926af04ea5ca10d6cae74c70f792354665259fe696c2c743002222",
+      "load-wsl.json": "47735808dae63071fe243b4b4ee6035f65e98ebd5b26e64418b6e6c7f6d06d6a",
+      "tui-report.json": "8a3fbe822a2f6bcd79f83f61325d2d37f55f9e2de71360fba2e6fd31727ddb3b",
+      "tui-wsl.log": "0bf8849e22cd5c5276212fe6e91a3500adff15ca350880ce55614171e68d8215",
+      "tested-source-files.json": "ee8d856248a5110271716fa40f1159962af51ebde5070be11a24ba9f06ebaebd",
       "tested-source-match.json": "7d2d1890b93a0387a786773a7d39804547ec0f7ba51380a8f36cee54a926260c",
-      "transfer-windows.log": "bc8bd684011dc903aefc8f9e524b5aaadcae81860fd2aad8a8aa5f0dccad510d",
-      "cross-platform/cross-platform-report.json": "2bc2b30d4ed51adc99b97217146b3181d026d33a049c47bc9151cd4a929f0b59"
+      "patch-windows.log": "f49d583d5eaff2b6e213b14f75b3d3b07151bf65c8c0003863af69babc5d5a67",
+      "cross-platform-final/cross-platform-report.json": "2bc2b30d4ed51adc99b97217146b3181d026d33a049c47bc9151cd4a929f0b59",
+      "software-export-receipt.json": "92a31b7141602d5811cbaa002d13eba9ab5cc555f0d84caf343c1a6cbb8af21e"
     }
   }
 }

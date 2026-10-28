@@ -108,7 +108,7 @@ async function fixture(run) {
 
 test("a different agent home imports goals, member history, notes and evidence without credentials or repository writes", () =>
   fixture(async (h) => {
-    const artifact = path.join(h.workspace, "proof.txt");
+    const artifact = path.join(h.workspace, "Proof.TXT");
     fs.writeFileSync(artifact, "EXACT_ACCEPTED_EVIDENCE");
     const receipt = h.kernel.goals.accept(
       h.kernel.store.mission().id,

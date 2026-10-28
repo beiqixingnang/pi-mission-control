@@ -1,3 +1,7 @@
+# 2.7.1 — Windows migration evidence validation (2026-10-28)
+
+- Match evidence entries with the same Windows case normalization used by the file manifest. Validate mixed-case evidence filenames in the isolated migration fixture and the Windows-to-WSL handoff.
+
 # 2.7.0 — portable conversation migration (2026-10-28)
 
 - Export a conversation snapshot with /project export and import it into a cloned workspace with pi --import-session or /project import. Both computers use matching Pi/plugin versions; credentials and repository source are configured/copied separately.

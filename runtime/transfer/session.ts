@@ -378,7 +378,9 @@ export async function inspectTransfer(
     if (
       typeof item.source !== "string" ||
       !item.entry?.startsWith("evidence/") ||
-      !names.has(item.entry)
+      !names.has(
+        process.platform === "win32" ? item.entry.toLowerCase() : item.entry,
+      )
     )
       throw Error("Invalid evidence mapping");
   if (
