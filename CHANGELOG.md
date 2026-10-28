@@ -1,3 +1,10 @@
+# 2.7.0 — portable conversation migration (2026-10-28)
+
+- Export a conversation snapshot with /project export and import it into a cloned workspace with pi --import-session or /project import. Both computers use matching Pi/plugin versions; credentials and repository source are configured/copied separately.
+- Retain complete streamed main/member logs, native context boundaries, notes and budgets, goal/acceptance records, summary routes/caches and task artifacts. Snapshot referenced evidence without overwriting repository files; map explicit Windows/POSIX source paths into the destination.
+- Verify per-file hashes before import, create fresh Pi identities and keep imported work paused. Interrupt old attempts without claiming remote processes stopped or replaying commands. Preserve existing-session /reload and reading-archive behavior.
+- Record the separate delegation/prompt review as a proposal only; do not change those workflow rules or member permissions in this release.
+
 # 2.6.3 — chunked summary compaction by default (2026-10-26)
 
 - Use bounded chunked summaries in unconfigured summary-mode conversations with their current model. Explicit summary routes remain authoritative, notes mode stays independent, and an explicit off setting retains Pi native compaction.

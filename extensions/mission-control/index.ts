@@ -405,6 +405,14 @@ export default function (pi: ExtensionAPI) {
       "v2",
       sessionId,
     );
+    try {
+      const imported = JSON.parse(
+        await fs.readFile(path.join(directory, "import-settings.json"), "utf8"),
+      );
+      settings = { ...settings, ...imported };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     kernel = new MissionKernel({
       directory,
       sessionId,

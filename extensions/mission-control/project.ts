@@ -22,6 +22,10 @@ import { RecoveryPicker } from "./recovery-ui.ts";
 import { mappedPath, type PathMapping } from "../../runtime/path-mapping.ts";
 import { workspaceResumeInstruction } from "../../runtime/workspace-control.ts";
 import {
+  exportTransfer,
+  prepareTransferImport,
+} from "../../runtime/transfer/session.ts";
+import {
   planRelocation,
   prepareRelocation,
   commitRelocation,
@@ -66,6 +70,12 @@ interface RelocationFailure {
 }
 
 export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
+  pi.registerFlag("import-session", {
+    type: "string",
+    description: "从跨电脑迁移包导入对话到当前工作区",
+    default: "",
+  });
+  let transferController: AbortController | undefined;
   pi.registerFlag("recover-here", {
     type: "boolean",
     description: "选择已有对话，恢复到当前目录（支持移动/改名后的工作区）",
@@ -95,6 +105,30 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
     clear();
     if (event.reason === "reload" && current().store.get("relocationHold"))
       ctx.ui.notify(workspaceResumeInstruction, "warning");
+    const importBundle = pi.getFlag("import-session");
+    if (
+      event.reason === "startup" &&
+      typeof importBundle === "string" &&
+      importBundle
+    ) {
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "--import-session 需要交互式终端；RPC 可使用 /project import <包目录>",
+          "error",
+        );
+        return;
+      }
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (alive)
+          pi.sendUserMessage(
+            "/project import " + JSON.stringify(importBundle),
+            { expandPromptTemplates: true },
+          );
+      }, 0);
+      timer.unref?.();
+      return;
+    }
     if (event.reason === "startup" && pi.getFlag("recover-here")) {
       if (ctx.mode !== "tui") {
         ctx.ui.notify(
@@ -114,6 +148,7 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
     }
   });
   pi.on("session_shutdown", () => {
+    if (!applying) transferController?.abort();
     alive = false;
     clear();
   });
@@ -288,6 +323,99 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
       prepared?.release();
       if (!attempted) kernel.finishRelocation();
       running = false;
+    }
+  }
+  async function transfer(
+    command: "export" | "import",
+    argument: string,
+    ctx: ExtensionCommandContext,
+  ) {
+    if (!ctx.isIdle() || ctx.hasPendingMessages())
+      throw Error("请等待当前回复/排队输入结束后再导出或导入");
+    if (running || pending || applying) throw Error("已有迁移操作正在进行");
+    if (ctx.mode === "print" || ctx.mode === "json")
+      throw Error("迁移需要持久交互式或 RPC 会话");
+    let file = argument.trim();
+    if (file.startsWith('"')) {
+      try {
+        file = JSON.parse(file);
+      } catch {
+        file = file.replace(/^"|"$/g, "");
+      }
+    } else file = file.replace(/^'(.*)'$/, "$1");
+    if (!file)
+      throw Error(
+        "请提供迁移包目录，例如 /project export C:/Pi-Transfer 或 /project import C:/Pi-Transfer",
+      );
+    file = path.resolve(ctx.cwd, file);
+    running = true;
+    transferController = new AbortController();
+    const controller = transferController;
+    let prepared: Awaited<ReturnType<typeof prepareTransferImport>> | undefined,
+      attempted = false;
+    try {
+      if (command === "export") {
+        const sessionFile = ctx.sessionManager.getSessionFile();
+        if (!sessionFile) throw Error("需要已保存的 Pi 对话");
+        const result = await exportTransfer({
+          destination: file,
+          sessionFile,
+          sessionId: ctx.sessionManager.getSessionId(),
+          cwd: ctx.cwd,
+          stateDirectory: current().store.directory,
+          settings: current().settings,
+          model: ctx.model
+            ? { provider: ctx.model.provider, id: ctx.model.id }
+            : undefined,
+          signal: controller.signal,
+          onProgress: (text) => ctx.ui.setStatus("session-transfer", text),
+        });
+        ctx.ui.notify(
+          `迁移包已导出：${result.destination}\n${result.files} 个文件；不含工作区源码。\n新电脑安装同版本 Pi 与插件、克隆工作区后，在工作区运行 pi --import-session "包目录"。`,
+          "info",
+        );
+      } else {
+        ctx.ui.setStatus("session-transfer", "正在校验迁移包与准备对话…");
+        prepared = await prepareTransferImport(file, ctx, {
+          signal: controller.signal,
+        });
+        if (!alive || ctx.hasPendingMessages())
+          throw Error("导入已取消或收到新输入，请重试");
+        await suspend(current());
+        applying = true;
+        attempted = true;
+        const r = prepared.relocation;
+        const switched = await ctx.switchSession(r.sessionFile, {
+          withSession: async (next) => {
+            await commitRelocation(r);
+            await next.sendMessage({
+              customType: "project-location",
+              content: `已从其他电脑导入对话快照到 ${r.plan.target}。主对话、目标验收、成员记录与笔记保留。旧路径通过 project_resolve 映射。旧任务没有重放，原电脑进程状态仍需核对。${workspaceResumeInstruction} 模型账号使用本机配置；工作区之外的依赖与权限请核对后继续。`,
+              display: true,
+            });
+            next.ui.notify(
+              `跨电脑导入完成：${r.plan.target}\n${workspaceResumeInstruction}\n确认旧电脑已停止工作，模型/API 配置在本机可用。`,
+              "info",
+            );
+          },
+        });
+        if (switched.cancelled) {
+          attempted = false;
+          await prepared.rollback();
+          prepared = undefined;
+          ctx.ui.notify("已取消导入，原对话保留", "info");
+        }
+      }
+    } catch (error) {
+      if (prepared && !attempted) await prepared.rollback();
+      throw error;
+    } finally {
+      applying = false;
+      running = false;
+      if (transferController === controller) transferController = undefined;
+      try {
+        ctx.ui.setStatus("session-transfer", undefined);
+      } catch {}
     }
   }
   const status = (ctx: ExtensionContext) => {
@@ -615,12 +743,16 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
   });
   pi.registerCommand("project", {
     description:
-      "Workspace: restore [session-file] | status | rename <name> | switch <path> | allow rename/switch <target> | revoke | resolve <old-path> | recover",
+      "Workspace: export <bundle-dir> | import <bundle-dir> | restore [session-file] | status | rename <name> | switch <path> | allow rename/switch <target> | revoke | resolve <old-path> | recover",
     handler: async (args, ctx) => {
       try {
         const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args.trim());
         const command = match?.[1] ?? "status";
         let target = (match?.[2] ?? "").trim();
+        if (command === "export" || command === "import") {
+          await transfer(command, target, ctx);
+          return;
+        }
         if (command === "restore") {
           await restoreHere(
             target ? target.replace(/^(["'])(.*)\1$/, "$2") : undefined,

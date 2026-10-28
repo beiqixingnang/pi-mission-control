@@ -223,6 +223,119 @@ async function harness(fn, options = {}) {
   }
 }
 test(
+  "a real Pi exports and imports its native context, notes and goal state into a separately cloned workspace",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      const bundle = path.join(h.base, "portable-session");
+      await h.tool("goal_start", {
+        objective: "Portable current context",
+        criteria: ["Retain the native boundary and handoff"],
+      });
+      await h.tool("context_note", {
+        action: "write",
+        notes: [
+          { name: "index", text: "PORTABLE_INDEX_173" },
+          { name: "handoff", text: "Continue source audit at line 173" },
+        ],
+      });
+      await h.tool("context_mode", { mode: "notes", inputLimitTokens: 300000 });
+      const sourceId = h.runtime.session.sessionId,
+        sourceFile = h.runtime.session.sessionFile,
+        branch = h.runtime.session.sessionManager.getBranch();
+      const boundary = branch.find((e) => e.type === "message").id;
+      h.runtime.session.sessionManager.appendCompaction(
+        "PORTABLE_CHECKPOINT_KEEP_173",
+        boundary,
+        8000,
+        {
+          contextMode: "notes",
+          injectedNotes: { index: { revision: 1, source: "public-index" } },
+        },
+        true,
+      );
+      await h.restart();
+      const before =
+        h.runtime.session.sessionManager.buildSessionProjection().messages;
+      const beforeMission = (await h.state()).mission;
+      await h.command("/project export " + JSON.stringify(bundle));
+      assert.ok(
+        fs.existsSync(path.join(bundle, "transfer.json")),
+        JSON.stringify(h.notices),
+      );
+      const sourceBytes = fs.readFileSync(sourceFile);
+      await h.moveAndOpen();
+      fs.writeFileSync(
+        path.join(h.target, "cloned-source.txt"),
+        "CLONED_REPOSITORY_IS_UNCHANGED",
+      );
+      await h.command("/project import " + JSON.stringify(bundle));
+      assert.notEqual(
+        h.runtime.session.sessionId,
+        sourceId,
+        JSON.stringify(h.notices),
+      );
+      const imported = h.runtime.session.sessionManager
+        .getBranch()
+        .find(
+          (e) =>
+            e.type === "compaction" &&
+            e.summary === "PORTABLE_CHECKPOINT_KEEP_173",
+        );
+      assert.ok(imported);
+      assert.equal(imported.firstKeptEntryId, boundary);
+      const sourceProjection = before.filter((m) => m.role !== "system"),
+        afterProjection = h.runtime.session.sessionManager
+          .buildSessionProjection()
+          .messages.filter((m) => m.role !== "system");
+      for (const message of sourceProjection)
+        assert.ok(
+          afterProjection.some(
+            (other) => JSON.stringify(other) === JSON.stringify(message),
+          ),
+          "the retained native context must survive import",
+        );
+      const state = await h.state();
+      assert.equal(state.mission.id, beforeMission.id);
+      assert.equal(state.workspaceHeld, true);
+      const memory = JSON.parse((await h.tool("context_mode")).content[0].text);
+      assert.equal(memory.mode, "notes");
+      assert.equal(
+        memory.budget.inputLimitTokens,
+        Math.min(
+          300000,
+          memory.budget.configuredWindowTokens -
+            memory.budget.outputReserveTokens -
+            memory.budget.safetyReserveTokens,
+        ),
+      );
+      assert.equal(
+        JSON.parse(
+          (await h.tool("context_note", { action: "read", name: "handoff" }))
+            .content[0].text,
+        ).text,
+        "Continue source audit at line 173",
+      );
+      assert.ok(fs.readFileSync(sourceFile).equals(sourceBytes));
+      assert.equal(
+        fs.readFileSync(path.join(h.target, "cloned-source.txt"), "utf8"),
+        "CLONED_REPOSITORY_IS_UNCHANGED",
+      );
+      await h.restart();
+      assert.equal((await h.state()).workspaceHeld, true);
+      assert.equal(
+        JSON.parse((await h.tool("context_mode")).content[0].text).mode,
+        "notes",
+      );
+      assert.ok(
+        h.notices.some((notice) =>
+          String(notice[0]).includes("跨电脑导入完成"),
+        ),
+      );
+    }),
+);
+
+test(
   "v2 rename preserves main/member memory, state, permissions and receipt paths under a fresh runtime",
   { timeout: 35000 },
   () =>

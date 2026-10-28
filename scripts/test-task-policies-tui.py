@@ -662,6 +662,7 @@ def main():
     # The user exits Pi before moving the directory. Then one new CLI command
     # must recover the same dedicated conversation without any model request.
     manual_recovery_round_trip(home, config, checks, reports, environment, fixture, leaf["id"], relocation_note)
+    portable_transfer_check(home, config, checks, reports, environment, candidate)
 
 
 def manual_recovery_round_trip(home, config, checks, reports, environment, fixture, accepted_leaf, note):
@@ -833,6 +834,123 @@ def manual_recovery_round_trip(home, config, checks, reports, environment, fixtu
     report.update(session=config, checks=checks, manualRestoreRoundTrip=True, recoveryModelRequests=0)
     report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2))
     print("MANUAL_RECOVERY_RESULT " + json.dumps({"passed": True, "checks": len(checks), "session": config, "modelRequestsDuringRecovery": 0}, ensure_ascii=False))
+
+
+def portable_transfer_check(home, config, checks, reports, environment, candidate):
+    """Use the same dedicated source conversation and a second, isolated agent
+    home as the destination computer. Neither endpoint is a production session.
+    """
+    transfer_home = home / ("transfer-test-" + uuid.uuid4().hex[:8])
+    transfer_home.mkdir()
+    bundle = transfer_home / "conversation"
+    target_agent, clone, package = [transfer_home / name for name in ["agent", "clone", "package"]]
+    for directory in [target_agent, clone, package]:
+        directory.mkdir()
+    copy_package(candidate, package)
+    fixture = package / "tests/v2/offline-provider.ts"
+    (target_agent / "settings.json").write_text(json.dumps({"packages": [str(package)], "retry": {"enabled": False}, "cacheWarming": "off", "quietStartup": True}))
+    (clone / "cloned-source.txt").write_text("CLONED_SOURCE_173")
+    source_agent = home / "agent"
+    source_config = json.loads((home / "test-session.json").read_text())
+    source_file = Path(source_config["sessionFile"])
+    source_state = source_agent / "mission-control/v2" / source_config["id"] / "state.sqlite"
+    with sqlite3.connect(f"file:{source_state}?mode=ro", uri=True) as db:
+        expected_acceptance = db.execute("SELECT id,data FROM goal_acceptances ORDER BY id").fetchall()
+    with sqlite3.connect(f"file:{source_agent / 'context-memory' / source_config['id'] / 'memory.sqlite'}?mode=ro", uri=True) as db:
+        expected_mode = db.execute("SELECT value FROM settings WHERE key='mode'").fetchone()
+        expected_notes = db.execute("SELECT name,revision,text FROM notes ORDER BY name").fetchall()
+
+    for importing in [False, True]:
+        trace = transfer_home / ("import-lifecycle.jsonl" if importing else "export-lifecycle.jsonl")
+        requests = transfer_home / ("import-requests.jsonl" if importing else "export-requests.jsonl")
+        env = dict(environment, PI_CODING_AGENT_DIR=str(target_agent if importing else source_agent), MC_FIXTURE_LIFECYCLE_TRACE=str(trace), MC_FIXTURE_CACHE_TRACE=str(requests))
+        args = ["--import-session", str(bundle)] if importing else ["--session", str(source_file)]
+        active_fixture = fixture if importing else home / "package/tests/v2/offline-provider.ts"
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 140, 0, 0))
+        process = subprocess.Popen([shutil.which("pi"), "--offline", "--no-mcp", "--no-skills", "--no-context-files", "--no-prompt-templates", "--tools", "*", "-e", str(active_fixture), "--provider", "mission-fixture", "--model", "model", "--thinking", "off", *args], cwd=clone if importing else Path(source_config["workspace"]), env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+        os.close(slave)
+        data = bytearray()
+        def drain():
+            if select.select([master], [], [], .1)[0]:
+                try: chunk = os.read(master, 65536)
+                except OSError: return
+                data.extend(chunk)
+                if b"\x1b[c" in chunk: os.write(master, b"\x1b[?1;2c")
+        def line(text):
+            drain(); os.write(master, text.encode()); drain(); os.write(master, b"\r")
+        def wait(predicate, label, timeout=45):
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
+                drain()
+                if predicate(): checks.append(label); return
+                if process.poll() is not None: raise AssertionError("Transfer test Pi exited: " + label)
+            raise AssertionError("Timed out: " + label + "\n" + data[-2000:].decode(errors="replace"))
+        def events():
+            result = []
+            if trace.exists():
+                for text in trace.read_text().splitlines():
+                    try: result.append(json.loads(text))
+                    except ValueError: pass
+            return result
+        def ready():
+            nonce = uuid.uuid4().hex
+            end = time.monotonic() + 20
+            while time.monotonic() < end:
+                line("/fixture-ready " + nonce)
+                for _ in range(4): drain()
+                if any(e.get("nonce") == nonce for e in events()): return
+            raise AssertionError("Transfer editor was not ready")
+        try:
+            if not importing:
+                wait(lambda: any(e.get("event") == "session_start" for e in events()), "the original dedicated conversation reopened for a portable export")
+                ready()
+                line("/mission pause")
+                for _ in range(6): drain()
+                line("/project export " + json.dumps(str(bundle)))
+                wait(lambda: (bundle / "transfer.json").exists(), "the real TUI exported a portable conversation without a model request", timeout=90)
+                assert not requests.exists() or not requests.read_text().strip()
+                assert not (bundle / "workspace").exists() and not (bundle / "plugin").exists()
+            else:
+                wait(lambda: any(e.get("reason") == "resume" and e.get("cwd") == str(clone) for e in events()), "--import-session restored the exported conversation into a separate agent home", timeout=90)
+                ready()
+                current = [e for e in events() if e.get("event") == "session_start" and e.get("reason") == "resume"][-1]
+                imported_file, imported_id = Path(current["sessionFile"]), current["sessionId"]
+                assert imported_id != source_config["id"]
+                state = target_agent / "mission-control/v2" / imported_id / "state.sqlite"
+                with sqlite3.connect(f"file:{state}?mode=ro", uri=True) as db:
+                    assert db.execute("SELECT id,data FROM goal_acceptances ORDER BY id").fetchall() == expected_acceptance
+                    assert db.execute("SELECT data FROM meta WHERE key='relocationHold'").fetchone() == ("true",)
+                with sqlite3.connect(f"file:{target_agent / 'context-memory' / imported_id / 'memory.sqlite'}?mode=ro", uri=True) as db:
+                    assert db.execute("SELECT value FROM settings WHERE key='mode'").fetchone() == expected_mode
+                    assert db.execute("SELECT name,revision,text FROM notes ORDER BY name").fetchall() == expected_notes
+                assert not requests.exists() or not requests.read_text().strip()
+                checks.append("portable import retained context mode, note revisions and acceptance evidence with zero model requests")
+                previous = len(events())
+                line("/reload")
+                wait(lambda: len(events()) > previous and any(e.get("reason") == "reload" and e.get("sessionId") == imported_id and e.get("pid") == process.pid for e in events()[previous:]), "portable import survived literal /reload in the same destination Pi process")
+                ready()
+                line('V2_TEST:{"op":"tool","name":"read","args":{"path":"cloned-source.txt"},"noRepeatWake":true}')
+                def read_finished():
+                    for row in imported_file.read_text().splitlines()[-15:]:
+                        m = json.loads(row).get("message", {})
+                        if m.get("role") == "toolResult" and m.get("toolName") == "read" and "CLONED_SOURCE_173" in json.dumps(m): return True
+                    return False
+                wait(read_finished, "the imported model resumed with the cloned workspace and preserved history")
+                assert (clone / "cloned-source.txt").read_text() == "CLONED_SOURCE_173"
+        finally:
+            if process.poll() is None:
+                line("/quit")
+                end = time.monotonic() + 8
+                while process.poll() is None and time.monotonic() < end: drain()
+                if process.poll() is None: os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=5)
+            (transfer_home / ("import.ansi" if importing else "export.ansi")).write_bytes(data)
+            os.close(master)
+    report_file = reports / "task-policies-tui.json"
+    report = json.loads(report_file.read_text())
+    report.update(checks=checks, portableTransfer=True, portableTransferModelRequests=0)
+    report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    print("PORTABLE_TRANSFER_RESULT " + json.dumps({"passed": True, "checks": len(checks), "sourceConversationPreserved": True, "separateAgentHome": True}))
 
 
 if __name__ == "__main__":

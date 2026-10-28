@@ -249,6 +249,24 @@ WSL固定回归会话位于 `/home/lishuo/pi-mission-control-test`，与实际�
 
 `recoveryMaxRequests`为兼容保留原设置名，现限制每轮连续失败数；`maxWakeAttempts`默认3，限制一轮冷却恢复中的探测次数。任一上限触发后保存下次冷却重试时间，不永久等待人工续接。`requests`保留累计请求，`failures`保留累计失败，`burstFailures`单独记录本轮失败；健康响应后结束该故障。故障恢复不重置显式配置的目标预算；成员与摘要请求仍有各自的重试流程，不计作主会话费用上限。超额请求通过Pi上下文入口中止，提供方须遵守宿主AbortSignal；不会自动重放已执行命令或把重连视为业务验收。
 
+## 跨电脑迁移对话
+
+两台电脑安装同版本 Pi 和插件；新电脑另行克隆工作区、配置自己的模型账号。
+
+旧电脑的 Pi 空闲时输入（父目录须存在，导出目录不能已存在）：
+
+```text
+/project export "C:/Pi-Transfers/software"
+```
+
+复制整个导出目录到新电脑，在克隆好的工作区终端运行：
+
+```text
+pi --import-session "C:/Pi-Transfers/software"
+```
+
+已有 Pi 可 `/reload` 后执行 `/project import "C:/Pi-Transfers/software"`。主对话历史、当前压缩检查点和近期上下文、主/成员笔记与预算、目标验收、子智能体记录及压缩配置一起保留；不会复制模型密钥或仓库源码，不覆盖新电脑的工作区文件。未提交代码/测试文件请自行搬迁。先确认旧电脑的任务已停止，再按提示 `/mission resume`；旧执行不会自动重放，未知远端进程仍须按实际情况核对。导出包是固定快照，新进展需重新导出。详见[迁移说明](docs/design/mission-control-v2/PORTABLE-TRANSFER-2026-10-28.md)。
+
 ## 独立压缩模型
 
 ```text

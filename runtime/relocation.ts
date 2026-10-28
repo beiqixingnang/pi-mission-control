@@ -450,6 +450,7 @@ export async function prepareRelocation(
     for (const name of [
       "compaction-summary.json",
       "member-compaction-summary.json",
+      "import-settings.json",
       "compaction-diagnostics.json",
       "summary-cache",
     ]) {
