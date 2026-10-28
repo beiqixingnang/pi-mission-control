@@ -15,6 +15,11 @@ import {
 import { taskTiming, executionDeadline } from "./task-policy.ts";
 import { capabilityView, reviewSnapshot, taskView } from "./team-policy.ts";
 import {
+  resolveNotificationPolicy,
+  triggersLead,
+  type NotificationPolicy,
+} from "./notifications.ts";
+import {
   resolveSettings,
   terminal,
   type Assignment,
@@ -1026,6 +1031,7 @@ export class MissionKernel {
       if (this.userHold || this.store.get("relocationHold"))
         throw new Error("Resolve user or workspace holds before acceptance");
       const record = this.goals.accept(id, evidence, revision);
+      this.notifyGoalAccepted(id, record.id);
       this.turnActed = true;
       this.changed();
       return record;
@@ -1144,6 +1150,7 @@ export class MissionKernel {
       m.updatedAt = this.now();
       this.store.event("mission.completed", m.id);
       const archived = this.archiveMission(m, "completed", true);
+      this.notifyGoalAccepted(m.id, this.goals.node(m.id).acceptanceId!);
       this.turnActed = true;
       return archived;
     });
@@ -1713,7 +1720,14 @@ export class MissionKernel {
       Partial<
         Pick<
           Delivery,
-          "taskId" | "artifact" | "scheduleId" | "scheduleRevision"
+          | "taskId"
+          | "artifact"
+          | "scheduleId"
+          | "scheduleRevision"
+          | "goalId"
+          | "goalRevision"
+          | "goalDepth"
+          | "goalEvent"
         >
       >,
   ): Delivery {
@@ -1898,6 +1912,178 @@ export class MissionKernel {
       this.store.set("mission", m);
     }
     this.changed();
+  }
+  notificationPolicy() {
+    return resolveNotificationPolicy(
+      this.store.get<NotificationPolicy>("notificationPolicy"),
+    );
+  }
+  setNotificationPolicy(patch: Partial<NotificationPolicy>, reset = false) {
+    const policy = resolveNotificationPolicy(
+      reset ? {} : { ...this.notificationPolicy(), ...patch },
+    );
+    this.store.set("notificationPolicy", policy);
+    if (this.reservation && !this.leadRunning) {
+      const batch = this.reservation.batchId;
+      this.generation++;
+      this.reservation = undefined;
+      for (const delivery of this.store.deliveries("lead"))
+        if (
+          delivery.batchId === batch &&
+          ["leased", "admitted"].includes(delivery.state)
+        ) {
+          delivery.state = "pending";
+          delete delivery.batchId;
+          this.store.putDelivery(delivery);
+        }
+    }
+    for (const delivery of this.store.deliveries("lead"))
+      if (
+        delivery.kind === "goal" &&
+        delivery.state === "pending" &&
+        !triggersLead(delivery, policy)
+      ) {
+        delivery.state = "superseded";
+        delivery.reason =
+          "This goal notification was disabled; its goal and acceptance history remain available.";
+        this.store.putDelivery(delivery);
+      }
+    this.store.event("notification.policy", this.options.sessionId, policy);
+    this.turnActed = true;
+    this.changed();
+    return policy;
+  }
+  private notifyGoalAccepted(id: string, acceptanceId: string) {
+    const goal = this.goals.node(id);
+    if (!this.notificationPolicy().goalAcceptedLevels.includes(goal.depth))
+      return;
+    this.delivery({
+      key: `goal-accepted:${acceptanceId}`,
+      from: "goal-ledger",
+      to: "lead",
+      kind: "goal",
+      goalId: id,
+      goalRevision: goal.revision,
+      goalDepth: goal.depth,
+      goalEvent: "accepted",
+      summary: `Level ${goal.depth} goal accepted: ${goal.objective}. Goal ${id}, revision ${goal.revision}, acceptance ${acceptanceId}.`,
+    });
+  }
+  private goalBatchSettled(goal: GoalNode) {
+    const ids = new Set(this.goals.subtree(goal.id).map((node) => node.id));
+    return !this.store
+      .missionTasks(goal.rootId)
+      .some(
+        (task) =>
+          ids.has(task.goalId ?? task.missionId) &&
+          (!terminal(task) ||
+            ["unknown", "running"].includes(task.processState)),
+      );
+  }
+  private goalBatchKey(goal: GoalNode) {
+    const subtree = this.goals
+      .subtree(goal.id)
+      .filter((node) => !["cancelled", "skipped"].includes(node.state));
+    const parents = new Set(subtree.map((node) => node.parentId));
+    const tasks = this.store.missionTasks(goal.rootId);
+    const batch = subtree
+      .filter((node) => !parents.has(node.id))
+      .map((leaf) => [
+        leaf.id,
+        leaf.revision,
+        tasks
+          .filter(
+            (task) =>
+              (task.goalId ?? task.missionId) === leaf.id &&
+              (task.goalRevision ?? 0) === leaf.revision,
+          )
+          .map((task) => [task.id, task.epoch])
+          .sort(),
+      ]);
+    return `goal-ready:${goal.id}:${createHash("sha256")
+      .update(JSON.stringify([goal.revision, batch]))
+      .digest("hex")}`;
+  }
+  private notifyReadyGoals(mission: Mission) {
+    const levels = this.notificationPolicy().goalReadyLevels;
+    if (!levels.length) return;
+    const nodes = this.store.goals(mission.id),
+      tasks = this.store.missionTasks(mission.id);
+    for (const goal of nodes) {
+      if (
+        !levels.includes(goal.depth) ||
+        ["accepted", "cancelled", "skipped", "blocked"].includes(goal.state) ||
+        this.goals.blockers(goal.id).length ||
+        !this.goalBatchSettled(goal)
+      )
+        continue;
+      const subtree = this.goals
+        .subtree(goal.id)
+        .filter((node) => !["cancelled", "skipped"].includes(node.state));
+      const parents = new Set(subtree.map((node) => node.parentId));
+      const leaves = subtree.filter((node) => !parents.has(node.id));
+      const evidence: string[] = [];
+      let ready = leaves.length > 0;
+      for (const leaf of leaves) {
+        if (leaf.state === "accepted" && leaf.acceptanceId) {
+          evidence.push(`acceptance:${leaf.id}:${leaf.acceptanceId}`);
+          continue;
+        }
+        const assigned = tasks.filter(
+          (task) =>
+            (task.goalId ?? task.missionId) === leaf.id &&
+            (task.goalRevision ?? 0) === leaf.revision,
+        );
+        const superseded = new Set(
+          assigned.map((task) => task.attemptOf).filter(Boolean),
+        );
+        const attempts = assigned.filter((task) => !superseded.has(task.id));
+        if (
+          !attempts.length ||
+          assigned.some(
+            (task) =>
+              !terminal(task) ||
+              ["unknown", "running"].includes(task.processState),
+          ) ||
+          attempts.some((task) => task.state !== "completed")
+        ) {
+          ready = false;
+          break;
+        }
+        evidence.push(
+          ...attempts.map(
+            (task) =>
+              `task:${leaf.id}:${leaf.revision}:${task.id}:${task.epoch}`,
+          ),
+        );
+      }
+      if (!ready) continue;
+      this.delivery({
+        key: this.goalBatchKey(goal),
+        from: "goal-ledger",
+        to: "lead",
+        kind: "goal",
+        goalId: goal.id,
+        goalRevision: goal.revision,
+        goalDepth: goal.depth,
+        goalEvent: "ready",
+        summary: `Level ${goal.depth} execution batch settled; ready for acceptance: ${goal.objective}. Goal ${goal.id}, revision ${goal.revision}. Evidence references: ${evidence.slice(0, 5).join(", ")}. Inspect evidence; this notification does not accept the goal.`,
+      });
+    }
+  }
+  private validGoalDelivery(delivery: Delivery) {
+    if (delivery.kind !== "goal") return true;
+    const goal = delivery.goalId ? this.store.goal(delivery.goalId) : undefined;
+    if (!goal || goal.revision !== delivery.goalRevision) return false;
+    return delivery.goalEvent === "accepted"
+      ? goal.state === "accepted" &&
+          delivery.key === `goal-accepted:${goal.acceptanceId}`
+      : this.goalBatchSettled(goal) &&
+          delivery.key === this.goalBatchKey(goal) &&
+          !["accepted", "cancelled", "skipped", "blocked"].includes(
+            goal.state,
+          ) &&
+          !this.goals.blockers(goal.id).length;
   }
   async userControl(action: "pause" | "resume" | "stop") {
     const m = this.store.mission();
@@ -2661,6 +2847,7 @@ export class MissionKernel {
     return {
       recoveryPlan: this.recoveryPlan(),
       decisionPolicy: this.decisionPolicyValue,
+      notificationPolicy: this.notificationPolicy(),
       mission: m,
       planning: this.planningStatus(),
       goals: this.goals.summary(m?.id),
@@ -2696,6 +2883,7 @@ export class MissionKernel {
       m = s.mission;
     if (!m) return "";
     return [
+      `Lead notification policy: ${JSON.stringify(s.notificationPolicy)}. Use mission_notifications to configure task-success/failure wakeups and goal ready/accepted levels separately. Quiet results remain saved for collection or the next scheduled report. Goal-ready means execution settled, not acceptance. Do not alter the user's report cadence as a substitute for notification settings.`,
       `Current Mission Control recovery plan: ${JSON.stringify(this.recoveryPlan(5))}. Follow this current plan before repeating old recovery advice. Tools named here are callable by the lead model; do not claim that recovery failed unless an actual recovery tool returned an error.`,
       `Autonomy policy: ${this.decisionPolicyValue}. Choose implementation, retry, command, file, member and formatting details yourself inside the approved scope. Use mission_decision only for a concrete business boundary such as scope, acceptance, permission, budget, deadline, release or irreversible risk.`,
       "Decision answers do not require A/B/C tokens. A new direct human answer may delegate an in-scope choice to the lead. Quote that actual answer when resolving the exact decisionId and explain the selected next step; do not request another confirmation merely to obtain a letter. A policy change alone does not answer an existing decision or expand workspace or action authorization.",
@@ -2740,6 +2928,13 @@ export class MissionKernel {
     this.ticking = true;
     try {
       const now = this.now();
+      for (const delivery of this.store.deliveries("lead"))
+        if (delivery.state === "pending" && !this.validGoalDelivery(delivery)) {
+          delivery.state = "superseded";
+          delivery.reason =
+            "Goal revision or state changed; notification is no longer current.";
+          this.store.putDelivery(delivery);
+        }
       this.store.transaction(() => {
         for (const s of this.userHold ||
         this.store.mission()?.humanPaused ||
@@ -2912,6 +3107,7 @@ export class MissionKernel {
           }
           this.launch(task);
         }
+        this.notifyReadyGoals(mission);
         if (
           !mission.externalWait &&
           now - mission.lastReportAt >= this.settings.progressIntervalMs
@@ -3010,6 +3206,9 @@ export class MissionKernel {
   }
   private pump() {
     const m = this.store.mission();
+    const policy = this.notificationPolicy();
+    const trigger = (d: Delivery) =>
+      triggersLead(d, policy) && this.validGoalDelivery(d);
     if (
       this.closing ||
       this.userHold ||
@@ -3031,7 +3230,8 @@ export class MissionKernel {
           (d) =>
             d.state === "pending" &&
             d.nextAttemptAt <= this.now() &&
-            (!d.missionId || d.missionId === m?.id),
+            (!d.missionId || d.missionId === m?.id) &&
+            trigger(d),
         )
     ) {
       this.delivery({
@@ -3053,15 +3253,24 @@ export class MissionKernel {
           (m?.status !== "attention" ||
             (d.kind === "reminder" && !d.missionId)) &&
           (m?.status === "active" ||
-            ["failure", "decision", "recovery", "reminder", "result"].includes(
-              d.kind,
-            )),
+            [
+              "failure",
+              "decision",
+              "recovery",
+              "reminder",
+              "result",
+              "goal",
+            ].includes(d.kind)),
       );
-    const trigger = (d: Delivery) =>
-      d.kind !== "progress" || d.from === "maintenance";
     if (!pending.some(trigger)) return;
     const priority = (d: Delivery) =>
-      d.kind === "decision" ? 0 : d.kind === "failure" ? 1 : trigger(d) ? 2 : 3;
+      !trigger(d)
+        ? 3
+        : d.kind === "decision"
+          ? 0
+          : d.kind === "failure"
+            ? 1
+            : 2;
     const eligible = pending
       .sort((a, b) => priority(a) - priority(b) || a.createdAt - b.createdAt)
       .slice(0, 8);
@@ -3077,7 +3286,7 @@ export class MissionKernel {
       }
     });
     const content =
-      "Mission Control updates. Handle these identities once; inspect artifacts when needed.\n\n" +
+      `Mission Control updates. Handle these identities once; inspect artifacts when needed.\nPending saved notifications: ${pending.length}; quiet: ${pending.filter((delivery) => !trigger(delivery)).length}. This batch includes ${eligible.length}; collect remaining saved results when needed without rerunning work.\n\n` +
       eligible
         .map(
           (d) =>
@@ -3728,7 +3937,10 @@ export class MissionKernel {
         .deliveries("lead")
         .some(
           (d) =>
-            d.batchId === batchId && ["leased", "admitted"].includes(d.state),
+            d.batchId === batchId &&
+            ["leased", "admitted"].includes(d.state) &&
+            triggersLead(d, this.notificationPolicy()) &&
+            this.validGoalDelivery(d),
         )
     );
   }

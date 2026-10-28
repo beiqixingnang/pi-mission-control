@@ -108,6 +108,12 @@ async function fixture(run) {
 
 test("a different agent home imports goals, member history, notes and evidence without credentials or repository writes", () =>
   fixture(async (h) => {
+    const notifications = h.kernel.setNotificationPolicy({
+      taskSuccess: false,
+      taskFailure: true,
+      goalReadyLevels: [2],
+      goalAcceptedLevels: [1, 2],
+    });
     const artifact = path.join(h.workspace, "Proof.TXT");
     fs.writeFileSync(artifact, "EXACT_ACCEPTED_EVIDENCE");
     const receipt = h.kernel.goals.accept(
@@ -243,6 +249,7 @@ test("a different agent home imports goals, member history, notes and evidence w
     restored.start(false);
     try {
       assert.notEqual(r.sessionId, h.id);
+      assert.deepEqual(restored.notificationPolicy(), notifications);
       assert.equal(restored.store.mission().id, sourceDb.id);
       assert.deepEqual(restored.store.acceptance(receipt.id), receipt);
       assert.equal(restored.store.get("relocationHold"), true);

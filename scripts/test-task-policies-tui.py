@@ -258,6 +258,56 @@ def main():
         tool("team_message", {"to": reviewer, "operation": "note", "message": "Direct discussion only; no formal task"})
         wait(lambda: any(d["to"] == reviewer and "Direct discussion only" in d["summary"] for d in query("deliveries")), "idle note was retained without a new execution turn")
         assert len(query("tasks")) == previous_tasks
+        # Notification settings are independent of reporting and peer handoffs.
+        before_notifications = {node["id"] for node in query("goal_nodes")}
+        tool("goal_plan", {"goals": [
+            {"key": "notification-stage", "parentId": original["id"], "objective": "Notification stage " + uuid.uuid4().hex[:6], "criteria": ["Both leaves verified"]},
+            {"key": "notification-success", "parentId": "notification-stage", "objective": "Quiet successful leaf", "criteria": ["Saved success receipt"]},
+            {"key": "notification-failure", "parentId": "notification-stage", "objective": "Independent failed leaf", "criteria": ["Retry succeeds"]}]})
+        wait(lambda: len([node for node in query("goal_nodes") if node["id"] not in before_notifications]) == 3, "notification regression registered a separate second-level batch")
+        notification_nodes = [node for node in query("goal_nodes") if node["id"] not in before_notifications]
+        notification_stage = next(node for node in notification_nodes if node["depth"] == 2)
+        success_leaf = next(node for node in notification_nodes if node["objective"] == "Quiet successful leaf")
+        failure_leaf = next(node for node in notification_nodes if node["objective"] == "Independent failed leaf")
+        report_at = mission()["lastReportAt"]
+        tool("mission_notifications", {"action": "set", "taskSuccess": False, "taskFailure": True, "goalReadyLevels": [], "goalAcceptedLevels": []})
+        wait(lambda: query("meta", "key='notificationPolicy'") and query("meta", "key='notificationPolicy'")[0]["taskSuccess"] is False, "the real lead model configured success quiet and failure wake separately")
+        tool("team_send", {"to": executor, "goalId": success_leaf["id"], "message": 'V2_TEST:{"op":"answer","text":"QUIET_TUI_RECEIPT"}'})
+        wait(lambda: any(t.get("goalId") == success_leaf["id"] and t["state"] == "completed" for t in query("tasks")), "a real managed success finished under the quiet policy")
+        success_task = next(t for t in query("tasks") if t.get("goalId") == success_leaf["id"])
+        success_delivery = next(d for d in query("deliveries") if d.get("taskId") == success_task["id"] and d["to"] == "lead")
+        assert success_delivery["state"] == "pending" and success_delivery["attempts"] == 0
+        checks.append("successful delivery remained unread without waking the lead")
+        failure_control = policy_dir / "notification-failure.json"
+        failure_control.write_text(json.dumps({"failures": 99, "error": "401 Unauthorized offline notification fixture"}))
+        tool("team_send", {"to": reviewer, "goalId": failure_leaf["id"], "message": "V2_TEST:" + json.dumps({"op": "flaky", "key": uuid.uuid4().hex, "controlFile": str(failure_control)})})
+        wait(lambda: any(t.get("goalId") == failure_leaf["id"] and t["state"] == "failed" for t in query("tasks")), "a real managed task failed independently of the quiet success")
+        failed_task = next(t for t in query("tasks") if t.get("goalId") == failure_leaf["id"])
+        wait(lambda: any(d.get("taskId") == failed_task["id"] and d["to"] == "lead" and d["attempts"] > 0 for d in query("deliveries")), "failure still woke the lead while success notifications were quiet")
+        tool("mission_notifications", {"action": "set", "goalReadyLevels": [2], "goalAcceptedLevels": [2]})
+        wait(lambda: query("meta", "key='notificationPolicy'")[0]["goalReadyLevels"] == [2], "second-level readiness and acceptance notifications were enabled without changing task flags")
+        assert not any(d.get("goalId") == notification_stage["id"] and d.get("goalEvent") == "ready" for d in query("deliveries"))
+        failure_control.write_text(json.dumps({"failures": 0}))
+        tool("team_resume", {"taskId": failed_task["id"]})
+        wait(lambda: any(t.get("attemptOf") == failed_task["id"] and t["state"] == "completed" for t in query("tasks")), "an explicit retry completed the failed leaf")
+        wait(lambda: any(d.get("goalId") == notification_stage["id"] and d.get("goalEvent") == "ready" and d["attempts"] > 0 for d in query("deliveries")), "only the complete second-level execution batch generated its ready-for-acceptance wake")
+        assert next(n for n in query("goal_nodes") if n["id"] == notification_stage["id"])["state"] != "accepted"
+        for notification_leaf in [success_leaf, failure_leaf]:
+            tool("goal_accept", {"goalId": notification_leaf["id"], "revision": 0, "evidence": [{"criterion": 1, "source": "statement", "summary": "Dedicated notification fixture completed and its receipt was checked"}]})
+            wait(lambda: next(n for n in query("goal_nodes") if n["id"] == notification_leaf["id"])["state"] == "accepted", "third-level leaf accepted without a configured third-level acceptance notification")
+        tool("goal_accept", {"goalId": notification_stage["id"], "revision": 0, "evidence": [{"criterion": 1, "source": "statement", "summary": "Both required notification leaf receipts were verified"}]})
+        wait(lambda: any(d.get("goalId") == notification_stage["id"] and d.get("goalEvent") == "accepted" and d["attempts"] > 0 for d in query("deliveries")), "second-level goal acceptance generated a separate exact-level notification")
+        assert not any(d.get("goalId") in [success_leaf["id"], failure_leaf["id"]] and d.get("goalEvent") == "accepted" for d in query("deliveries"))
+        assert mission()["lastReportAt"] == report_at
+        checks.append("notification changes preserved the hourly report schedule and never auto-accepted a goal")
+        tool("goal_pause", {"reason": "Preserve notification settings through reload"})
+        wait(lambda: mission()["status"] == "paused", "notification fixture paused before reload")
+        reload("literal /reload preserved independent success/failure and second-level notification settings")
+        assert query("meta", "key='notificationPolicy'")[0] == {"taskSuccess": False, "taskFailure": True, "goalReadyLevels": [2], "goalAcceptedLevels": [2]}
+        tool("mission_notifications", {"action": "reset"})
+        wait(lambda: query("meta", "key='notificationPolicy'")[0]["taskSuccess"] is True, "notification defaults restored explicitly for the remaining regressions")
+        tool("goal_resume", {"reason": "Continue the remaining dedicated regressions"})
+        wait(lambda: mission()["status"] == "active", "the AI resumed its own notification-test pause without renewing the reporting cadence")
         artifact = workspace / "decode-findings.txt"
         if artifact.exists():
             artifact.unlink()

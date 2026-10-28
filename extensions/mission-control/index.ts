@@ -1266,7 +1266,7 @@ export default function (pi: ExtensionAPI) {
       throw new Error(
         "No unfinished tasks. Collect results and continue approved work or complete the mission with evidence.",
       );
-    return "Lead turn ended. Runtime maintenance and result wakeups remain active.";
+    return "Lead turn ended. Runtime maintenance remains active; lead wakeups follow mission_notifications and the independent report interval.";
   };
   tool(
     "mission_wait",
@@ -1834,9 +1834,59 @@ export default function (pi: ExtensionAPI) {
       current().resumeProgress(args.goalId, args.expectedRevision, args.reason),
   );
   tool(
+    "mission_notifications",
+    "Configure lead notification policy",
+    "Inspect/set/reset this conversation's persisted lead wake policy. Task success and failure are independent booleans. goalReadyLevels notifies when every required leaf has accepted evidence or successful settled work, labelled ready for acceptance; it never auto-accepts a goal. goalAcceptedLevels notifies only after goal_accept at those exact depths (1=main goal, 2=stage). Example: taskSuccess:false, taskFailure:true, goalReadyLevels:[2] suppresses leaf-task success wakes but wakes on failures and second-level batches ready for review. Empty level lists disable those goal notifications. Quiet results remain durable and can join scheduled reports or other wakes. Peer/parent handoffs, explicit decisions, runtime recovery and the report interval remain independent. Existing sessions can apply this directly without a slash command.",
+    Type.Object({
+      action: optional(
+        Type.Union([
+          Type.Literal("status"),
+          Type.Literal("set"),
+          Type.Literal("reset"),
+        ]),
+      ),
+      taskSuccess: optional(Type.Boolean()),
+      taskFailure: optional(Type.Boolean()),
+      goalReadyLevels: optional(
+        Type.Array(Type.Integer({ minimum: 1, maximum: 12 }), { maxItems: 12 }),
+      ),
+      goalAcceptedLevels: optional(
+        Type.Array(Type.Integer({ minimum: 1, maximum: 12 }), { maxItems: 12 }),
+      ),
+    }),
+    (args) => {
+      const patch: any = {};
+      for (const key of [
+        "taskSuccess",
+        "taskFailure",
+        "goalReadyLevels",
+        "goalAcceptedLevels",
+      ])
+        if (args[key] !== undefined && args[key] !== null)
+          patch[key] = args[key];
+      const action =
+        args.action ?? (Object.keys(patch).length ? "set" : "status");
+      const policy =
+        action === "status"
+          ? current().notificationPolicy()
+          : current().setNotificationPolicy(patch, action === "reset");
+      return {
+        policy,
+        reportIntervalSeconds: current().settings.progressIntervalMs / 1000,
+        scope: "conversation",
+        appliesTo:
+          "Unread lead notifications; an already-running response can finish",
+        quietResults:
+          "Retained for explicit collection, the next scheduled report or another eligible wake",
+        goalReadyMeaning:
+          "Execution settled and ready for review; goal acceptance remains explicit",
+      };
+    },
+  );
+  tool(
     "mission_report",
     "Set progress interval",
-    "Set an approved regular progress-report interval in seconds. Completion/failure wakeups and maintenance remain automatic.",
+    "Set an approved regular progress-report interval in seconds. Task-success/failure and goal-level wakeups are configured separately through mission_notifications; maintenance and peer handoffs remain automatic.",
     Type.Object({ seconds: Type.Integer({ minimum: 1, maximum: 86400 }) }),
     (args) => {
       current().setReportInterval(args.seconds * 1000);

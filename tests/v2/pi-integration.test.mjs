@@ -175,6 +175,127 @@ async function until(fn, timeout = 25000) {
 }
 
 test(
+  "real model configures independent notification flags and exact goal levels across reload",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "mission_notifications",
+            args: {
+              action: "set",
+              taskSuccess: false,
+              taskFailure: true,
+              goalReadyLevels: [2],
+              goalAcceptedLevels: [2, 1],
+            },
+            noRepeatWake: true,
+          }),
+      );
+      assert.ok(!JSON.parse(h.session.getLastAssistantText()).isError);
+      await h.session.reload();
+      const status = JSON.parse(
+        (await h.tool("mission_notifications")).content[0].text,
+      );
+      assert.deepEqual(status.policy, {
+        taskSuccess: false,
+        taskFailure: true,
+        goalReadyLevels: [2],
+        goalAcceptedLevels: [1, 2],
+      });
+      assert.equal(status.reportIntervalSeconds, 3600);
+      const invalid = await h.tool("mission_notifications", {
+        action: "set",
+        goalReadyLevels: [13],
+      });
+      assert.equal(invalid.isError, true);
+      assert.deepEqual((await h.snapshot()).notificationPolicy, status.policy);
+      const reset = JSON.parse(
+        (await h.tool("mission_notifications", { action: "reset" })).content[0]
+          .text,
+      );
+      assert.equal(reset.policy.taskSuccess, true);
+      assert.deepEqual(reset.policy.goalReadyLevels, []);
+    }),
+);
+
+test(
+  "real managed success stays quiet and failure wakes the lead with the retained receipt",
+  { timeout: 25000 },
+  () =>
+    harness(async (h) => {
+      await h.session.prompt(
+        'V2_TEST:{"op":"answer","text":"READY","noRepeatWake":true}',
+      );
+      await h.tool("goal_start", {
+        objective: "Test independent notification controls",
+        criteria: ["Keep successful receipts and wake on failures"],
+      });
+      await h.tool("mission_notifications", {
+        action: "set",
+        taskSuccess: false,
+        taskFailure: true,
+      });
+      await h.tool("team_spawn", {
+        name: "notification-worker",
+        role: "Offline notification fixture",
+        workspace: { execution: "files" },
+      });
+      const send = async (command) =>
+        JSON.parse(
+          (
+            await h.tool("team_send", {
+              to: "notification-worker",
+              message: "V2_TEST:" + JSON.stringify(command),
+            })
+          ).content[0].text,
+        ).taskId;
+      const success = await send({ op: "answer", text: "QUIET_REAL_RECEIPT" });
+      await until(async () =>
+        (await h.snapshot()).tasks.some(
+          (task) => task.id === success && task.state === "completed",
+        ),
+      );
+      const quiet = (await h.snapshot()).deliveries.find(
+        (d) => d.taskId === success,
+      );
+      assert.equal(quiet.state, "pending");
+      assert.equal(quiet.attempts, 0);
+      const failure = await send({
+        op: "flaky",
+        key: crypto.randomUUID(),
+        failures: 99,
+        error: "401 Unauthorized offline notification fixture",
+      });
+      await until(async () =>
+        (await h.snapshot()).tasks.some(
+          (task) => task.id === failure && task.state === "failed",
+        ),
+      );
+      await until(async () =>
+        (await h.snapshot()).deliveries.some(
+          (d) => d.taskId === failure && d.attempts > 0,
+        ),
+      );
+      await until(async () =>
+        (await h.snapshot()).deliveries.some(
+          (d) => d.taskId === success && d.state === "observed",
+        ),
+      );
+      await h.tool("goal_pause", {
+        reason: "Notification assertions complete",
+      });
+      assert.ok(
+        (await h.snapshot()).deliveries.some(
+          (d) => d.taskId === failure && d.kind === "failure",
+        ),
+      );
+    }),
+);
+
+test(
   "real goal_pause keeps root and child planning editable across reload without resuming execution",
   { timeout: 20000 },
   () =>
@@ -3286,7 +3407,7 @@ test(
       const catalog = JSON.parse(
         (await h.tool("mission_capabilities")).content[0].text,
       );
-      assert.equal(catalog.tools.length, 59);
+      assert.equal(catalog.tools.length, 60);
       assert.ok(catalog.tools.every((t) => t.active));
       h.session.setActiveToolsByName(["read"]);
       await h.session.reload();

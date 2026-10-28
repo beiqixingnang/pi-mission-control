@@ -540,6 +540,7 @@ export default async function (pi: ExtensionAPI) {
       "mission_recover",
       "mission_reconcile",
       "mission_report",
+      "mission_notifications",
       "mission_compact",
       "mission_wait_external",
       "mission_signal",

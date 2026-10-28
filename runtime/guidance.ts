@@ -52,7 +52,11 @@ export const teamWorkflowGuidance =
   "publication/deployment, credentials/permission changes, external messages, irreversible actions or conflicting user instructions); keep independent authorized work moving. " +
   "Deliver completed and uncovered criteria, evidence, tests, real blockers and next steps together. Reuse valid tests and review receipts; run additional checks only for relevant changes, contradictions or new risks. " +
   "Internal plan checks, user-requested reporting cadence and completion/failure events are separate. Changing one never authorizes changing the others. " +
-  "Do not create duplicate maintenance schedules or silently reduce the user's reports to daily updates.";
+  "Do not create duplicate maintenance schedules or silently reduce the user's reports to daily updates. " +
+  "Use mission_notifications to configure task-success and task-failure wakes independently, plus exact goal-ready and goal-accepted levels. " +
+  "For second-level batch review with fewer interruptions, taskSuccess:false, taskFailure:true and goalReadyLevels:[2] can be combined. " +
+  "A ready notification means execution has settled, not that the goal is accepted; never automatically equate member completion with goal acceptance. " +
+  "Quiet results remain saved and join the next scheduled report or another eligible wake. Changing notification settings never changes reporting cadence or peer/parent task handoffs.";
 
 export const memberWorkflowGuidance =
   "Work continuously through the complete authorized batch, including its dependencies, acceptance criteria and evidence, rather than returning after each file for reassignment. " +

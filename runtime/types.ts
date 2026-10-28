@@ -201,6 +201,7 @@ export interface Delivery {
     | "progress"
     | "reminder"
     | "recovery"
+    | "goal"
     | "continue";
   summary: string;
   artifact?: string;
@@ -214,6 +215,10 @@ export interface Delivery {
   missionId?: string;
   scheduleId?: string;
   scheduleRevision?: number;
+  goalId?: string;
+  goalRevision?: number;
+  goalDepth?: number;
+  goalEvent?: "ready" | "accepted";
 }
 export interface Mission {
   id: string;

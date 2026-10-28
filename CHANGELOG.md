@@ -1,3 +1,10 @@
+# 2.10.0 — configurable lead notifications (2026-10-28)
+
+- Add mission_notifications so the lead can independently configure task-success and task-failure wakes, exact goal-ready levels and exact accepted-goal levels. Preserve existing default task wake behavior and the separate report cadence.
+- Retain quiet task receipts for collection and later digests without an idle continuation bypass; preserve parent/peer handoffs and explicit authorization/runtime-recovery notifications. Fence not-yet-started wakes when the policy changes.
+- Notify readiness only when every required leaf has accepted evidence or successful settled work for its current revision. Keep readiness separate from acceptance, deduplicate unchanged batches and exact acceptance receipts, and supersede stale goal notifications.
+- Persist policy across reload, relocation and portable transfer without changing user holds, budgets or task execution.
+
 # 2.9.0 — editable paused goals (2026-10-28)
 
 - Add goal_pause and goal_resume so the AI can handle natural-language pause, continue/restart and edit requests, or pause and resume its own planning adjustments. Preserve user pauses for edit-only requests. Goal and child edits, planning, usage and independent holds survive reload without restarting work. Explicitly restore a mistakenly stopped retained goal to paused planning by ID while preserving its stopped archive and old task records; resume on the user's restart intent without a slash command.
