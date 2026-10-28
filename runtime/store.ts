@@ -138,10 +138,12 @@ export class Store {
     this.db.prepare("DELETE FROM meta WHERE key=?").run(key);
   }
   archiveMission(mission: Mission, at: number, reason: string) {
-    const archived = this.archive("goal", mission, at, reason);
-    this.putMission(archived);
-    this.unset("mission");
-    return archived;
+    return this.transaction(() => {
+      const archived = this.archive("goal", mission, at, reason);
+      this.putMission(archived);
+      if (this.mission()?.id === mission.id) this.unset("mission");
+      return archived;
+    });
   }
   archive<T extends { id: string }>(
     kind: ArchiveKind,

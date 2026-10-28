@@ -122,6 +122,25 @@ export class GoalPanel {
             : []),
           ...(goal.reason ? [`原因：${goal.reason}`] : []),
           ...(goal.nextStep ? [`下一步：${goal.nextStep}`] : []),
+          ...(goal.plan
+            ? [
+                `执行计划 · 版本 ${goal.planRevision ?? 0}：`,
+                ...goal.plan
+                  .split("\n")
+                  .flatMap((line) => line.match(/[\s\S]{1,2000}/gu) ?? [""]),
+              ]
+            : ["执行计划：未设置（可选）"]),
+          ...(goal.planEditors?.length
+            ? [
+                "计划编辑授权：" +
+                  goal.planEditors
+                    .map(
+                      (entry) =>
+                        `${this.kernel.store.member(entry.memberId)?.name ?? entry.memberId}（${entry.mode === "once" ? "一次性" : "长期"}）`,
+                    )
+                    .join("、"),
+              ]
+            : []),
           ...detail.blockers.map((b) => `阻塞：${b}`),
           ...(goal.estimateMs
             ? [

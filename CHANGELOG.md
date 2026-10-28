@@ -1,3 +1,13 @@
+# 2.11.0 — optional execution plans and direct goal archival (2026-10-28)
+
+- Add optional execution-plan text to main goals and subgoals, with independent revisions, readable task/ancestor previews, paginated member access and goal-panel display. Plan-only edits preserve acceptance, scope, pauses, budgets and running tasks.
+- Add goal_plan_update and goal_plan_authorize. Grant exact goal/member editing once or permanently across tasks/reload, or revoke it. Consume once grants only on successful changed writes; fence stale versions and execution tokens, keep transport replays idempotent, and prevent members from granting authority or changing criteria through plan edits. Preserve plans and grants across portable migration.
+
+- Resolve goal_stop by the requested main goal ID, including inactive planned, paused and blocked goals. Archive without selecting or resuming them, cancel only their task trees and deliveries, and retain existing evidence and unknown-process receipts.
+- Preserve another selected goal's execution, pauses, holds, wake reservation and activity accounting, including when selection changes during asynchronous cancellation. Repeated stops return the retained archive; accepted goals keep their acceptance and child cancellation stays explicit through goal_edit.
+- Verify direct archival through real model tools, bottom-panel removal and same-process /reload in the dedicated WSL test conversation.
+- Keep the expanded tool catalog valid within its bounded output using short list descriptions and full per-tool lookups.
+
 # 2.10.0 — configurable lead notifications (2026-10-28)
 
 - Add mission_notifications so the lead can independently configure task-success and task-failure wakes, exact goal-ready levels and exact accepted-goal levels. Preserve existing default task wake behavior and the separate report cadence.

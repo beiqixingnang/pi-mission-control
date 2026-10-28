@@ -50,6 +50,116 @@ const claim = (criterion = 1) => ({
   summary: "Concrete fixture result recorded for this criterion",
 });
 
+for (const state of ["planned", "paused", "blocked"])
+  test(`stop archives an unselected ${state} main goal without activation or changing current execution`, () =>
+    using(async (h) => {
+      const [old, current] = h.kernel.planGoals([
+        { objective: "Obsolete plan", criteria: ["Retain history"] },
+        { objective: "Current governance", criteria: ["Keep running"] },
+      ]);
+      const [child] = h.kernel.planGoals([
+        {
+          parentId: old.id,
+          objective: "Verified old work",
+          criteria: ["Keep receipt"],
+        },
+      ]);
+      const receipt = h.kernel.acceptGoal(child.id, [claim()], 0);
+      h.kernel.activateGoal(current.id);
+      if (state === "paused") h.kernel.pauseGoal(old.id);
+      if (state === "blocked")
+        h.kernel.editGoal(
+          old.id,
+          { state: "blocked", reason: "Old blocker" },
+          0,
+        );
+      const mission = h.kernel.store.mission();
+      mission.turns = 9;
+      mission.outputTokens = 123;
+      h.kernel.store.set("mission", mission);
+      const clock = h.kernel.store.get("missionActivityClock");
+      const generation = h.kernel.generation;
+      const reservation = { id: "current-reservation" };
+      h.kernel.reservation = reservation;
+      const archived = await h.kernel.stopGoal(old.id, "Archive obsolete plan");
+      assert.equal(archived.id, old.id);
+      assert.equal(archived.status, "stopped");
+      assert.equal(archived.archiveReason, "stopped");
+      assert.deepEqual(h.kernel.store.mission(), mission);
+      assert.deepEqual(h.kernel.store.get("missionActivityClock"), clock);
+      assert.equal(h.kernel.generation, generation);
+      assert.equal(h.kernel.reservation, reservation);
+      assert.equal(h.kernel.snapshot().held, false);
+      assert.equal(h.kernel.goals.node(old.id).state, "cancelled");
+      assert.deepEqual(h.kernel.store.acceptance(receipt.id), receipt);
+      assert.equal(h.kernel.goals.node(child.id).acceptanceId, receipt.id);
+      h.advance(5000);
+      assert.deepEqual(
+        await h.kernel.stopGoal(old.id, "Repeated stop"),
+        archived,
+      );
+      await h.reload();
+      assert.equal(h.kernel.store.mission().id, current.id);
+      assert.equal(h.kernel.store.mission().status, "active");
+      assert.equal(h.kernel.store.mission().turns, 9);
+      assert.deepEqual(h.kernel.store.savedMission(old.id), archived);
+      assert.deepEqual(h.kernel.store.archived("goal", old.id), archived);
+    }));
+
+test("stop by ID works without a selected mission and preserves independent holds", () =>
+  using(async (h) => {
+    const [current, old] = h.kernel.planGoals([
+      { objective: "Selected plan", criteria: ["Keep paused"] },
+      { objective: "Old retained plan", criteria: ["Archive directly"] },
+    ]);
+    h.kernel.pauseGoal(current.id, "User pause", 0, "user");
+    h.kernel.store.set("escapeHold", true);
+    h.kernel.store.set("relocationHold", true);
+    const before = h.kernel.store.mission();
+    await h.kernel.stopGoal(old.id);
+    assert.deepEqual(h.kernel.store.mission(), before);
+    assert.equal(h.kernel.snapshot().held, true);
+    assert.equal(h.kernel.store.get("escapeHold"), true);
+    assert.equal(h.kernel.store.get("relocationHold"), true);
+    h.kernel.store.unset("mission");
+    // Legacy retained roots may predate the separate saved-mission row.
+    h.kernel.store.db
+      .prepare("DELETE FROM goal_missions WHERE id=?")
+      .run(current.id);
+    const result = await h.kernel.stopGoal(current.id);
+    assert.equal(result.id, current.id);
+    assert.equal(result.status, "stopped");
+    assert.equal(h.kernel.store.mission(), undefined);
+    assert.equal(h.kernel.store.get("escapeHold"), true);
+    assert.equal(h.kernel.store.get("relocationHold"), true);
+  }));
+
+test("stop rejects unknown, subgoal and accepted identities without changing the selected goal", () =>
+  using(async (h) => {
+    const done = h.kernel.setGoal("Accepted plan", ["Evidence retained"]);
+    h.kernel.complete([{ criterion: 1, evidence: "Verified" }]);
+    const current = h.kernel.setGoal("Current plan", ["Stay selected"]);
+    const [child] = h.kernel.planGoals([
+      {
+        parentId: current.id,
+        objective: "Child",
+        criteria: ["Use explicit child edit"],
+      },
+    ]);
+    const before = h.kernel.store.mission();
+    const accepted = h.kernel.store.savedMission(done.id);
+    await assert.rejects(h.kernel.stopGoal("missing-goal"), /Unknown goal/);
+    await assert.rejects(h.kernel.stopGoal(child.id), /main goal.*goal_edit/);
+    await assert.rejects(h.kernel.stopGoal(done.id), /accepted.*complete/);
+    assert.deepEqual(h.kernel.store.mission(), before);
+    assert.deepEqual(h.kernel.store.savedMission(done.id), accepted);
+    assert.equal(h.kernel.goals.node(done.id).state, "accepted");
+    const result = await h.kernel.stopGoal();
+    assert.equal(result.id, current.id);
+    assert.equal(h.kernel.store.mission(), undefined);
+    await assert.rejects(h.kernel.stopGoal(), /Specify.*goalId/);
+  }));
+
 test("root acceptance is atomic for the requested identity and same-revision repeats return its original receipt", () =>
   using((h) => {
     const [a, b] = h.kernel.planGoals([

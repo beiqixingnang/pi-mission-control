@@ -1343,6 +1343,7 @@ export default function (pi: ExtensionAPI) {
           module: Type.Optional(Type.String({ maxLength: 200 })),
           scope: Type.Optional(scopeSchema),
           nextStep: Type.Optional(Type.String({ maxLength: 2000 })),
+          plan: Type.Optional(Type.String({ maxLength: 16000 })),
           estimateMs: Type.Optional(
             Type.Tuple([
               Type.Integer({ minimum: 0 }),
@@ -1379,6 +1380,7 @@ export default function (pi: ExtensionAPI) {
             "summary",
             "definition",
             "scope",
+            "plan",
             "acceptance",
             "history",
             "receipts",
@@ -1395,6 +1397,15 @@ export default function (pi: ExtensionAPI) {
         limit = args.limit ?? 10;
       const brief = (node: any) => ({
         ...node,
+        plan: undefined,
+        planEditors: undefined,
+        executionPlan: node.plan
+          ? {
+              revision: node.planRevision ?? 0,
+              preview: cleanText(node.plan, 160),
+              full: "goal_tree(section:plan,goalId)",
+            }
+          : undefined,
         objective: cleanText(node.objective, 300),
         criteria: undefined,
         criterionCount: node.criteria.length,
@@ -1413,6 +1424,8 @@ export default function (pi: ExtensionAPI) {
         nextStep: node.nextStep ? cleanText(node.nextStep, 300) : undefined,
       });
       if (args.goalId) {
+        if (args.section === "plan")
+          return current().goalPlans.view(args.goalId);
         const detail = ledger.detail(args.goalId);
         if (args.section === "definition") {
           const pageSize = Math.min(limit, 5);
@@ -1530,6 +1543,31 @@ export default function (pi: ExtensionAPI) {
         bounded: true,
       };
     },
+  );
+  tool(
+    "goal_plan_update",
+    "Edit execution plan",
+    "Add, revise or remove an optional execution plan on any unfinished main goal or subgoal, including while paused or while workers execute. Read its current planRevision from goal_tree(section:plan), supply Markdown/text or null to remove it. Plan revisions are separate from goal/acceptance revisions; edits preserve scope, evidence, budget and pauses. Plans describe approved methods and do not grant permissions. Give members exact per-goal once/permanent editing authority through goal_plan_authorize; otherwise they can only read plans.",
+    Type.Object({
+      goalId: Type.String(),
+      plan: Type.Union([Type.String({ maxLength: 16000 }), Type.Null()]),
+      planRevision: Type.Integer({ minimum: 0 }),
+    }),
+    (args) =>
+      current().updateGoalPlan(args.goalId, args.plan, args.planRevision),
+  );
+  tool(
+    "goal_plan_authorize",
+    "Authorize member plan editing",
+    "Grant once or permanent execution-plan editing for one exact goalId and member identity, or revoke it. once permits one successful changed write; stale/invalid/no-op writes do not consume it. permanent persists across tasks and reload until revoked. Grants do not extend to children, peers, task delegation, criteria, scope or acceptance; workers cannot grant authority. The member must execute in this main goal to use the grant. Query current editors with goal_tree(section:plan).",
+    Type.Object({
+      goalId: Type.String(),
+      member: Type.String(),
+      mode: Type.Union(
+        ["once", "permanent", "revoke"].map((mode) => Type.Literal(mode)),
+      ),
+    }),
+    (args) => current().authorizeGoalPlan(args.goalId, args.member, args.mode),
   );
   tool(
     "goal_edit",
@@ -1704,7 +1742,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_stop",
     "Stop goal",
-    "Permanently stop and archive the active goal, cancel unfinished tasks and suppress stale deliveries. For a temporary pause, disabling goal reminders or planning edits while paused, use goal_pause instead. Only use this for the user's actual final stop/archive request; it is not a pause switch.",
+    "Permanently stop and archive a main goal by goalId (defaults to the selected goal). Inactive, planned, paused or blocked main goals can be archived directly without activation or affecting another selected goal. Cancel only that goal's unfinished tasks and suppress its stale deliveries; repeated stops return the existing archive. For a temporary pause, disabling goal reminders or planning edits while paused, use goal_pause instead. Only use this for the user's actual final stop/archive request; it is not a pause switch.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       reason: Type.Optional(Type.String({ maxLength: 2000 })),
@@ -1997,7 +2035,12 @@ export default function (pi: ExtensionAPI) {
           "Tools are directly declared from one host registry, refreshed at session start and before model requests",
         tools: shown.map((t) => ({
           name: t.name,
-          description: t.description,
+          description: args.toolName
+            ? t.description
+            : cleanText(t.description, 200),
+          ...(!args.toolName && t.description.length > 200
+            ? { fullDescription: "mission_capabilities(toolName)" }
+            : {}),
           active: active.has(t.name),
           exposure: t.exposure,
           module: path.basename(t.sourceInfo.path),

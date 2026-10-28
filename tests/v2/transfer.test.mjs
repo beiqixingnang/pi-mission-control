@@ -225,6 +225,14 @@ test("a different agent home imports goals, member history, notes and evidence w
     );
     const before = fs.readFileSync(h.session);
     const sourceDb = h.kernel.store.mission();
+    const [planning] = h.kernel.planGoals([
+      {
+        objective: "Retained optional plan",
+        criteria: ["Keep authorization"],
+        plan: "Continue the saved implementation steps",
+      },
+    ]);
+    h.kernel.authorizeGoalPlan(planning.id, member.name, "permanent");
     await h.exportNow();
     assert.deepEqual(fs.readFileSync(h.session), before);
     assert.deepEqual(h.kernel.store.mission(), sourceDb);
@@ -250,6 +258,14 @@ test("a different agent home imports goals, member history, notes and evidence w
     try {
       assert.notEqual(r.sessionId, h.id);
       assert.deepEqual(restored.notificationPolicy(), notifications);
+      assert.equal(
+        restored.goalPlans.view(planning.id).plan,
+        "Continue the saved implementation steps",
+      );
+      assert.equal(
+        restored.goalPlans.permission(planning.id, member.id),
+        "permanent",
+      );
       assert.equal(restored.store.mission().id, sourceDb.id);
       assert.deepEqual(restored.store.acceptance(receipt.id), receipt);
       assert.equal(restored.store.get("relocationHold"), true);

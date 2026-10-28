@@ -341,18 +341,35 @@ export default async function (pi: ExtensionAPI) {
     name: "goal_context",
     label: "Read assigned goal",
     description:
-      "Read this task's goal revision, parent stages, scope and acceptance criteria. Fetch missing pages when the assignment preview is incomplete; do not duplicate a complete lookup. Read-only; cannot edit or accept any goal.",
+      "Read this task's goal revision, parent stages, scope, acceptance criteria and optional execution plan. section:plan returns text pages and current planRevision/editPermission; goalId may select an ancestor, descendant or another explicitly authorized plan in this main goal. Fetch missing pages only when previews are incomplete. Reading grants no edit or acceptance authority.",
     parameters: Type.Object({
       section: Type.Optional(
         Type.Union(
-          ["summary", "criteria", "scope"].map((value) => Type.Literal(value)),
+          ["summary", "criteria", "scope", "plan"].map((value) =>
+            Type.Literal(value),
+          ),
         ),
       ),
       offset: Type.Optional(Type.Integer({ minimum: 0 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
+      goalId: Type.Optional(Type.String()),
     }),
     async execute(id, args) {
       return result(await request(id, { op: "goal-context", ...args }));
+    },
+  });
+  register({
+    name: "goal_plan_update",
+    label: "Edit authorized execution plan",
+    description:
+      "Edit only execution-plan text for the assigned goal (or an explicitly authorized goalId in this main goal). Requires a once or permanent grant from the lead and the latest planRevision from goal_context(section:plan). A successful changed write consumes a once grant; stale/invalid/no-op writes do not. null removes the plan. Cannot change criteria, scope, acceptance, execution permission or grant editing to others.",
+    parameters: Type.Object({
+      goalId: Type.Optional(Type.String()),
+      plan: Type.Union([Type.String({ maxLength: 16000 }), Type.Null()]),
+      planRevision: Type.Integer({ minimum: 0 }),
+    }),
+    async execute(id, args) {
+      return result(await request(id, { op: "goal-plan-update", ...args }));
     },
   });
   register({
@@ -525,6 +542,7 @@ export default async function (pi: ExtensionAPI) {
       "team_resume",
       "goal_start",
       "goal_plan",
+      "goal_plan_authorize",
       "goal_edit",
       "goal_focus",
       "goal_accept",
@@ -573,6 +591,7 @@ export default async function (pi: ExtensionAPI) {
       "team_collect",
       "mission_decision",
       "goal_context",
+      "goal_plan_update",
       "team_capabilities",
       "team_review",
     ];
@@ -634,7 +653,7 @@ export default async function (pi: ExtensionAPI) {
     }
     pi.setActiveTools([...permitted]);
     event.systemPromptOptions.promptGuidelines.push(
-      `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use tools needed for the actual approved task; role names add no separate restrictions. Use goal_context for complete assigned criteria and scope. Reuse valid evidence, report concrete results and uncovered items, and let the lead record acceptance. Choose routine methods yourself; avoid repeated checks or needless permission requests. Use team_message for permitted peers and team_wait alone for descendants. Never ask the lead to run routine tests on your behalf when your tools allow them; report an actual capability gap precisely.`,
+      `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use tools needed for the actual approved task; role names add no separate restrictions. Use goal_context for complete assigned criteria, scope and optional execution plans. Follow available plans within existing authorization and choose routine details without repeated questions. Read the current planRevision; goal_plan_update needs an explicit once/permanent grant for that goal and changes plan text only. Reuse valid evidence, report concrete results and uncovered items, and let the lead record acceptance. Choose routine methods yourself; avoid repeated checks or needless permission requests. Use team_message for permitted peers and team_wait alone for descendants. Never ask the lead to run routine tests on your behalf when your tools allow them; report an actual capability gap precisely.`,
       `Actual capabilities for this execution: ${JSON.stringify(capabilityView(member, [...permitted]))}`,
       memberWorkflowGuidance,
     );

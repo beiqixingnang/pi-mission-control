@@ -134,6 +134,14 @@ test("bottom board shows active and paused goals together, hides archived goals,
     }
     assert.equal(kernel.store.mission().id, active.id);
     assert.equal(kernel.store.savedMission(paused.id).status, "paused");
+    await kernel.stopGoal(paused.id, "Archive old paused fixture");
+    for (const width of [70, 160]) {
+      const rendered = board(kernel, width, false, undefined, 42).join("\n");
+      assert.match(rendered, /Active fixture goal/);
+      assert.doesNotMatch(rendered, /Paused revised fixture goal/);
+    }
+    assert.equal(kernel.store.mission().id, active.id);
+    assert.equal(kernel.store.mission().status, "active");
   }));
 
 test("bottom board hides a selected closed goal and counts overflow without exposing archived titles", () =>
@@ -163,6 +171,29 @@ test("bottom board hides a selected closed goal and counts overflow without expo
       assert.doesNotMatch(lines.join("\n"), /Completed fixture/);
     }
     assert.equal(kernel.store.goal(closed.id).state, "accepted");
+  }));
+
+test("goal details show an optional plan and its explicit member editing authorization", () =>
+  withRoster(async ({ kernel, add }) => {
+    const root = kernel.setGoal("Optional planned goal");
+    add("plan-reader");
+    kernel.updateGoalPlan(
+      root.id,
+      "1. Reuse the saved fixture\n2. Verify output without repeated questions",
+      0,
+    );
+    kernel.authorizeGoalPlan(root.id, "plan-reader", "once");
+    const panel = new GoalPanel(
+      kernel,
+      () => {},
+      () => {},
+      { height: () => 40 },
+    );
+    panel.detailId = root.id;
+    const rendered = panel.render(140).join("\n");
+    assert.match(rendered, /执行计划 · 版本 1/);
+    assert.match(rendered, /Reuse the saved fixture/);
+    assert.match(rendered, /plan-reader（一次性）/);
   }));
 
 test("compact goal counts and the detailed keyboard board share the acceptance ledger", () =>

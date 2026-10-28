@@ -300,6 +300,106 @@ test("stop settles activity at user intent while delayed cancellation keeps unkn
     assert.deepEqual(h.kernel.store.get("goalActivityClock:" + root.id), ended);
   }));
 
+test("archiving an inactive main goal cancels only its task tree and deliveries while the current worker continues", () =>
+  using(async (h) => {
+    h.idle(false);
+    const [current, old] = h.kernel.planGoals([
+      { objective: "Current goal", criteria: ["Worker continues"] },
+      { objective: "Obsolete goal", criteria: ["Archive old tree"] },
+    ]);
+    h.add("current-reader");
+    const oldMember = h.add("old-reader");
+    const task = h.kernel.dispatch("current-reader", "Keep working");
+    await flush();
+    const previous = {
+      ...h.kernel.store.task(task.id),
+      id: "old-task",
+      missionId: old.id,
+      goalId: old.id,
+      member: oldMember.name,
+      memberId: oldMember.id,
+      state: "queued",
+      processState: "stopped",
+    };
+    h.kernel.store.putTask(previous);
+    h.kernel.store.putTask({
+      ...previous,
+      id: "old-child",
+      parentId: previous.id,
+    });
+    h.kernel.store.putTask({
+      ...previous,
+      id: "old-unknown",
+      state: "interrupted",
+      processState: "unknown",
+    });
+    const oldDelivery = h.kernel.delivery({
+      key: "old-result",
+      taskId: previous.id,
+      from: oldMember.name,
+      to: "lead",
+      kind: "result",
+      summary: "Old result",
+    });
+    const currentDelivery = h.kernel.delivery({
+      key: "current-progress",
+      taskId: task.id,
+      from: "current-reader",
+      to: "lead",
+      kind: "progress",
+      summary: "Current progress",
+    });
+    await h.kernel.stopGoal(old.id, "Archive obsolete goal");
+    assert.equal(h.kernel.store.task(previous.id).state, "cancelled");
+    assert.equal(h.kernel.store.task("old-child").state, "cancelled");
+    assert.equal(h.kernel.store.task("old-unknown").processState, "unknown");
+    assert.equal(
+      h.kernel.store.deliveries().find((d) => d.id === oldDelivery.id).state,
+      "cancelled",
+    );
+    assert.deepEqual(
+      h.kernel.store.deliveries().find((d) => d.id === currentDelivery.id),
+      JSON.parse(JSON.stringify(currentDelivery)),
+    );
+    assert.equal(h.kernel.store.task(task.id).state, "running");
+    assert.equal(h.workers[0].signal.aborted, false);
+    assert.equal(h.kernel.store.mission().id, current.id);
+    h.workers[0].resolve({
+      ok: true,
+      text: "Current work completed",
+      processState: "stopped",
+    });
+    await flush();
+    assert.equal(h.kernel.store.task(task.id).state, "completed");
+  }));
+
+test("delayed goal cancellation cannot clear a newly selected goal or its user pause", () =>
+  using(async (h) => {
+    h.idle(false);
+    const old = h.kernel.setGoal("Stopping old goal");
+    h.add("reader");
+    h.kernel.dispatch("reader", "Wait for cancellation");
+    await flush();
+    let release;
+    const gate = new Promise((resolve) => (release = resolve));
+    h.workers[0].stop = async () => {
+      await gate;
+      h.workers[0].resolve({ ok: false, text: "", processState: "stopped" });
+    };
+    const stopping = h.kernel.stopGoal(old.id);
+    await flush();
+    const current = h.kernel.setGoal("New independent goal");
+    h.kernel.pauseGoal(current.id, "User requested pause", 0, "user");
+    h.kernel.store.set("escapeHold", true);
+    const before = h.kernel.store.mission();
+    release();
+    await stopping;
+    assert.deepEqual(h.kernel.store.mission(), before);
+    assert.equal(h.kernel.snapshot().held, true);
+    assert.equal(h.kernel.store.get("escapeHold"), true);
+    assert.equal(h.kernel.store.savedMission(old.id).status, "stopped");
+  }));
+
 test("lead reconciliation rejects a live execution and cancellation cannot fake a stopped unknown process", () =>
   using(async (h) => {
     h.idle(false);

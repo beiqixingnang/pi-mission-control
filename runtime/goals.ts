@@ -13,6 +13,7 @@ import type {
   Mission,
 } from "./types.ts";
 import { cleanText } from "./public.ts";
+import { executionPlan } from "./goal-plans.ts";
 import { mappedPath, type PathMapping } from "./path-mapping.ts";
 
 const excluded = (goal: GoalNode) =>
@@ -267,6 +268,9 @@ export class GoalLedger {
           nextStep: definition.nextStep
             ? text(definition.nextStep, "Next step")
             : undefined,
+          ...(definition.plan !== undefined
+            ? { plan: executionPlan(definition.plan), planRevision: 0 }
+            : {}),
           estimateMs: estimate(definition.estimateMs),
           state: "planned",
           revision: 0,

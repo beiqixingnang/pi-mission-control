@@ -134,6 +134,16 @@ export interface GoalNode {
   revision: number;
   reason?: string;
   nextStep?: string;
+  /** Optional execution guidance; independent of the acceptance revision. */
+  plan?: string;
+  planRevision?: number;
+  planUpdatedAt?: number;
+  planUpdatedBy?: string;
+  planEditors?: Array<{
+    memberId: string;
+    mode: "once" | "permanent";
+    grantedAt: number;
+  }>;
   workspaceBlock?: {
     relocationId: string;
     revision: number;
@@ -156,6 +166,7 @@ export interface GoalDefinition {
   module?: string;
   scope?: GoalScope;
   nextStep?: string;
+  plan?: string;
   estimateMs?: [number, number];
 }
 export interface GoalEvidence {

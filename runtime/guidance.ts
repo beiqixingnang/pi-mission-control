@@ -1,4 +1,5 @@
 export const goalPlanningGuidance =
+  "An optional execution plan may be stored on each main goal or subgoal with goal_plan(plan) or goal_plan_update. Do not require plans for routine work. Members receive bounded plan previews and can retrieve full plans through goal_context(section:plan). Plans clarify methods and routine decisions within approved scope, never grant new execution authority. The lead may grant goal_plan_authorize once or permanent for one goal/member, or revoke it; members use goal_plan_update with the current planRevision. Plan-only edits preserve criteria, acceptance, pauses and budgets. " +
   "Before execution, inventory the full approved scope and register the complete stage and leaf checklist upfront, " +
   "including all known files/modules, acceptance criteria and dependencies. Do not create only the next few goals, " +
   "finish them, then append another batch: that makes progress denominators drift (1/4 becomes 3/8). " +

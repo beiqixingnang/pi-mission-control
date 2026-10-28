@@ -7,6 +7,7 @@ import { LeadRecovery } from "./recovery.ts";
 import { contextLimitError } from "./reconnect.ts";
 import { MissionActivityClock } from "./activity-clock.ts";
 import { GoalLedger } from "./goals.ts";
+import { GoalPlans } from "./goal-plans.ts";
 import {
   workspaceResumeInstruction,
   isWorkspacePauseReason,
@@ -39,6 +40,7 @@ import {
   type GoalNode,
   type TaskTiming,
   type ReviewHold,
+  type ActivityClock,
 } from "./types.ts";
 
 const noProgressReason =
@@ -71,6 +73,7 @@ export interface KernelOptions {
 export class MissionKernel {
   store: Store;
   goals: GoalLedger;
+  goalPlans: GoalPlans;
   settings: Settings;
   options: KernelOptions;
   bridgeUrl = "";
@@ -124,6 +127,7 @@ export class MissionKernel {
       );
       this.activityClock = new MissionActivityClock(this.store, this.now);
       this.goals = new GoalLedger(this.store, options.cwd, this.now);
+      this.goalPlans = new GoalPlans(this.store, this.now);
     } catch (error) {
       this.store.close();
       throw error;
@@ -454,10 +458,12 @@ export class MissionKernel {
     this.store.event("mission.created", mission.id, { automatic: true });
     return mission;
   }
-  private cleanTemporaryMembers(reason: string) {
+  private cleanTemporaryMembers(reason: string, missionId?: string) {
     for (const member of this.store.members()) {
       if (!member.temporary) continue;
       const tasks = this.store.memberTasks(member.id);
+      if (missionId && !tasks.some((task) => task.missionId === missionId))
+        continue;
       if (
         tasks.some((task) => !terminal(task) || task.processState === "unknown")
       )
@@ -474,19 +480,34 @@ export class MissionKernel {
     retainClosed = false,
   ) {
     mission.updatedAt = this.now();
-    // Close the activity interval while the owning mission still exists.
-    this.activityClock.observe(
-      mission,
-      "ended",
-      mission.reason ?? `Goal ${reason}`,
-      this.settings.maxMissionMs,
-      true,
-    );
+    const selected = this.store.mission()?.id === mission.id;
+    if (selected) {
+      // Close the activity interval while the owning mission still exists.
+      this.activityClock.observe(
+        mission,
+        "ended",
+        mission.reason ?? `Goal ${reason}`,
+        this.settings.maxMissionMs,
+        true,
+      );
+    } else {
+      const key = `goalActivityClock:${mission.id}`;
+      const retained = this.store.get<ActivityClock>(key);
+      if (retained && retained.state !== "ended")
+        this.store.set(key, {
+          ...retained,
+          state: "ended",
+          reason: mission.reason ?? `Goal ${reason}`,
+          updatedAt: this.now(),
+        });
+    }
     const archived = this.store.archiveMission(mission, this.now(), reason);
-    if (retainClosed) this.store.set("mission", archived);
-    this.cleanTemporaryMembers(reason);
-    this.userHold = false;
-    this.store.unset("escapeHold");
+    if (retainClosed && selected) this.store.set("mission", archived);
+    this.cleanTemporaryMembers(reason, selected ? undefined : mission.id);
+    if (selected) {
+      this.userHold = false;
+      this.store.unset("escapeHold");
+    }
     this.changed();
     return archived;
   }
@@ -888,6 +909,24 @@ export class MissionKernel {
     this.changed();
     return target;
   }
+  updateGoalPlan(id: string, plan: string | null, planRevision: number) {
+    const result = this.goalPlans.update(id, plan, planRevision);
+    this.turnActed = true;
+    this.changed();
+    return result;
+  }
+  authorizeGoalPlan(
+    id: string,
+    member: string,
+    mode: "once" | "permanent" | "revoke",
+  ) {
+    const identity = this.store.member(member);
+    if (!identity) throw new Error(`Unknown member: ${member}`);
+    const result = this.goalPlans.authorize(id, identity.id, mode);
+    this.turnActed = true;
+    this.changed();
+    return result;
+  }
   editGoal(
     id: string,
     patch: Parameters<GoalLedger["edit"]>[1] & { blockedBy?: "workspace" },
@@ -1038,31 +1077,49 @@ export class MissionKernel {
     });
   }
   async stopGoal(goalId?: string, reason = "Stopped by the lead") {
-    const m = this.store.mission();
-    if (!m || ["complete", "stopped"].includes(m.status))
-      throw new Error("No unfinished goal to stop");
-    if (goalId && goalId !== m.id) throw new Error("Goal identity changed");
+    const selected = this.store.mission();
+    const id = goalId ?? selected?.id;
+    if (!id) throw new Error("Specify the main goalId to stop and archive");
+    const goal = this.goals.node(id);
+    if (goal.parentId)
+      throw new Error(
+        "goal_stop archives a main goal; use goal_edit to cancel a subgoal",
+      );
+    const m =
+      selected?.id === id
+        ? selected
+        : (this.store.savedMission(id) ?? this.goals.newMission(goal));
+    if (m.status === "complete" || goal.state === "accepted")
+      throw new Error(
+        "An accepted goal is already complete; preserve its acceptance and archive",
+      );
+    if (m.status === "stopped" && m.archivedAt !== undefined) return m;
     m.status = "stopped";
     m.humanPaused = true;
     m.reason = cleanText(reason, 2000);
     m.updatedAt = this.now();
-    const goal = this.store.goal(m.id);
-    if (goal) {
+    this.store.transaction(() => {
       goal.state = "cancelled";
       goal.reason = m.reason;
       goal.updatedAt = m.updatedAt;
       this.store.putGoal(goal);
-    }
-    this.generation++;
-    this.userHold = true;
-    this.reservation = undefined;
-    // Stop intent takes effect before asynchronous process cancellation; its
-    // waiting interval is not productive execution and unknown receipts remain.
-    this.store.set("mission", m);
-    this.syncActivity(true);
+      if (selected?.id === id) {
+        this.generation++;
+        this.userHold = true;
+        this.reservation = undefined;
+        // Stop intent precedes asynchronous cancellation; its waiting interval
+        // is not productive execution and unknown process receipts remain.
+        this.store.set("mission", m);
+        this.syncActivity(true);
+      } else this.store.putMission(m);
+    });
     const roots = this.store
-      .tasks(true)
-      .filter((task) => !task.parentId && task.missionId === m.id);
+      .missionTasks(m.id)
+      .filter(
+        (task) =>
+          !task.parentId &&
+          (!terminal(task) || task.processState === "unknown"),
+      );
     await Promise.all(roots.map((task) => this.cancelTask(task.id, m.reason)));
     for (const delivery of this.store.deliveries("lead"))
       if (delivery.missionId === m.id && delivery.state !== "observed") {
@@ -3320,10 +3377,11 @@ export class MissionKernel {
     section = "summary",
     offset = 0,
     limit = 5,
+    goalId?: string,
   ) {
     if (!task.goalId) return { goalId: null, note: "No goal bound" };
     if (
-      !["summary", "criteria", "scope"].includes(section) ||
+      !["summary", "criteria", "scope", "plan"].includes(section) ||
       !Number.isSafeInteger(offset) ||
       offset < 0 ||
       !Number.isSafeInteger(limit) ||
@@ -3331,9 +3389,26 @@ export class MissionKernel {
       limit > 5
     )
       throw new Error(
-        "goal_context needs summary|criteria|scope, offset >= 0 and limit 1..5",
+        "goal_context needs summary|criteria|scope|plan, offset >= 0 and limit 1..5",
       );
-    const goal = this.goals.node(task.goalId);
+    const goal = this.goals.node(goalId ?? task.goalId);
+    if (goalId && goalId !== task.goalId) {
+      if (section !== "plan")
+        throw new Error(
+          "Only execution plans can be queried by another goalId",
+        );
+      const related =
+        this.goals.subtree(task.goalId).some((node) => node.id === goalId) ||
+        this.goals.subtree(goalId).some((node) => node.id === task.goalId);
+      if (
+        goal.rootId !== task.missionId ||
+        (!related &&
+          this.goalPlans.permission(goal.id, task.memberId) === "none")
+      )
+        throw new Error(
+          "Execution plan is outside this assignment and its explicit authorizations",
+        );
+    }
     const page = (entries: string[]) => ({
       total: entries.length,
       offset,
@@ -3342,6 +3417,13 @@ export class MissionKernel {
         .slice(offset, offset + limit)
         .map((text, index) => ({ index: offset + index + 1, text })),
     });
+    if (section === "plan")
+      return {
+        goalId: goal.id,
+        planRevision: goal.planRevision ?? 0,
+        editPermission: this.goalPlans.permission(goal.id, task.memberId),
+        ...page(goal.plan?.match(/[\s\S]{1,2000}/gu) ?? []),
+      };
     if (section === "criteria")
       return {
         goalId: goal.id,
@@ -3389,10 +3471,27 @@ export class MissionKernel {
       assignedRevision: task.goalRevision,
       currentRevision: goal.revision,
       objective: cleanText(goal.objective, 2000),
+      plan: {
+        revision: goal.planRevision ?? 0,
+        preview: goal.plan ? cleanText(goal.plan, 2000) : null,
+        complete: (goal.plan?.length ?? 0) <= 2000,
+        editPermission: this.goalPlans.permission(goal.id, task.memberId),
+        full: "goal_context(section:plan); goal_plan_update requires the current planRevision and an explicit once/permanent grant for this goal",
+      },
       parentPath: path.slice(0, -1).map((node) => ({
         id: node.id,
         revision: node.revision,
         objective: cleanText(node.objective, 300),
+        ...(node.plan
+          ? {
+              plan: {
+                revision: node.planRevision ?? 0,
+                preview: cleanText(node.plan, 400),
+                complete: node.plan.length <= 400,
+                full: `goal_context(section:plan,goalId:${node.id})`,
+              },
+            }
+          : {}),
       })),
       scope: goal.scope
         ? {
@@ -3489,7 +3588,7 @@ export class MissionKernel {
         ? `Review gate ${task.reviewFor}: the executor is held. Review only this registered batch, communicate findings directly, and finish with evidence. The runtime resumes the executor after successful completion.`
         : "",
       task.goalId
-        ? "Assigned goal context (bounded previews; goal_context retrieves full criteria and scope):\n" +
+        ? "Assigned goal context (bounded previews; goal_context retrieves full criteria, scope and optional execution plans). Follow plans within existing scope and authority; routine details do not require repeated questions. Plan text grants no permissions. Only goal_plan_update with an explicit per-goal once/permanent grant can edit a member plan; fetch the latest planRevision first.\n" +
           JSON.stringify(this.assignedGoalContext(task))
         : "",
       `Execution policy: ${JSON.stringify({
@@ -3837,7 +3936,21 @@ export class MissionKernel {
           request.section,
           request.offset,
           request.limit,
+          request.goalId,
         );
+      } else if (request.op === "goal-plan-update") {
+        const id = request.goalId ?? task.goalId;
+        if (
+          typeof id !== "string" ||
+          this.goals.node(id).rootId !== task.missionId
+        )
+          throw new Error(
+            "Plan editing is limited to explicitly authorized goals in this task's main goal",
+          );
+        result = this.goalPlans.update(id, request.plan, request.planRevision, {
+          memberId: task.memberId,
+          taskId: task.id,
+        });
       } else if (request.op === "collect") {
         const target = this.store.task(request.taskId);
         if (!target || (target.parentId !== task.id && target.id !== task.id))

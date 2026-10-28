@@ -577,6 +577,69 @@ def main():
         line("/mission resume")
         wait(lambda: not mission()["humanPaused"], "test mission resumed for root-identity regression")
 
+        failed, text = call_tool("mission_capabilities", {})
+        assert not failed, text
+        catalog = json.loads(text)
+        assert len(catalog["tools"]) == 62 and all(len(tool["description"]) <= 200 for tool in catalog["tools"])
+        checks.append("expanded tool catalog remained complete valid JSON without truncating the new plan tools")
+
+        failed, text = call_tool("goal_plan_update", {"goalId": original["id"], "plan": "Parent roadmap: reuse valid evidence, implement the approved batch and verify its output.", "planRevision": 0})
+        assert not failed, text
+        plan_marker = "Optional execution plan " + uuid.uuid4().hex[:8]
+        failed, text = call_tool("goal_plan", {"goals": [{"parentId": original["id"], "objective": plan_marker,
+            "criteria": ["Exact plan output"], "plan": "Initial child methods"}]})
+        assert not failed, text
+        plan_leaf = next(node for node in query("goal_nodes") if node["objective"] == plan_marker)
+        plan_member = "plan-reader-" + uuid.uuid4().hex[:6]
+        failed, text = call_tool("team_spawn", {"name": plan_member, "role": "Use the optional plan", "model": "mission-fixture/model", "tools": ["read"], "workspace": {"execution": "files"}})
+        assert not failed, text
+
+        def plan_worker_call(name, args):
+            previous = {task["id"] for task in query("tasks")}
+            failed, text = call_tool("team_send", {"to": plan_member, "goalId": plan_leaf["id"], "wait": True,
+                "message": "V2_TEST:" + json.dumps({"op": "tool", "name": name, "args": args})})
+            assert not failed, text
+            completed = next(task for task in query("tasks") if task["id"] not in previous and task["member"] == plan_member)
+            assert completed["state"] == "completed"
+            return Path(completed["resultPath"]).read_text()
+
+        assert "Initial child methods" in plan_worker_call("goal_context", {"section": "plan"})
+        assert "authorization" in plan_worker_call("goal_plan_update", {"plan": "Unauthorized", "planRevision": 0})
+        failed, text = call_tool("goal_plan_authorize", {"goalId": plan_leaf["id"], "member": plan_member, "mode": "once"})
+        assert not failed, text
+        assert "One approved refinement" in plan_worker_call("goal_plan_update", {"plan": "One approved refinement", "planRevision": 0})
+        assert "authorization" in plan_worker_call("goal_plan_update", {"plan": "Denied second edit", "planRevision": 1})
+        checks.append("real restricted member read its optional execution plan and used a once grant exactly once")
+        failed, text = call_tool("goal_pause", {"goalId": original["id"], "source": "user"})
+        assert not failed
+        failed, text = call_tool("goal_plan_update", {"goalId": plan_leaf["id"], "plan": "Lead revised this plan while paused", "planRevision": 1})
+        assert not failed and mission()["status"] == "paused"
+        failed, text = call_tool("goal_plan_authorize", {"goalId": plan_leaf["id"], "member": plan_member, "mode": "permanent"})
+        assert not failed
+        reload("optional plans and permanent per-member editing grants survived literal /reload in the same Pi process")
+        saved_plan = next(node for node in query("goal_nodes") if node["id"] == plan_leaf["id"])
+        assert saved_plan["planRevision"] == 2 and saved_plan["planEditors"][0]["mode"] == "permanent"
+        assert mission()["status"] == "paused"
+        checks.append("plan-only editing retained the user pause, criteria and goal revision across reload")
+        line("/mission resume")
+        wait(lambda: mission()["id"] == original["id"] and mission()["status"] == "active", "selected goal explicitly resumed after plan editing regression")
+        assert "Persistent member refinement" in plan_worker_call("goal_plan_update", {"plan": "Persistent member refinement", "planRevision": 2})
+        failed, text = call_tool("goal_plan_authorize", {"goalId": plan_leaf["id"], "member": plan_member, "mode": "revoke"})
+        assert not failed
+        assert "authorization" in plan_worker_call("goal_plan_update", {"plan": "Denied after revoke", "planRevision": 3})
+        saved_plan = next(node for node in query("goal_nodes") if node["id"] == plan_leaf["id"])
+        assert saved_plan["planRevision"] == 3 and saved_plan["revision"] == 0 and saved_plan["criteria"] == ["Exact plan output"]
+        checks.append("permanent plan editing worked in a new task after reload and revocation immediately denied further writes")
+
+        # The external producer here is this harness configuring the summary
+        # fixture. Keep unrelated empty autonomous replies from introducing a
+        # no-progress hold during the compaction/recovery checks.
+        failed, text = call_tool("mission_wait_external", {
+            "reason": "Dedicated test runner is configuring the summary fixture",
+            "deadline": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 1800))})
+        assert not failed, text
+        fixture_wait = json.loads(text)
+
         # Only the dedicated test agent's summary preferences are reset. This
         # reproduces an existing main conversation with no model override.
         for summary_config in [database.parent / "compaction-summary.json", agent / "compaction-summary.json"]:
@@ -612,7 +675,11 @@ def main():
         assert saved_summary_fault["nextAt"] > 0
         reload("wrapped compaction failure retained its automatic retry through literal /reload")
         summary_control.write_text(json.dumps({"mode": "success"}))
-        wait(lambda: len(compactions()) > before_checkpoint and not recovery(), "healthy default compaction resumed automatically after the wrapped outage without a user continue", timeout=40)
+        wait(lambda: len(compactions()) > before_checkpoint and (not recovery() or recovery()["phase"] == "ready"),
+            "default compaction repaired context automatically after the wrapped outage while the fixture producer was pending", timeout=40)
+        failed, text = call_tool("mission_signal", {"waitId": fixture_wait["id"], "token": fixture_wait["token"]})
+        assert not failed, text
+        wait(lambda: not recovery(), "completed fixture producer signalled normally and the repaired model resumed without a user continue")
         assert memory_rows("SELECT value FROM settings WHERE key='mode'") == [("summary",)]
         checks.append("compaction recovery preserved summary mode and existing goal acceptance")
         summary_control.unlink()
@@ -628,6 +695,39 @@ def main():
         assert mission()["id"] == selected
         assert [node for node in query("goal_nodes") if node["id"] in [selected, unselected["id"]]] == before_roots
         checks.append("unselected root acceptance was rejected without changing either root")
+
+        # Archive obsolete roots directly, keeping the selected goal across
+        # literal reload in the same process and the same conversation.
+        failed, text = call_tool("goal_stop", {"goalId": unselected["id"], "reason": "User requested archive of obsolete main goal"})
+        assert not failed, text
+        assert json.loads(text)["id"] == unselected["id"]
+        assert mission()["id"] == selected and mission()["status"] == "active"
+        assert next(node for node in query("goal_nodes") if node["id"] == unselected["id"])["state"] == "cancelled"
+        checks.append("real model archived an unselected planned main goal directly without activation or changing the active goal")
+        failed, text = call_tool("goal_stop", {"goalId": unselected["id"], "reason": "Repeated archive request"})
+        assert not failed and json.loads(text)["id"] == unselected["id"]
+        checks.append("repeated archive returned the same stopped identity")
+        paused_marker = "Obsolete paused main " + uuid.uuid4().hex[:8]
+        failed, text = call_tool("goal_plan", {"goals": [{"objective": paused_marker, "criteria": ["Archive while paused"]}]})
+        assert not failed
+        paused_root = next(node for node in query("goal_nodes") if node["objective"] == paused_marker)
+        failed, text = call_tool("goal_pause", {"goalId": paused_root["id"]})
+        assert not failed
+        failed, text = call_tool("goal_pause", {"goalId": selected, "source": "user"})
+        assert not failed
+        held_mission = mission()
+        failed, text = call_tool("goal_stop", {"goalId": paused_root["id"]})
+        assert not failed, text
+        assert {key: value for key, value in mission().items() if key != "outputTokens"} == {key: value for key, value in held_mission.items() if key != "outputTokens"}
+        assert mission()["status"] == "paused" and mission()["outputTokens"] >= held_mission["outputTokens"]
+        held_mission = mission()
+        checks.append("archiving an unselected paused goal preserved the current user's paused plan")
+        reload("direct main goal archive survived literal /reload in the same Pi process")
+        assert mission() == held_mission
+        assert all(next(m for m in query("goal_missions") if m["id"] == root)["status"] == "stopped" for root in [unselected["id"], paused_root["id"]])
+        checks.append("archived main goals stayed archived while the selected user pause survived reload")
+        line("/mission resume")
+        wait(lambda: mission()["id"] == selected and mission()["status"] == "active", "only the selected goal explicitly resumed after archive regression")
 
         # The tool fixture JSON escapes these characters, so its control prompt
         # cannot itself become another literal user-history search hit.

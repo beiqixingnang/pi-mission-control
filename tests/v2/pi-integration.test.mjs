@@ -420,6 +420,207 @@ test(
 );
 
 test(
+  "real model grants optional plan editing to a restricted member once and permanently across reload",
+  { timeout: 30000 },
+  () =>
+    harness(async (h) => {
+      await h.tool("mission_notifications", {
+        action: "set",
+        taskSuccess: false,
+      });
+      const { created } = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                key: "root",
+                objective: "Planned outcome",
+                criteria: ["Keep acceptance"],
+                plan: "Root roadmap",
+              },
+              {
+                parentId: "root",
+                objective: "Planned leaf",
+                criteria: ["Exact output"],
+                plan: "Initial methods",
+              },
+            ],
+          })
+        ).content[0].text,
+      );
+      const leaf = created[1];
+      await h.tool("team_spawn", {
+        name: "plan-reader",
+        role: "Follow the optional execution plan",
+        model: "mission-fixture/model",
+        tools: ["read"],
+        workspace: { execution: "files" },
+      });
+      const workerCall = async (name, args) => {
+        const before = new Set(
+          (await h.snapshot()).tasks.map((task) => task.id),
+        );
+        const sent = await h.tool("team_send", {
+          to: "plan-reader",
+          goalId: leaf.id,
+          wait: true,
+          message: "V2_TEST:" + JSON.stringify({ op: "tool", name, args }),
+        });
+        assert.ok(!sent.isError, sent.content[0].text);
+        const task = (await h.snapshot()).tasks.find(
+          (task) => !before.has(task.id),
+        );
+        assert.equal(task.state, "completed");
+        return await fs.readFile(task.resultPath, "utf8");
+      };
+      assert.match(
+        await workerCall("goal_context", { section: "plan" }),
+        /Initial methods/,
+      );
+      assert.match(
+        await workerCall("goal_plan_update", {
+          plan: "Unapproved",
+          planRevision: 0,
+        }),
+        /authorization/,
+      );
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "goal_plan_authorize",
+            args: { goalId: leaf.id, member: "plan-reader", mode: "once" },
+            noRepeatWake: true,
+          }),
+      );
+      assert.ok(!JSON.parse(h.session.getLastAssistantText()).isError);
+      assert.match(
+        await workerCall("goal_plan_update", {
+          plan: "One approved refinement",
+          planRevision: 0,
+        }),
+        /One approved refinement/,
+      );
+      let plan = JSON.parse(
+        (await h.tool("goal_tree", { goalId: leaf.id, section: "plan" }))
+          .content[0].text,
+      );
+      assert.equal(plan.planRevision, 1);
+      assert.deepEqual(plan.editors, []);
+      assert.match(
+        await workerCall("goal_plan_update", {
+          plan: "Denied repeat",
+          planRevision: 1,
+        }),
+        /authorization/,
+      );
+      await h.tool("goal_plan_authorize", {
+        goalId: leaf.id,
+        member: "plan-reader",
+        mode: "permanent",
+      });
+      await h.session.reload();
+      assert.match(
+        await workerCall("goal_plan_update", {
+          plan: "Persistent approved refinement",
+          planRevision: 1,
+        }),
+        /Persistent approved refinement/,
+      );
+      plan = JSON.parse(
+        (await h.tool("goal_tree", { goalId: leaf.id, section: "plan" }))
+          .content[0].text,
+      );
+      assert.equal(plan.planRevision, 2);
+      assert.equal(plan.editors[0].mode, "permanent");
+      await h.tool("goal_plan_authorize", {
+        goalId: leaf.id,
+        member: "plan-reader",
+        mode: "revoke",
+      });
+      assert.match(
+        await workerCall("goal_plan_update", {
+          plan: "Denied after revoke",
+          planRevision: 2,
+        }),
+        /authorization/,
+      );
+      const definition = JSON.parse(
+        (await h.tool("goal_tree", { goalId: leaf.id, section: "definition" }))
+          .content[0].text,
+      );
+      assert.equal(definition.revision, 0);
+    }),
+);
+
+test(
+  "real model archives inactive main goals by ID and preserves the selected user pause through reload",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const roots = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                objective: "Current governance goal",
+                criteria: ["Keep selected"],
+              },
+              {
+                objective: "Obsolete planned goal",
+                criteria: ["Archive without activation"],
+              },
+              {
+                objective: "Obsolete paused goal",
+                criteria: ["Archive without resuming"],
+              },
+            ],
+          })
+        ).content[0].text,
+      );
+      const planned = roots.created;
+      await h.tool("goal_pause", { goalId: planned[2].id });
+      await h.tool("goal_pause", { goalId: planned[0].id, source: "user" });
+      const current = (await h.snapshot()).mission;
+      const plan = ({ outputTokens, ...rest }) => rest;
+      for (const root of planned.slice(1)) {
+        await h.session.prompt(
+          "V2_TEST:" +
+            JSON.stringify({
+              op: "tool",
+              name: "goal_stop",
+              args: {
+                goalId: root.id,
+                reason: "User requested archive of obsolete plan",
+              },
+              noRepeatWake: true,
+            }),
+        );
+        const result = h.events.findLast(
+          (event) =>
+            event.type === "tool_execution_end" &&
+            event.toolName === "goal_stop",
+        );
+        assert.ok(result && !result.result.isError, JSON.stringify(result));
+        assert.equal(JSON.parse(result.result.content[0].text).id, root.id);
+        assert.deepEqual(plan((await h.snapshot()).mission), plan(current));
+      }
+      const beforeReload = (await h.snapshot()).mission;
+      await h.session.reload();
+      assert.deepEqual((await h.snapshot()).mission, beforeReload);
+      const history = JSON.parse(
+        (await h.tool("lifecycle_history")).content[0].text,
+      );
+      for (const root of planned.slice(1))
+        assert.ok(
+          history.goals.some(
+            (goal) => goal.id === root.id && goal.status === "stopped",
+          ),
+        );
+    }),
+);
+
+test(
   "real goal_pause restores a stopped goal by ID as a paused editable plan",
   { timeout: 20000 },
   () =>
@@ -3407,8 +3608,22 @@ test(
       const catalog = JSON.parse(
         (await h.tool("mission_capabilities")).content[0].text,
       );
-      assert.equal(catalog.tools.length, 60);
+      assert.equal(catalog.tools.length, 62);
       assert.ok(catalog.tools.every((t) => t.active));
+      assert.ok(catalog.tools.every((t) => t.description.length <= 200));
+      const planTool = JSON.parse(
+        (
+          await h.tool("mission_capabilities", {
+            toolName: "goal_plan_authorize",
+            includeSchemas: true,
+          })
+        ).content[0].text,
+      );
+      assert.match(planTool.tools[0].description, /permanent/);
+      assert.equal(
+        planTool.tools[0].parameters.properties.goalId.type,
+        "string",
+      );
       h.session.setActiveToolsByName(["read"]);
       await h.session.reload();
       await h.session.prompt(
