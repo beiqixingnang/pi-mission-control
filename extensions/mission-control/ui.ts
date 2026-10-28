@@ -7,7 +7,7 @@ import { panelLine, type UiTheme } from "./presentation.ts";
 
 export const stateNames: Record<string, string> = {
   active: "推进中",
-  paused: "用户暂停",
+  paused: "暂停中",
   waiting_user: "等待用户",
   complete: "已验收",
   stopped: "已停止",
@@ -27,6 +27,7 @@ export function missionState(
 ) {
   if (workspaceHeld) return "迁移后待恢复";
   if (!m && !recovery) return "就绪";
+  if (m?.status === "paused") return stateNames.paused;
   if (m && m.status !== "active")
     return m.blocker?.kind === "budget"
       ? "预算耗尽"
@@ -97,13 +98,56 @@ export function board(
             : "",
     };
   });
-  const goalDetail = `二级${s.goals.level2.completed}/${s.goals.level2.total} 三级${s.goals.level3.completed}/${s.goals.level3.total}`;
-  const goal = {
-    category: "目标",
-    name: m?.objective ?? "首次派工自动建立",
-    status: missionState(m, s.recovery, s.workspaceHeld),
-    detail: s.workspaceHeld ? "/mission resume 手动恢复" : goalDetail,
-  };
+  const goals = kernel.store
+    .goals()
+    .filter(
+      (goal) =>
+        !goal.parentId &&
+        !["accepted", "cancelled", "skipped"].includes(goal.state),
+    )
+    .map((goal) => (goal.id === m?.id ? m : kernel.store.savedMission(goal.id)))
+    .filter((goal): goal is Mission =>
+      Boolean(
+        goal &&
+          !goal.archivedAt &&
+          !["complete", "stopped"].includes(goal.status),
+      ),
+    )
+    .sort((a, b) => Number(b.id === m?.id) - Number(a.id === m?.id));
+  const goalRows = goals.slice(0, Math.max(1, limit - 3)).map((goal) => {
+    const selected = goal.id === m?.id;
+    const progress = selected ? s.goals : kernel.goals.summary(goal.id);
+    return {
+      category: "目标",
+      name: goal.objective,
+      status:
+        !selected && goal.status === "active"
+          ? "待推进"
+          : missionState(
+              goal,
+              selected ? s.recovery : undefined,
+              selected && s.workspaceHeld,
+            ),
+      detail:
+        selected && s.workspaceHeld
+          ? "/mission resume 手动恢复"
+          : `二级${progress.level2.completed}/${progress.level2.total} 三级${progress.level3.completed}/${progress.level3.total}`,
+    };
+  });
+  if (s.workspaceHeld && !goals.some((goal) => goal.id === m?.id))
+    goalRows.unshift({
+      category: "工作区",
+      name: "工作区已迁移",
+      status: "迁移后待恢复",
+      detail: "手动执行 /mission resume",
+    });
+  if (!goalRows.length)
+    goalRows.push({
+      category: "目标",
+      name: "无活跃或暂停目标",
+      status: "就绪",
+      detail: "",
+    });
   const reminderRows = schedules.map((r) => ({
     category: "定时任务",
     name: r.title,
@@ -135,17 +179,33 @@ export function board(
     reminderRows.length,
     table && limit >= 10 ? 2 : 1,
   );
-  const availableMembers = Math.max(0, limit - 4 - remindersShown);
+  const goalsShown = goalRows.slice(
+    0,
+    Math.max(1, limit - 3 - (table ? remindersShown : 0)),
+  );
+  const hiddenGoals = Math.max(
+    0,
+    goals.length -
+      goalsShown.filter(
+        (row) => row.category === "目标" && row.status !== "就绪",
+      ).length,
+  );
+  const availableMembers = Math.max(
+    0,
+    limit - 3 - remindersShown - goalsShown.length,
+  );
   const shown = memberRows.slice(0, availableMembers);
   const hiddenMembers = memberRows.length - shown.length,
     hiddenReminders = reminderRows.length - remindersShown;
-  const footer = [
-    hiddenMembers ? `另有 ${hiddenMembers}名成员` : "",
-    hiddenReminders ? `另有 ${hiddenReminders}项提醒` : "",
-    "/mission goals 目标详情 · /agents 成员对话",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const footer = (membersHidden: number, remindersHidden: number) =>
+    [
+      hiddenGoals ? `另有 ${hiddenGoals}个目标` : "",
+      membersHidden ? `另有 ${membersHidden}名成员` : "",
+      remindersHidden ? `另有 ${remindersHidden}项提醒` : "",
+      "/mission goals 目标详情 · /agents 成员对话",
+    ]
+      .filter(Boolean)
+      .join(" · ");
   let lines: string[];
   if (table) {
     const widths = [8, width - 57, 14, 26];
@@ -167,33 +227,53 @@ export function board(
     lines = [
       theme?.fg?.("accent", theme?.bold?.(header) ?? header) ?? header,
       "─".repeat(width),
-      row(goal),
+      ...goalsShown.map(row),
       ...reminderRows.slice(0, remindersShown).map(row),
       ...shown.map(row),
-      footer,
+      footer(hiddenMembers, hiddenReminders),
     ];
   } else {
     const running = memberRows.filter((r) => r.status === "执行中").length,
       waiting = memberRows.filter((r) => r.status === "等待下游").length;
-    const memberLine = (r: typeof goal) =>
+    const memberLine = (r: (typeof goalRows)[number]) =>
       `${cell(r.name, Math.max(1, width - 13))} ${r.status}`;
-    const compactShown = memberRows.slice(0, Math.max(0, limit - 5));
+    const showProgress =
+      goalsShown.length === 1 &&
+      Boolean(goalsShown[0].detail) &&
+      limit > goalsShown.length + 3;
+    const compactShown = memberRows.slice(
+      0,
+      Math.max(0, limit - goalsShown.length - 3 - Number(showProgress)),
+    );
     lines = [
-      `目标 · ${goal.status} · ${goal.name}`,
-      s.workspaceHeld ? "请手动执行 /mission resume" : `${goalDetail} 已验收`,
+      ...goalsShown.map(
+        (goal) =>
+          `${goal.category} · ${goal.status} · ${goal.name}${goal.category === "工作区" ? " · " + goal.detail : ""}`,
+      ),
+      ...(showProgress
+        ? [
+            s.workspaceHeld
+              ? "请手动执行 /mission resume"
+              : `${goalsShown[0].detail} 已验收`,
+          ]
+        : []),
       `定时 · ${reminderCount}项${reminderCount ? " · " + reminderRows[0].detail + " " + reminderRows[0].name : " · 无"}`,
       `成员 · ${memberRows.length}名 · 执行 ${running} · 等待 ${waiting}`,
       ...compactShown.map(memberLine),
-      `${memberRows.length > compactShown.length ? `另有 ${memberRows.length - compactShown.length}名成员 · ` : ""}/mission goals 详情 · /agents 对话`,
+      footer(
+        memberRows.length - compactShown.length,
+        Math.max(0, reminderCount - 1),
+      ),
     ];
   }
   if (expanded) {
-    if (m?.reason) lines.push(`需处理：${cleanText(m.reason, 240)}`);
+    if (m?.reason && goals.some((goal) => goal.id === m.id))
+      lines.push(`需处理：${cleanText(m.reason, 240)}`);
     if (s.recovery)
       lines.push(
         `恢复原因 ${cleanText(s.recovery.reason, 240)} · 本轮失败 ${s.recovery.burstFailures ?? s.recovery.requests}/${kernel.settings.recoveryMaxRequests} · 累计请求 ${s.recovery.requests}${s.recovery.nextAt ? " · 下次检查 " + new Date(s.recovery.nextAt).toISOString() : ""}`,
       );
-    if (m)
+    if (m && goals.some((goal) => goal.id === m.id))
       lines.push(
         `活动耗时 ${duration(s.activity?.activeMs ?? 0)} · 时间预算 ${kernel.settings.maxMissionMs ? duration(kernel.settings.maxMissionMs) : "无时间上限"}`,
         `自动接续 ${m.turns}/${kernel.settings.maxAutonomousTurns || "不限"} · 主输出 ${m.outputTokens}/${kernel.settings.maxOutputTokens || "不限"}`,

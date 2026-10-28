@@ -175,6 +175,180 @@ async function until(fn, timeout = 25000) {
 }
 
 test(
+  "real goal_pause keeps root and child planning editable across reload without resuming execution",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const plan = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                key: "root",
+                objective: "Per-item planning",
+                criteria: ["Each item has a decision"],
+              },
+              {
+                key: "leaf",
+                parentId: "root",
+                objective: "Item 1",
+                criteria: ["Original requirement"],
+              },
+            ],
+          })
+        ).content[0].text,
+      ).created;
+      const root = plan.find((node) => node.key === "root"),
+        leaf = plan.find((node) => node.key === "leaf");
+      const before = (await h.snapshot()).mission;
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "goal_pause",
+            args: {
+              goalId: root.id,
+              reason: "Pause execution; keep editing the exact items",
+            },
+            noRepeatWake: true,
+          }),
+      );
+      assert.ok(!JSON.parse(h.session.getLastAssistantText()).isError);
+      const edit = await h.tool("goal_edit", {
+        goalId: leaf.id,
+        revision: 0,
+        objective: "Keep implemented check for item 1",
+        criteria: [
+          "Record current behavior",
+          "Simplify this item's obsolete suggestion",
+        ],
+      });
+      assert.ok(!edit.isError, edit.content[0].text);
+      await h.tool("goal_update", {
+        goalId: root.id,
+        revision: 0,
+        objective: "Revised per-item planning",
+        criteria: ["Every child carries its own disposition"],
+      });
+      await h.session.reload();
+      const status = JSON.parse((await h.tool("goal_status")).content[0].text);
+      assert.equal(status.id, root.id);
+      assert.equal(status.status, "paused");
+      assert.equal(status.humanPaused, true);
+      assert.equal(status.planning.planEditable, true);
+      assert.equal(status.planning.pauseSource, "agent");
+      assert.equal(status.planning.resumeRequiredForEditing, false);
+      assert.equal(status.budgetStartedAt, before.budgetStartedAt);
+      const detail = JSON.parse(
+        (await h.tool("goal_tree", { goalId: leaf.id, section: "definition" }))
+          .content[0].text,
+      );
+      assert.equal(detail.objective, "Keep implemented check for item 1");
+      assert.equal(detail.planning.executionPaused, true);
+      assert.equal((await h.snapshot()).tasks.length, 0);
+    }),
+);
+
+test(
+  "natural-language goal pause, child edit and continue are executed by model tools without slash commands",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const nodes = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                key: "root",
+                objective: "Natural-language controlled goal",
+                criteria: ["Preserve this plan"],
+              },
+              {
+                key: "child",
+                parentId: "root",
+                objective: "Old individual item",
+                criteria: ["Keep item-specific criteria"],
+              },
+            ],
+          })
+        ).content[0].text,
+      ).created;
+      const child = nodes.find((node) => node.key === "child");
+      const budgetStartedAt = (await h.snapshot()).mission.budgetStartedAt;
+      await h.session.prompt("请暂停当前目标，保留计划可编辑");
+      assert.ok(!JSON.parse(h.session.getLastAssistantText()).isError);
+      assert.equal((await h.snapshot()).mission.status, "paused");
+      await h.session.prompt(
+        `请修改子目标 ${child.id} 为 逐项保留已实现检查并简化建议`,
+      );
+      assert.ok(!JSON.parse(h.session.getLastAssistantText()).isError);
+      assert.equal((await h.snapshot()).mission.status, "paused");
+      const detail = JSON.parse(
+        (await h.tool("goal_tree", { goalId: child.id, section: "definition" }))
+          .content[0].text,
+      );
+      assert.equal(detail.objective, "逐项保留已实现检查并简化建议");
+      await h.session.prompt("请继续当前目标");
+      assert.ok(!JSON.parse(h.session.getLastAssistantText()).isError);
+      assert.equal((await h.snapshot()).mission.status, "active");
+      assert.equal(
+        (await h.snapshot()).mission.budgetStartedAt,
+        budgetStartedAt,
+      );
+    }),
+);
+
+test(
+  "real goal_pause restores a stopped goal by ID as a paused editable plan",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const root = JSON.parse(
+        (
+          await h.tool("goal_start", {
+            objective: "Existing retained goal",
+            criteria: ["Keep this goal ID"],
+          })
+        ).content[0].text,
+      );
+      await h.tool("goal_stop", {
+        goalId: root.id,
+        reason: "Legacy temporary pause was stopped instead",
+      });
+      const paused = await h.tool("goal_pause", {
+        goalId: root.id,
+        revision: 0,
+      });
+      assert.ok(!paused.isError, paused.content[0].text);
+      assert.equal(JSON.parse(paused.content[0].text).restoredStopped, true);
+      const edited = await h.tool("goal_update", {
+        goalId: root.id,
+        revision: 0,
+        objective: "Revised retained goal",
+        criteria: ["Edit without restart"],
+      });
+      assert.ok(!edited.isError, edited.content[0].text);
+      await h.session.reload();
+      const status = await h.snapshot();
+      assert.equal(status.mission.id, root.id);
+      assert.equal(status.mission.status, "paused");
+      assert.equal(status.tasks.length, 0);
+      const history = JSON.parse(
+        (await h.tool("lifecycle_history")).content[0].text,
+      );
+      assert.ok(
+        history.goals.some(
+          (goal) => goal.id === root.id && goal.status === "stopped",
+        ),
+      );
+      await h.session.prompt("请继续当前目标");
+      assert.ok(!JSON.parse(h.session.getLastAssistantText()).isError);
+      assert.equal((await h.snapshot()).mission.id, root.id);
+      assert.equal((await h.snapshot()).mission.status, "active");
+    }),
+);
+
+test(
   "real member writes named metadata and explicit output roots while denying the actual agent state",
   { timeout: 20000 },
   () =>
@@ -3112,7 +3286,7 @@ test(
       const catalog = JSON.parse(
         (await h.tool("mission_capabilities")).content[0].text,
       );
-      assert.equal(catalog.tools.length, 57);
+      assert.equal(catalog.tools.length, 59);
       assert.ok(catalog.tools.every((t) => t.active));
       h.session.setActiveToolsByName(["read"]);
       await h.session.reload();

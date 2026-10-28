@@ -17,7 +17,15 @@ export const goalPlanningGuidance =
   "directory before planning its bounded batches. Group related files sensibly; do not create a goal for every function " +
   "or add arbitrary batch-size caps. Existing unscoped goals remain usable; refine them when replanning. " +
   "Record concise criterion-specific evidence once and reuse it while valid; file counts or changed-line counts alone " +
-  "do not prove completion. Do not repeatedly recheck accepted evidence without a relevant change.";
+  "do not prove completion. Do not repeatedly recheck accepted evidence without a relevant change. " +
+  "Execution pause and planning edits are separate: the lead AI may proactively call goal_pause when planning or coordination requires it, without waiting for a user pause command. " +
+  "Use source:agent for an AI-initiated pause and source:user for an actual user pause request; preserve any existing user pause. For a temporary pause of a goal or its reminders use goal_pause, never goal_stop. " +
+  "While paused, directly update the corresponding goal or subgoal with goal_edit/goal_update/goal_plan and keep it paused; do not ask for execution resume just to edit. " +
+  "Apply item-specific requirements to the matching child goals rather than only changing an overall description. " +
+  "If an earlier goal_stop archived what the user intended as a temporary pause, explicitly call goal_pause with that retained main goalId to restore paused planning. " +
+  "Preserve acceptance history, user and workspace holds, budgets and tasks; old work is not replayed. " +
+  "Use goal_resume to resume an AI-initiated pause when its adjustment is complete, or source:user to carry out the user's natural-language continue/restart request. " +
+  "A request only to edit a user-paused plan must keep that pause. Users do not need slash commands for goal pause, resume, restart or item-specific edits; execute the corresponding tools yourself within their stated intent.";
 
 export const delegationGuidance =
   "Choose member tools, workspace and deadlines from the actual task and existing user authorization. " +

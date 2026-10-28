@@ -1294,13 +1294,14 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_status",
     "Goal status",
-    "Read the runtime-owned mission/Goal; maintenance also works without an explicit Goal.",
+    "Read the runtime-owned mission and planning control. Paused goals remain editable through goal_edit/goal_update/goal_plan; resume is only needed for execution.",
     Type.Object({}),
     () => {
       const status = modelStatus();
       return {
         runtime: status.runtime,
         recoveryPlan: status.recoveryPlan,
+        planning: status.planning,
         ...(status.mission ?? {
           status: "none",
           maintenance: "automatic upon dispatch",
@@ -1417,6 +1418,7 @@ export default function (pi: ExtensionAPI) {
           const pageSize = Math.min(limit, 5);
           return {
             goalId: detail.goal.id,
+            planning: current().planningStatus(detail.goal.id),
             revision: detail.goal.revision,
             objective: detail.goal.objective,
             scope: brief(detail.goal).scope,
@@ -1489,6 +1491,7 @@ export default function (pi: ExtensionAPI) {
             criteria: detail.goal.criteria.map((c) => cleanText(c, 200)),
           },
           blockers: detail.blockers.slice(0, 10).map((b) => cleanText(b, 300)),
+          planning: current().planningStatus(detail.goal.id),
           acceptance: detail.acceptance
             ? {
                 id: detail.acceptance.id,
@@ -1513,6 +1516,7 @@ export default function (pi: ExtensionAPI) {
       );
       return {
         ...snapshot,
+        planning: current().planningStatus(args.rootId),
         nodes: snapshot.nodes.slice(offset, offset + limit).map(brief),
         roots: snapshot.roots.slice(offset, offset + limit).map(brief),
         nodeTotal: snapshot.nodes.length,
@@ -1530,7 +1534,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_edit",
     "Update goal progress",
-    "Update a goal's definition, concrete scope, blockers, next step or estimate. Scope changes revise the goal and invalidate affected acceptances. Keep code leaves at explicit file or batch level. state:planned reopens accepted work. A workspace pause belongs to runtime control: ask the user to manually run /mission resume; do not create an ordinary business blocker for it. If recording this pause is necessary, pair state:blocked with blockedBy:workspace so the same user resume can release it. Independent business blockers omit blockedBy. Cannot accept or silently exclude scope; holds and budgets remain authoritative.",
+    "Update the relevant goal/subgoal's definition, scope, blockers, next step or estimate, including while execution is paused. Editing never resumes execution, starts workers or renews budgets; do not request a resume merely to edit. Scope changes revise the goal and invalidate affected acceptances. Keep code leaves at explicit file or batch level. state:planned reopens accepted work. A workspace pause remains runtime control; /mission resume is needed only to execute. If recording it is necessary, pair state:blocked with blockedBy:workspace. Independent business blockers omit blockedBy. Settle affected running/unknown work before definition changes; cannot accept or silently exclude scope.",
     Type.Object({
       goalId: Type.String(),
       revision: Type.Integer({ minimum: 0 }),
@@ -1647,7 +1651,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_update",
     "Update goal",
-    "Revise the goal definition and acceptance criteria. Clear prior evidence and advance its revision while preserving user holds, budgets and usage.",
+    "Revise the main goal definition and acceptance criteria while preserving pause, independent holds, budgets and usage. A paused goal is editable without resuming. Use goalId for a non-selected paused main goal; use goal_edit to change the relevant subgoal. If an earlier goal_stop archived a temporary pause, restore paused planning with goal_pause(goalId) first.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       objective: Type.String({ minLength: 1, maxLength: 8000 }),
@@ -1663,9 +1667,44 @@ export default function (pi: ExtensionAPI) {
       ),
   );
   tool(
+    "goal_pause",
+    "Pause execution, keep plan editable",
+    "Pause execution or goal reminders while retaining an editable main/child plan and all usage/history/independent holds. The lead AI may pause proactively when planning or coordination requires it; no user pause command is required. source:agent is the default; source:user forwards an actual user pause request. Existing user pauses remain user-owned. Edits alone do not resume execution. Omit goalId for the current main goal. An explicit retained goalId can restore a mistakenly stopped/archived goal as paused planning without replaying tasks; honor the user's resume intent with goal_resume. Another selected goal is not switched. Use goal_resume to continue, goal_stop only for final stop/archive.",
+    Type.Object({
+      goalId: Type.Optional(Type.String()),
+      reason: Type.Optional(Type.String({ maxLength: 2000 })),
+      revision: Type.Optional(Type.Integer({ minimum: 0 })),
+      source: Type.Optional(
+        Type.Union([Type.Literal("agent"), Type.Literal("user")]),
+      ),
+    }),
+    (args) =>
+      current().pauseGoal(args.goalId, args.reason, args.revision, args.source),
+  );
+  tool(
+    "goal_resume",
+    "Resume paused goal",
+    "Resume the AI's own planning pause, or carry out the user's natural-language continue/restart request with source:user. No slash command is required. For an edit-only request keep a user pause. Preserve usage and budget counters, acceptance history and independent workspace/authorization/budget/unknown-process holds. Restoring a stopped goal is explicit: goal_pause(goalId), edit as needed, then goal_resume on the user's restart request. Another selected goal is not switched automatically; use goal_activate after settling it when selection is requested.",
+    Type.Object({
+      goalId: Type.Optional(Type.String()),
+      reason: Type.Optional(Type.String({ maxLength: 2000 })),
+      revision: Type.Optional(Type.Integer({ minimum: 0 })),
+      source: Type.Optional(
+        Type.Union([Type.Literal("agent"), Type.Literal("user")]),
+      ),
+    }),
+    (args) =>
+      current().resumeGoal(
+        args.goalId,
+        args.reason,
+        args.revision,
+        args.source,
+      ),
+  );
+  tool(
     "goal_stop",
     "Stop goal",
-    "Stop the active goal, cancel its unfinished task tree, suppress stale deliveries and archive the goal. A later objective starts a new goal identity.",
+    "Permanently stop and archive the active goal, cancel unfinished tasks and suppress stale deliveries. For a temporary pause, disabling goal reminders or planning edits while paused, use goal_pause instead. Only use this for the user's actual final stop/archive request; it is not a pause switch.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       reason: Type.Optional(Type.String({ maxLength: 2000 })),
@@ -1946,10 +1985,12 @@ export default function (pi: ExtensionAPI) {
           reconnect: "reconnect_config",
           schedules: "schedule",
           memberMessage: "team_message",
+          pauseEditableGoal: "goal_pause",
+          resumeGoal: "goal_resume",
           runtimeProgressResume: "mission_control",
         },
         userControls: [
-          "Explicit user pause/stop and budget renewal: /mission",
+          "Natural-language goal pause/continue/edit requests are carried out by the AI with goal_pause, goal_resume and goal_edit/goal_update. Direct /mission commands remain available; budget renewal and independent workspace authorization retain their own controls",
           "Workspace authorization: direct natural-language rename/switch request or /project allow; project_status exposes the exact one-use grant for project_apply",
           "Interactive display/editor/copy UI remains user-owned",
         ],
@@ -1995,7 +2036,7 @@ export default function (pi: ExtensionAPI) {
     (args) => {
       if (args.action && !["status", "on"].includes(args.action))
         throw new Error(
-          "Only the user may pause/stop or renew mission budgets through /mission. Runtime faults recover automatically; inspect mission_status.recovery and mission_recover. Do not turn runtime faults into business decisions.",
+          "Only the user can renew mission budgets. Use goal_pause/goal_resume for AI-initiated or natural-language requested goal control. Runtime faults recover automatically through mission_status.recovery and mission_recover. Do not turn them into business decisions.",
         );
       return {
         maintenance: "automatic",

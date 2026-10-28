@@ -1,3 +1,10 @@
+# 2.9.0 — editable paused goals (2026-10-28)
+
+- Add goal_pause and goal_resume so the AI can handle natural-language pause, continue/restart and edit requests, or pause and resume its own planning adjustments. Preserve user pauses for edit-only requests. Goal and child edits, planning, usage and independent holds survive reload without restarting work. Explicitly restore a mistakenly stopped retained goal to paused planning by ID while preserving its stopped archive and old task records; resume on the user's restart intent without a slash command.
+- Expose planning control in status and goal details; guide the lead to apply each change to its matching child and reserve goal_stop for final stop/archive. A plan edit never resumes execution.
+- Show active and paused main goals together in the bottom panel, label paused goals explicitly, hide stopped/archived and accepted goals, and report overflow within the existing row budget.
+- Keep a committed workspace/import replacement usable when an immediate reload invalidates its final notification context; preserve real migration errors and make the isolated TUI tester report an exited process promptly.
+
 # 2.8.0 — member capabilities and paired review (2026-10-28)
 
 - Authorize file writes by explicit roots, including extraWriteRoots, without directory-name bans for .agents, .pi or .git. Keep the actual Pi agent, installation and session-state paths protected; host commands retain their explicitly trusted authority.

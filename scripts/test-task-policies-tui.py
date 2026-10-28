@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shutil
 import signal
@@ -185,6 +186,13 @@ def main():
         reload("candidate loaded through literal /reload in the same Pi process")
         assert mission()["id"] == original["id"] and mission()["humanPaused"]
         assert mission()["outputTokens"] == original["outputTokens"]
+        # A legacy goal_stop may have archived a user's intended temporary
+        # pause. Restore only planning in this existing conversation.
+        if not legacy_workspace_block:
+            tool("goal_stop", {"goalId": original["id"], "reason": "Dedicated regression: legacy pause was mistakenly stopped"})
+            wait(lambda: mission() is None, "legacy stop archived the dedicated goal for paused-planning regression")
+            tool("goal_pause", {"goalId": original["id"], "revision": original.get("revision", 0)})
+            wait(lambda: mission() is not None and mission()["id"] == original["id"] and mission()["status"] == "paused", "goal_pause restored the same archived goal as paused without starting execution")
         line("/mission resume")
         wait(lambda: not mission()["humanPaused"], "same goal explicitly resumed")
         if legacy_workspace_block:
@@ -258,6 +266,33 @@ def main():
         tool("goal_accept", {"goalId": leaf["id"], "revision": 0, "evidence": [
             {"criterion": 1, "source": "artifact", "path": str(artifact), "summary": "Decode file batch findings recorded in dedicated test workspace"}]})
         wait(lambda: any(n["id"] == leaf["id"] and n["state"] == "accepted" for n in query("goal_nodes")), "scope and evidence accepted once")
+        tool("goal_pause", {"goalId": original["id"], "reason": "Edit plans while preserving the execution pause"})
+        wait(lambda: mission()["status"] == "paused", "model goal_pause paused execution while keeping the plan editable")
+        companion_title = "Paused-plan-" + uuid.uuid4().hex[:6]
+        known_nodes = {node["id"] for node in query("goal_nodes")}
+        tool("goal_plan", {"goals": [
+            {"key": "paused-root", "objective": companion_title, "criteria": ["Keep paused planning visible"]},
+            {"parentId": "paused-root", "objective": "Item-specific old disposition", "criteria": ["Original item requirement"]}]})
+        wait(lambda: any(n["id"] not in known_nodes and n["depth"] == 1 for n in query("goal_nodes")), "a separate per-item plan was registered while execution remained paused")
+        companion = next(n for n in query("goal_nodes") if n["id"] not in known_nodes and n["depth"] == 1)
+        companion_leaf = next(n for n in query("goal_nodes") if n.get("parentId") == companion["id"])
+        tool("goal_pause", {"goalId": companion["id"]})
+        wait(lambda: any(m["id"] == companion["id"] and m["status"] == "paused" for m in query("goal_missions")), "non-selected companion goal was paused without selecting or resuming it")
+        tool("goal_edit", {"goalId": companion_leaf["id"], "revision": 0, "objective": "Keep this item's implemented check", "criteria": ["Record current behavior", "Simplify only this item's obsolete suggestion"]})
+        wait(lambda: next(n for n in query("goal_nodes") if n["id"] == companion_leaf["id"])["revision"] == 1, "the matching child received its own revised requirements while paused")
+        tool("goal_update", {"goalId": companion["id"], "revision": 0, "objective": companion_title, "criteria": ["Each child stores its own disposition"]})
+        wait(lambda: next(m for m in query("goal_missions") if m["id"] == companion["id"])["revision"] == 1, "the paused companion main goal was edited without an execution resume")
+        reload("literal /reload preserved paused planning and item-specific revisions")
+        assert mission()["id"] == original["id"] and mission()["status"] == "paused"
+        assert next(m for m in query("goal_missions") if m["id"] == companion["id"])["status"] == "paused"
+        assert next(n for n in query("goal_nodes") if n["id"] == companion_leaf["id"])["revision"] == 1
+        tool("goal_resume", {"goalId": original["id"], "source": "user", "reason": "Continue this main goal after editing"})
+        wait(lambda: mission()["status"] == "active", "the AI resumed execution on the user's continue request without a slash command")
+        wait(lambda: re.search(r"目标[^\r\n]*" + re.escape(companion_title) + r"[^\r\n]*暂停中", visible) is not None, "the real bottom panel showed the paused companion alongside the active main goal with one unified pause label")
+        tool("goal_resume", {"goalId": companion["id"], "reason": "AI completed its planning adjustment"})
+        wait(lambda: next(m for m in query("goal_missions") if m["id"] == companion["id"])["status"] == "active", "the AI resumed its own non-selected planning pause without switching the current goal")
+        tool("goal_pause", {"goalId": companion["id"]})
+        wait(lambda: next(m for m in query("goal_missions") if m["id"] == companion["id"])["status"] == "paused", "the AI could pause the companion again while retaining its edits")
         line("/mission pause")
         wait(lambda: mission()["humanPaused"], "test goal paused for retention")
         reload("second /reload preserved test goal, scope and acceptance")
@@ -708,9 +743,13 @@ def main():
 def manual_recovery_round_trip(home, config, checks, reports, environment, fixture, accepted_leaf, note):
     agent = home / "agent"
     sessions = agent / "sessions"
-    destinations = [home / "workspace 用户移动", home / "workspace"] if Path(config["workspace"]) == home / "workspace" else [home / "workspace"]
+    moved = home / "workspace 用户移动"
+    if moved.exists():
+        moved = home / ("workspace 用户移动 " + uuid.uuid4().hex[:8])
+    destinations = [moved, home / "workspace"] if Path(config["workspace"]) == home / "workspace" else [home / "workspace"]
     for cycle, destination in enumerate(destinations):
         source = Path(config["workspace"])
+        assert source.resolve().is_relative_to(home.resolve()) and destination.resolve().is_relative_to(home.resolve())
         assert source.is_dir() and not destination.exists()
         source.rename(destination)
         master, slave = pty.openpty()
@@ -918,6 +957,8 @@ def portable_transfer_check(home, config, checks, reports, environment, candidat
                 data.extend(chunk)
                 if b"\x1b[c" in chunk: os.write(master, b"\x1b[?1;2c")
         def line(text):
+            if process.poll() is not None:
+                raise AssertionError("Transfer test Pi exited before input\n" + data[-6000:].decode(errors="replace"))
             drain(); os.write(master, text.encode()); drain(); os.write(master, b"\r")
         def wait(predicate, label, timeout=45):
             end = time.monotonic() + timeout

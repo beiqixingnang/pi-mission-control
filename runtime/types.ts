@@ -237,6 +237,7 @@ export interface Mission {
   lastReportAt: number;
   nextContinueAt: number;
   humanPaused: boolean;
+  pauseSource?: "user" | "agent";
   revision?: number;
   archivedAt?: number;
   archiveReason?: string;

@@ -297,6 +297,43 @@ export default function (pi: ExtensionAPI) {
           // Deterministic stand-in for the lead model's natural-language flow:
           // inspect the real plugin grant, then apply it. It does not parse the
           // target or issue filesystem operations itself.
+          const goalUser = textOf(
+            context.messages.filter((m: any) => m.role === "user").at(-1),
+          );
+          const childEdit = goalUser.match(/^请修改子目标 (\S+) 为 (.+)$/u);
+          const goalCommand =
+            goalUser === "请暂停当前目标，保留计划可编辑"
+              ? {
+                  name: "goal_pause",
+                  args: { source: "user", reason: goalUser },
+                }
+              : goalUser === "请继续当前目标"
+                ? {
+                    name: "goal_resume",
+                    args: { source: "user", reason: goalUser },
+                  }
+                : childEdit
+                  ? {
+                      name: "goal_edit",
+                      args: {
+                        goalId: childEdit[1],
+                        objective: childEdit[2],
+                        revision: 0,
+                      },
+                    }
+                  : undefined;
+          if (goalCommand) {
+            const last = context.messages.at(-1);
+            if (last?.role === "toolResult")
+              answer(
+                JSON.stringify({ isError: last.isError, text: textOf(last) }),
+              );
+            else tool(goalCommand.name, goalCommand.args);
+            stream.push({ type: "start", partial: message });
+            stream.push({ type: "done", reason: message.stopReason, message });
+            stream.end();
+            return;
+          }
           const workspaceUser =
             context.messages
               .filter((m: any) => m.role === "user")

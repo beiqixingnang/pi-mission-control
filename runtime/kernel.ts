@@ -527,9 +527,19 @@ export class MissionKernel {
           revision,
         );
       }
-      const m = this.store.mission();
+      const selected = this.store.mission();
+      const m =
+        goalId && goalId !== selected?.id
+          ? this.store.savedMission(goalId)
+          : selected;
       if (!m || ["complete", "stopped"].includes(m.status))
-        throw new Error("No unfinished goal to update");
+        throw new Error(
+          "No editable unfinished goal. For a temporarily stopped goal, call goal_pause with its goalId to restore paused planning; editing does not require execution resume.",
+        );
+      if (m.id !== selected?.id && !m.humanPaused)
+        throw new Error(
+          "Activate this goal or use goal_pause before revising its definition",
+        );
       if (goalId && goalId !== m.id) throw new Error("Goal identity changed");
       if (revision !== undefined && revision !== (m.revision ?? 0))
         throw new Error("Goal revision changed");
@@ -575,13 +585,206 @@ export class MissionKernel {
       m.nextContinueAt = this.now() + 1000;
       m.updatedAt = this.now();
       // Editing an objective neither grants execution authority nor renews a budget.
-      this.store.set("mission", m);
+      if (m.id === selected?.id) this.store.set("mission", m);
+      else this.store.putMission(m);
       this.syncGoalDefinition(m);
       this.store.event("mission.updated", m.id, { revision: m.revision });
-      this.recovery.revise(m.revision);
+      if (m.id === selected?.id) this.recovery.revise(m.revision);
       this.turnActed = true;
       this.changed();
       return m;
+    });
+  }
+  pauseGoal(
+    goalId?: string,
+    reason = "Execution paused; plan remains editable",
+    revision?: number,
+    source: "user" | "agent" = "agent",
+  ) {
+    return this.store.transaction(() => {
+      const selected = this.store.mission();
+      const id = goalId ?? selected?.id;
+      if (!id)
+        throw new Error("Specify the retained main goalId to pause its plan");
+      const root = this.goals.node(id);
+      if (root.parentId)
+        throw new Error(
+          "Pause the main goal, then edit its subgoals by their own IDs",
+        );
+      if (revision !== undefined && revision !== root.revision)
+        throw new Error("Goal revision changed");
+      const mission =
+        selected?.id === id
+          ? selected
+          : (this.store.savedMission(id) ?? this.goals.newMission(root));
+      if (mission.status === "complete" || root.state === "accepted")
+        throw new Error(
+          "An accepted goal must be explicitly reopened before planning more work",
+        );
+      const restoredStopped = mission.status === "stopped";
+      const retainUserPause =
+        mission.status === "paused" && mission.pauseSource !== "agent";
+      mission.pauseSource =
+        retainUserPause || restoredStopped ? "user" : source;
+      mission.status = "paused";
+      mission.humanPaused = true;
+      mission.reason = cleanText(reason, 2000);
+      mission.updatedAt = this.now();
+      // Preserve the stopped archive as history; this explicitly restores only
+      // its editable plan, never old tasks, process attestations or execution.
+      if (restoredStopped) {
+        delete mission.archivedAt;
+        delete mission.archiveReason;
+        if (root.state === "cancelled") {
+          root.state = "planned";
+          root.reason = mission.reason;
+          root.updatedAt = this.now();
+          this.store.putGoal(root);
+        }
+      }
+      if (!selected || selected.id === id) {
+        this.generation++;
+        this.userHold = true;
+        this.reservation = undefined;
+        for (const delivery of this.store.deliveries("lead"))
+          if (
+            delivery.missionId === id &&
+            ["leased", "admitted"].includes(delivery.state)
+          ) {
+            delivery.state = "pending";
+            delete delivery.batchId;
+            this.store.putDelivery(delivery);
+          }
+        this.store.set("mission", mission);
+      } else this.store.putMission(mission);
+      this.store.event("goal.paused-for-planning", id, {
+        reason: mission.reason,
+        restoredStopped,
+        source: mission.pauseSource,
+      });
+      this.turnActed = true;
+      this.changed();
+      return {
+        goal: mission,
+        restoredStopped,
+        planning: this.planningStatus(id),
+      };
+    });
+  }
+  planningStatus(goalId?: string) {
+    const selected = this.store.mission();
+    const id = goalId ? this.goals.node(goalId).rootId : selected?.id;
+    const mission =
+      id === selected?.id
+        ? selected
+        : id
+          ? this.store.savedMission(id)
+          : undefined;
+    const closed =
+      mission?.status === "stopped" || mission?.status === "complete";
+    const unsettled = id
+      ? this.store
+          .missionTasks(id)
+          .filter((task) => !terminal(task) || task.processState === "unknown")
+          .length
+      : 0;
+    return {
+      goalId: id,
+      executionStatus: mission?.status ?? "none",
+      executionPaused: Boolean(
+        mission?.humanPaused || mission?.status === "paused",
+      ),
+      pauseSource:
+        mission?.status === "paused"
+          ? (mission.pauseSource ?? "user")
+          : undefined,
+      planEditable: Boolean(id && !closed),
+      definitionChangesRequireSettledWork: unsettled > 0,
+      resumeRequiredForEditing: false,
+      instruction: closed
+        ? mission?.status === "stopped"
+          ? "Use goal_pause(goalId) to explicitly restore this retained plan as paused, then goal_edit/goal_update/goal_plan. Do not resume execution just to edit."
+          : "Explicitly reopen accepted scope before changing its plan."
+        : "Edit the relevant main or subgoal directly with goal_edit/goal_update/goal_plan. An edit-only request preserves the pause, budget and independent holds. Settle affected live/unknown work before definition changes. Use goal_resume for the AI's own pause or the user's natural-language continue/restart request; no slash command is required.",
+    };
+  }
+  resumeGoal(
+    goalId?: string,
+    reason = "Resume the approved goal",
+    revision?: number,
+    source: "user" | "agent" = "agent",
+  ) {
+    return this.store.transaction(() => {
+      const selected = this.store.mission();
+      const id = goalId ?? selected?.id;
+      if (!id) throw new Error("Specify the paused main goalId");
+      const root = this.goals.node(id);
+      if (root.parentId)
+        throw new Error("Resume the main goal, then focus its ready child");
+      if (revision !== undefined && root.revision !== revision)
+        throw new Error("Goal revision changed");
+      const mission =
+        selected?.id === id ? selected : this.store.savedMission(id);
+      if (!mission || ["complete", "stopped"].includes(mission.status))
+        throw new Error(
+          "For a stopped goal, first restore its paused plan with goal_pause(goalId); accepted scope requires explicit reopening",
+        );
+      if (mission.status === "active" && !mission.humanPaused)
+        return {
+          goal: mission,
+          planning: this.planningStatus(id),
+          selected: selected?.id === id,
+        };
+      if (mission.status !== "paused")
+        throw new Error(
+          "Resolve the goal's independent runtime or business hold before resuming",
+        );
+      if (
+        (mission.pauseSource !== "agent" || this.store.get("escapeHold")) &&
+        source !== "user"
+      )
+        throw new Error(
+          "Keep the user's pause for an edit-only request. On the user's natural-language continue/restart request, call goal_resume with source:user; no user slash command is needed",
+        );
+      if (
+        this.store.get("relocationHold") ||
+        mission.decision ||
+        mission.blocker ||
+        this.store.unknownProcesses().total
+      )
+        throw new Error(
+          "Resolve independent workspace, authorization, budget or unknown-process holds first; goal resume never clears them",
+        );
+      mission.status = "active";
+      mission.humanPaused = false;
+      delete mission.pauseSource;
+      delete mission.reason;
+      mission.updatedAt = this.now();
+      mission.nextContinueAt = this.now() + 1000;
+      if (!selected || selected.id === id) {
+        this.generation++;
+        this.userHold = false;
+        this.reservation = undefined;
+        this.store.unset("escapeHold");
+        this.store.set("mission", mission);
+      } else this.store.putMission(mission);
+      this.store.event("goal.resumed", id, {
+        reason: cleanText(reason, 2000),
+        source,
+      });
+      this.turnActed = true;
+      this.changed();
+      queueMicrotask(() => {
+        if (!this.closing)
+          void this.tick().catch((error) =>
+            this.options.notify?.(String(error)),
+          );
+      });
+      return {
+        goal: mission,
+        planning: this.planningStatus(id),
+        selected: !selected || selected.id === id,
+      };
     });
   }
   private syncGoalDefinition(m: Mission) {
@@ -724,8 +927,11 @@ export class MissionKernel {
       if (
         !node.parentId &&
         (patch.objective !== undefined || patch.criteria !== undefined) &&
-        id === this.store.mission()?.id &&
-        !["complete", "stopped"].includes(this.store.mission()!.status)
+        (id === this.store.mission()?.id ||
+          this.store.savedMission(id)?.humanPaused) &&
+        !["complete", "stopped"].includes(
+          this.store.savedMission(id)?.status ?? "",
+        )
       ) {
         if (patch.dependsOn !== undefined || patch.state !== undefined)
           throw new Error("Update root definition separately from its state");
@@ -1751,6 +1957,8 @@ export class MissionKernel {
         this.store.putDelivery(d);
       }
     m.humanPaused = action !== "resume";
+    if (action === "pause") m.pauseSource = "user";
+    else delete m.pauseSource;
     m.status =
       action === "resume" ? "active" : action === "stop" ? "stopped" : "paused";
     m.reason = action === "resume" ? undefined : `User ${action}`;
@@ -2454,6 +2662,7 @@ export class MissionKernel {
       recoveryPlan: this.recoveryPlan(),
       decisionPolicy: this.decisionPolicyValue,
       mission: m,
+      planning: this.planningStatus(),
       goals: this.goals.summary(m?.id),
       recovery: this.recovery.current(),
       activity: this.activityClock.snapshot(m),
@@ -2505,7 +2714,7 @@ export class MissionKernel {
           )
           .join("; ") || "none"
       }`,
-      "Task completion and maintenance are automatic, independent of Goal/reminder tools. Delegate approved work, let teammates review each other, then call mission_wait alone. Only the user can pause or stop the mission. Use mission_complete with evidence after verification; use mission_decision only for a concrete user decision. Inspect saved result paths rather than repeat completed commands.",
+      "Task completion and maintenance are automatic, independent of Goal/reminder tools. Delegate approved work, let teammates review each other, then call mission_wait alone. Honor user pause requests with goal_pause, preserving an editable plan; reserve goal_stop for a final stop/archive. Paused plan edits need no execution resume and must keep the pause. Use mission_complete with evidence after verification; use mission_decision only for a concrete user decision. Inspect saved result paths rather than repeat completed commands.",
       "Mission Control tools are declared directly from the host registry. mission_capabilities lists their active visibility and exact schemas. Inspect unknown executions and host processes before mission_reconcile; it records your stopped-process evidence and never replays work.",
       s.recovery
         ? `Runtime recovery: ${JSON.stringify(s.recovery)}. Recovery preserves the approved goal and budget. Never turn a runtime fault into a user decision or edit the goal to bypass a hold; inspect mission_recover.`

@@ -104,6 +104,67 @@ test("workspace pause has one accurate status and a manual resume command in com
     assert.doesNotMatch(board(kernel, 160).join("\n"), /迁移后待恢复/);
   }));
 
+test("bottom board shows active and paused goals together, hides archived goals, and preserves pause after a plan edit", () =>
+  withRoster(async ({ kernel }) => {
+    const archived = kernel.setGoal("Archived fixture must stay hidden");
+    await kernel.stopGoal(archived.id);
+    const [active, paused] = kernel.planGoals([
+      { objective: "Active fixture goal", criteria: ["Remain active"] },
+      { objective: "Paused fixture goal", criteria: ["Editable while paused"] },
+    ]);
+    kernel.pauseGoal(paused.id);
+    kernel.updateGoal(
+      "Paused revised fixture goal",
+      ["Edit without execution"],
+      paused.id,
+      0,
+    );
+    for (const width of [70, 160]) {
+      const lines = board(kernel, width, false, undefined, 42);
+      const rendered = lines.join("\n");
+      assert.match(rendered, /Active fixture goal/);
+      assert.match(rendered, /Paused revised fixture goal/);
+      assert.match(
+        lines.find((line) => line.includes("Paused revised")),
+        /暂停中/,
+      );
+      assert.doesNotMatch(rendered, /Archived fixture/);
+      assert.ok(lines.length <= 10);
+      assert.ok(lines.every((line) => visibleWidth(line) <= width));
+    }
+    assert.equal(kernel.store.mission().id, active.id);
+    assert.equal(kernel.store.savedMission(paused.id).status, "paused");
+  }));
+
+test("bottom board hides a selected closed goal and counts overflow without exposing archived titles", () =>
+  withRoster(async ({ kernel }) => {
+    const closed = kernel.setGoal("Completed fixture must stay hidden", [
+      "Accepted",
+    ]);
+    kernel.complete([{ criterion: 1, evidence: "Verified fixture" }]);
+    assert.doesNotMatch(board(kernel, 160).join("\n"), /Completed fixture/);
+    kernel.store.set("relocationHold", true);
+    const held = board(kernel, 160).join("\n");
+    assert.match(held, /迁移后待恢复/);
+    assert.match(held, /\/mission resume/);
+    assert.doesNotMatch(held, /Completed fixture/);
+    kernel.store.set("relocationHold", false);
+    const roots = kernel.planGoals(
+      Array.from({ length: 12 }, (_, i) => ({
+        objective: "Visible planned goal " + i,
+        criteria: ["Visible"],
+      })),
+    );
+    for (const root of roots.slice(1)) kernel.pauseGoal(root.id);
+    for (const width of [70, 160]) {
+      const lines = board(kernel, width, false, undefined, 24);
+      assert.ok(lines.length <= 8);
+      assert.match(lines.join("\n"), /另有 \d+个目标/);
+      assert.doesNotMatch(lines.join("\n"), /Completed fixture/);
+    }
+    assert.equal(kernel.store.goal(closed.id).state, "accepted");
+  }));
+
 test("compact goal counts and the detailed keyboard board share the acceptance ledger", () =>
   withRoster(async ({ kernel }) => {
     const nodes = kernel.planGoals([

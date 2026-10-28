@@ -21,6 +21,7 @@ import {
 import { RecoveryPicker } from "./recovery-ui.ts";
 import { mappedPath, type PathMapping } from "../../runtime/path-mapping.ts";
 import { workspaceResumeInstruction } from "../../runtime/workspace-control.ts";
+import { projectNotice } from "../../runtime/project-notice.ts";
 import {
   exportTransfer,
   prepareTransferImport,
@@ -290,14 +291,10 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
       const changed = await ctx.switchSession(r.sessionFile, {
         withSession: async (next) => {
           await commitRelocation(r);
-          await next.sendMessage({
-            customType: "project-location",
-            content: `用户已将旧对话从 ${r.plan.source} 恢复到当前工作区 ${r.plan.target}。历史正文和目标证据保留；旧项目内成员工作区已映射，外部权限不变。旧绝对路径可用 project_resolve 查询。旧命令没有自动重放。${workspaceResumeInstruction}`,
-            display: true,
-          });
-          next.ui.notify(
+          await projectNotice(
+            next,
             `已恢复到当前工作区：${r.plan.target}\n${workspaceResumeInstruction}\n备份与恢复日志：${r.journal}`,
-            "info",
+            `用户已将旧对话从 ${r.plan.source} 恢复到当前工作区 ${r.plan.target}。历史正文和目标证据保留；旧项目内成员工作区已映射，外部权限不变。旧绝对路径可用 project_resolve 查询。旧命令没有自动重放。${workspaceResumeInstruction}`,
           );
         },
       });
@@ -388,14 +385,10 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
         const switched = await ctx.switchSession(r.sessionFile, {
           withSession: async (next) => {
             await commitRelocation(r);
-            await next.sendMessage({
-              customType: "project-location",
-              content: `已从其他电脑导入对话快照到 ${r.plan.target}。主对话、目标验收、成员记录与笔记保留。旧路径通过 project_resolve 映射。旧任务没有重放，原电脑进程状态仍需核对。${workspaceResumeInstruction} 模型账号使用本机配置；工作区之外的依赖与权限请核对后继续。`,
-              display: true,
-            });
-            next.ui.notify(
+            await projectNotice(
+              next,
               `跨电脑导入完成：${r.plan.target}\n${workspaceResumeInstruction}\n确认旧电脑已停止工作，模型/API 配置在本机可用。`,
-              "info",
+              `已从其他电脑导入对话快照到 ${r.plan.target}。主对话、目标验收、成员记录与笔记保留。旧路径通过 project_resolve 映射。旧任务没有重放，原电脑进程状态仍需核对。${workspaceResumeInstruction} 模型账号使用本机配置；工作区之外的依赖与权限请核对后继续。`,
             );
           },
         });
@@ -531,9 +524,9 @@ export function installProject(pi: ExtensionAPI, current: () => MissionKernel) {
       const changed = await ctx.switchSession(r.sessionFile, {
         withSession: async (next) => {
           await commitRelocation(r);
-          next.ui.notify(
+          await projectNotice(
+            next,
             `工作区迁移完成：${fresh.target}\n${workspaceResumeInstruction}\n备份与恢复日志：${r.journal}`,
-            "info",
           );
         },
       });
