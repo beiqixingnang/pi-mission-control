@@ -19,6 +19,7 @@ import {
 } from "../relocation.ts";
 import { getRecoveryProjectIdentity } from "../../extensions/project/identity.ts";
 import { rebindWorkspaceGoalBlocks } from "../workspace-control.ts";
+import { rebaseReviewHolds } from "../team-policy.ts";
 import {
   digest,
   safeName,
@@ -513,6 +514,9 @@ export async function prepareTransferImport(
         member.workspace.root = mapped(member.workspace.root);
         member.workspace.extraReadRoots =
           member.workspace.extraReadRoots.map(mapped);
+        if (member.workspace.extraWriteRoots)
+          member.workspace.extraWriteRoots =
+            member.workspace.extraWriteRoots.map(mapped);
         member.sessionId = memoryIds.get(member.sessionId) ?? member.sessionId;
         if (member.sessionFile) member.sessionFile = mapped(member.sessionFile);
         return member;
@@ -538,6 +542,7 @@ export async function prepareTransferImport(
         return task;
       };
       store.transaction(() => {
+        rebaseReviewHolds(store, mapped);
         for (const member of store.members())
           store.putMember(rewriteMember(member));
         for (const task of store.tasks()) store.putTask(rewriteTask(task));

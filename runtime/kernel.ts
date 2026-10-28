@@ -13,6 +13,7 @@ import {
   releaseWorkspaceGoalBlocks,
 } from "./workspace-control.ts";
 import { taskTiming, executionDeadline } from "./task-policy.ts";
+import { capabilityView, reviewSnapshot, taskView } from "./team-policy.ts";
 import {
   resolveSettings,
   terminal,
@@ -32,6 +33,7 @@ import {
   type GoalEvidence,
   type GoalNode,
   type TaskTiming,
+  type ReviewHold,
 } from "./types.ts";
 
 const noProgressReason =
@@ -45,6 +47,7 @@ interface Live {
   processState?: "stopped" | "unknown";
   delivering?: boolean;
   deliveryPromise?: Promise<void>;
+  tools?: Set<string>;
 }
 export interface KernelOptions {
   directory: string;
@@ -978,16 +981,253 @@ export class MissionKernel {
   ) {
     const m = this.store.member(name);
     if (!m) throw new Error("Unknown member");
-    if (this.store.tasks(true).some((t) => t.memberId === m.id))
-      throw new Error(
-        "Finish or cancel member work before changing its capabilities",
-      );
     Object.assign(m, patch);
     m.revision = (m.revision ?? 0) + 1;
     this.store.putMember(m);
+    this.store.event("member.capabilities-configured", m.id, {
+      revision: m.revision,
+    });
     this.turnActed = true;
     this.changed();
     return m;
+  }
+  memberCapabilities(name?: string) {
+    const members = name ? [this.store.member(name)] : this.store.members();
+    if (members.some((member) => !member)) throw new Error("Unknown member");
+    return members.map((member) => {
+      const m = member!;
+      const running = this.store
+        .tasks(true)
+        .filter(
+          (task) => task.memberId === m.id && task.processState === "running",
+        );
+      return {
+        name: m.name,
+        desired: capabilityView(m),
+        executions: running.map((task) => ({
+          taskId: task.id,
+          epoch: task.epoch,
+          active: task.capabilitySnapshot
+            ? capabilityView(task.capabilitySnapshot, task.actualTools)
+            : null,
+          pending:
+            !task.capabilitySnapshot ||
+            task.capabilitySnapshot.revision !== m.revision,
+        })),
+        reviewHold: this.store.get<ReviewHold>(`reviewHold:${m.id}`),
+      };
+    });
+  }
+  requestReview(
+    executorName: string,
+    reviewerName: string,
+    message: string,
+    files: string[],
+    parentId?: string,
+  ) {
+    const executor = this.store.member(executorName),
+      reviewer = this.store.member(reviewerName);
+    if (!executor || !reviewer || executor.id === reviewer.id)
+      throw new Error(
+        "Review requires distinct known executor and reviewer identities",
+      );
+    if (
+      !Array.isArray(files) ||
+      !files.length ||
+      files.length > 100 ||
+      files.some((file) => typeof file !== "string" || !file.trim())
+    )
+      throw new Error("Review requires an explicit batch of 1 to 100 files");
+    if (this.store.tasks(true).some((task) => task.memberId === reviewer.id))
+      throw new Error(
+        "Reviewer must finish its current work before starting a review batch",
+      );
+    if (this.store.hasUnknownProcess(executor.id))
+      throw new Error(
+        "Reconcile the executor's unknown processes before review",
+      );
+    const previous = this.store.get<ReviewHold>(`reviewHold:${executor.id}`);
+    if (previous && previous.state !== "released")
+      throw new Error("Executor already has an active review hold");
+    const id = randomUUID();
+    const reviewTask = this.dispatch(reviewerName, message, { parentId });
+    reviewTask.reviewFor = id;
+    this.store.putTask(reviewTask);
+    const hold: ReviewHold = {
+      id,
+      executorId: executor.id,
+      reviewerId: reviewer.id,
+      reviewTaskId: reviewTask.id,
+      state: "draining",
+      files: [
+        ...new Set(
+          files.map((file) => path.resolve(executor.workspace.root, file)),
+        ),
+      ],
+      createdAt: this.now(),
+    };
+    this.store.set(`reviewHold:${executor.id}`, hold);
+    for (const task of this.store
+      .tasks(true)
+      .filter((task) => task.memberId === executor.id)) {
+      task.reviewHoldId = id;
+      this.store.putTask(task);
+    }
+    this.store.event("review.requested", id, {
+      executor: executorName,
+      reviewer: reviewerName,
+      reviewTaskId: reviewTask.id,
+    });
+    this.changed();
+    return hold;
+  }
+  releaseReview(executorName: string, reason: string) {
+    const executor = this.store.member(executorName);
+    if (!executor || !reason.trim())
+      throw new Error("Known executor and release reason required");
+    const hold = this.store.get<ReviewHold>(`reviewHold:${executor.id}`);
+    if (!hold) throw new Error("No review hold");
+    if (hold.state === "released") return hold;
+    const reviewTask = this.store.task(hold.reviewTaskId);
+    if (
+      reviewTask &&
+      (!terminal(reviewTask) || reviewTask.processState === "unknown")
+    )
+      throw new Error(
+        "Finish or cancel and reconcile the review task before releasing the executor",
+      );
+    const after = reviewSnapshot(executor, hold.files, true);
+    hold.resultPath = this.store.artifact(
+      hold.id,
+      "review-result",
+      JSON.stringify(
+        {
+          reason,
+          before: hold.snapshotPath,
+          after,
+          reviewResultPath: reviewTask?.resultPath,
+          reviewState: reviewTask?.state,
+        },
+        null,
+        2,
+      ),
+    );
+    hold.state = "released";
+    hold.releasedAt = this.now();
+    this.store.set(`reviewHold:${executor.id}`, hold);
+    for (const task of this.store
+      .tasks(true)
+      .filter((task) => task.reviewHoldId === hold.id)) {
+      task.continuation = `Review released. Reread the current batch files and review findings before the next change. Review receipt: ${hold.resultPath}; reviewer result: ${reviewTask?.resultPath ?? reason}`;
+      delete task.reviewHoldId;
+      this.store.putTask(task);
+    }
+    this.store.event("review.released", hold.id, {
+      reason,
+      resultPath: hold.resultPath,
+    });
+    this.changed();
+    return hold;
+  }
+  reviewContext(executorName: string) {
+    const executor = this.store.member(executorName);
+    if (!executor) throw new Error("Unknown executor");
+    const hold = this.store.get<ReviewHold>(`reviewHold:${executor.id}`);
+    if (!hold) return { executor: executorName, hold: undefined };
+    const reviewer = this.store.member(hold.reviewerId);
+    const reviewTask = this.store.task(hold.reviewTaskId);
+    return {
+      executor: executorName,
+      hold,
+      reviewer: reviewer ? capabilityView(reviewer) : undefined,
+      reviewTask: reviewTask
+        ? {
+            id: reviewTask.id,
+            state: reviewTask.state,
+            resultPath: reviewTask.resultPath,
+            summary: reviewTask.summary,
+          }
+        : undefined,
+    };
+  }
+  private advanceReviews() {
+    for (const executor of this.store.members()) {
+      const hold = this.store.get<ReviewHold>(`reviewHold:${executor.id}`);
+      if (!hold || hold.state === "released") continue;
+      if (hold.error) continue;
+      if (
+        this.store.hasUnknownProcess(executor.id) ||
+        this.store
+          .tasks(true)
+          .some(
+            (task) => task.memberId === executor.id && this.live.has(task.id),
+          )
+      )
+        continue;
+      try {
+        if (hold.state === "draining" && !hold.error) {
+          const reviewer = this.store.member(hold.reviewerId);
+          if (!reviewer) throw new Error("Review identity was removed");
+          const before = reviewSnapshot(executor, hold.files);
+          reviewSnapshot(reviewer, hold.files);
+          hold.snapshotPath = this.store.artifact(
+            hold.id,
+            "review-snapshot",
+            JSON.stringify(
+              {
+                executor: executor.name,
+                capabilityRevision: executor.revision,
+                createdAt: this.now(),
+                files: before,
+              },
+              null,
+              2,
+            ),
+          );
+          hold.state = "held";
+          this.store.set(`reviewHold:${executor.id}`, hold);
+          this.store.event("review.held", hold.id, {
+            snapshotPath: hold.snapshotPath,
+          });
+        }
+        const reviewTask = this.store.task(hold.reviewTaskId);
+        if (reviewTask?.state === "completed")
+          this.releaseReview(executor.name, "Review batch completed");
+        else if (reviewTask && terminal(reviewTask) && !hold.error)
+          throw new Error(
+            `Review ${reviewTask.state}; executor remains held until explicit release or another review`,
+          );
+      } catch (error) {
+        hold.error = String(error);
+        this.store.set(`reviewHold:${executor.id}`, hold);
+        this.delivery({
+          key: `review-error:${hold.id}`,
+          from: "review",
+          to: "lead",
+          kind: "failure",
+          summary: hold.error,
+        });
+      }
+    }
+  }
+  private boundaryReason(task: Task) {
+    const hold = this.store.get<ReviewHold>(`reviewHold:${task.memberId}`);
+    if (hold && hold.state !== "released") return "review" as const;
+    const current = this.store.member(task.memberId);
+    if (
+      task.capabilitySnapshot &&
+      current?.revision !== task.capabilitySnapshot.revision
+    )
+      return "capabilities" as const;
+    return undefined;
+  }
+  private checkpoint(task: Task) {
+    const reason = this.boundaryReason(task);
+    if (!reason || this.live.get(task.id)?.tools?.size)
+      return { action: "run", pending: reason };
+    task.boundaryRequested = reason;
+    this.store.putTask(task);
+    return { action: "settle", reason };
   }
   async disbandMember(name: string, reason = "Disbanded by the lead") {
     if (name === "lead" || name === "all")
@@ -1216,11 +1456,20 @@ export class MissionKernel {
     this.changed();
   }
   /** User-facing member message: steer a live worker, or start a new tracked turn when idle. */
-  async messageMember(name: string, message: string) {
+  async messageMember(
+    name: string,
+    message: string,
+    operation: "note" | "assign" | "user" = "user",
+  ) {
     const member = this.store.member(name);
     if (!member) throw new Error(`Unknown member: ${name}`);
     if (!message.trim() || Buffer.byteLength(message) > 16000)
       throw new Error("Member message must contain 1 to 16000 bytes");
+    if (operation === "assign")
+      return {
+        mode: "new-turn" as const,
+        taskId: this.dispatch(name, message).id,
+      };
     const liveTask = this.store
       .tasks(true)
       .find((task) => task.memberId === member.id && task.state === "running");
@@ -1239,8 +1488,19 @@ export class MissionKernel {
         "This member is settling; wait for its current turn to finish",
       );
     }
-    const task = this.dispatch(name, message);
-    return { mode: "new-turn" as const, taskId: task.id };
+    if (operation === "user")
+      return {
+        mode: "new-turn" as const,
+        taskId: this.dispatch(name, message).id,
+      };
+    const note = this.delivery({
+      key: `lead-note:${randomUUID()}`,
+      from: "lead",
+      to: name,
+      kind: "progress",
+      summary: message,
+    });
+    return { mode: "note" as const, deliveryId: note.id };
   }
   delivery(
     input: Pick<Delivery, "key" | "from" | "to" | "kind" | "summary"> &
@@ -2204,7 +2464,7 @@ export class MissionKernel {
       },
       compactionQueued: this.compactionQueued,
       members: this.store.members(),
-      tasks: this.store.tasks(),
+      tasks: this.store.tasks().map(taskView),
       deliveries: this.store
         .deliveries("lead")
         .filter((d) => !["cancelled", "superseded"].includes(d.state)),
@@ -2213,6 +2473,10 @@ export class MissionKernel {
       maintenance: !this.closing,
       held: this.userHold,
       workspaceHeld: Boolean(this.store.get("relocationHold")),
+      reviewHolds: this.store
+        .members()
+        .map((member) => this.store.get<ReviewHold>(`reviewHold:${member.id}`))
+        .filter(Boolean),
       nextReportAt: m
         ? m.lastReportAt + this.settings.progressIntervalMs
         : undefined,
@@ -2315,6 +2579,7 @@ export class MissionKernel {
         !this.userHold &&
         !this.store.get("relocationHold")
       ) {
+        this.advanceReviews();
         for (const task of this.store.tasks(true))
           if (
             task.state === "waiting" &&
@@ -2394,6 +2659,19 @@ export class MissionKernel {
           if (task.missionId !== mission?.id) continue;
           if (task.goalId && this.goals.blockers(task.goalId).length) continue;
           if (task.blockedReason) continue;
+          const hold = this.store.get<ReviewHold>(
+            `reviewHold:${task.memberId}`,
+          );
+          if (hold && hold.state !== "released") continue;
+          if (task.reviewFor) {
+            const review = this.store
+              .members()
+              .map((member) =>
+                this.store.get<ReviewHold>(`reviewHold:${member.id}`),
+              )
+              .find((item) => item?.id === task.reviewFor);
+            if (!review || review.state !== "held" || review.error) continue;
+          }
           if (
             task.phase === "work" &&
             task.queueTimeoutMs &&
@@ -2757,7 +3035,10 @@ export class MissionKernel {
     };
   }
   private launch(task: Task) {
-    const member = this.store.member(task.memberId)!;
+    const member = structuredClone(this.store.member(task.memberId)!);
+    task.capabilitySnapshot = member;
+    delete task.actualTools;
+    delete task.boundaryRequested;
     this.previews.delete(member.id);
     task.state = "running";
     task.epoch++;
@@ -2784,6 +3065,11 @@ export class MissionKernel {
     const prompt = [
       `Assigned task ${task.id}; phase ${task.phase}. Follow the existing user authorization.`,
       original,
+      task.continuation ?? "",
+      `Actual capability snapshot for this execution: ${JSON.stringify(capabilityView(member))}. Configured changes take effect after the current operations settle; do not bypass guards.`,
+      task.reviewFor
+        ? `Review gate ${task.reviewFor}: the executor is held. Review only this registered batch, communicate findings directly, and finish with evidence. The runtime resumes the executor after successful completion.`
+        : "",
       task.goalId
         ? "Assigned goal context (bounded previews; goal_context retrieves full criteria and scope):\n" +
           JSON.stringify(this.assignedGoalContext(task))
@@ -2809,7 +3095,7 @@ export class MissionKernel {
             )
             .join("\n\n")
         : "",
-      "Use team_message to assign approved downstream work to permitted teammates. After dispatch call team_wait ALONE to end this turn; the runtime resumes this same session for review. Routine updates stay within the team; send decision/failure only when coordination is required.",
+      "Use team_message operation:note for direct discussion; it never creates work. Use assign only for a formal authorized downstream task, then team_wait ALONE if waiting for descendants. Finish the complete authorized batch before reporting; ordinary preferences do not block autonomous work. Continue independent approved work when one operation needs explicit authority.",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -2951,6 +3237,37 @@ export class MissionKernel {
           delivery.nextAttemptAt = this.now() + this.settings.retryBaseMs;
           this.store.putDelivery(delivery);
         }
+    if (
+      task.boundaryRequested &&
+      outcome.processState === "stopped" &&
+      outcome.cleanSettlement !== false &&
+      !outcome.protocolDiagnostic &&
+      !(task.timeoutMs && task.executionMs >= task.timeoutMs)
+    ) {
+      const boundary = task.boundaryRequested;
+      const receipt = this.store.artifact(
+        `${task.id}-${task.epoch}`,
+        "checkpoint",
+        JSON.stringify(
+          {
+            boundary,
+            capabilityRevision: task.capabilitySnapshot?.revision,
+            previousContinuation: task.continuation,
+            text: outcome.text,
+            sessionFile: task.sessionFile,
+            at: this.now(),
+          },
+          null,
+          2,
+        ),
+      );
+      task.state = "queued";
+      task.continuation = `Continue the same approved batch after a ${boundary} checkpoint. Do not replay completed commands. Inspect retained session/tool results and reread current files. Checkpoint receipt: ${receipt}`;
+      delete task.boundaryRequested;
+      this.store.putTask(task);
+      this.store.event("task.checkpoint", task.id, { boundary, receipt });
+      return;
+    }
     if (outcome.ok && task.state === "waiting") {
       this.store.putTask(task);
       return;
@@ -3041,7 +3358,8 @@ export class MissionKernel {
     if (!identity || !task || terminal(task) || task.epoch !== identity.epoch)
       throw new Error("Stale or unauthorized member execution");
     const member = this.store.member(task.memberId)!;
-    if (request.op === "ping") return { ok: true };
+    if (request.op === "ping")
+      return { ok: true, pending: this.boundaryReason(task) };
     if (typeof request.id !== "string" || request.id.length > 160)
       throw new Error("A bounded request identity is required");
     const key = `request:${task.id}:${task.epoch}:${request.id}`,
@@ -3054,7 +3372,48 @@ export class MissionKernel {
     }
     return this.store.transaction(() => {
       let result: unknown;
-      if (request.op === "goal-context") {
+      if (request.op === "ready") {
+        if (
+          !Array.isArray(request.tools) ||
+          request.tools.length > 500 ||
+          request.tools.some((tool: unknown) => typeof tool !== "string")
+        )
+          throw new Error("Invalid actual tool list");
+        task.actualTools = request.tools;
+        this.store.putTask(task);
+        result = { ready: true };
+      } else if (request.op === "capabilities") {
+        result = this.memberCapabilities(member.name);
+      } else if (request.op === "tool-begin") {
+        const live = this.live.get(task.id);
+        if (!live || typeof request.callId !== "string")
+          throw new Error("No live tool owner");
+        if (this.boundaryReason(task))
+          result = { ...this.checkpoint(task), denied: true };
+        else {
+          (live.tools ??= new Set()).add(request.callId);
+          result = { action: "run" };
+        }
+      } else if (request.op === "tool-end") {
+        this.live.get(task.id)?.tools?.delete(request.callId);
+        result = this.checkpoint(task);
+      } else if (request.op === "checkpoint") {
+        result = this.checkpoint(task);
+      } else if (request.op === "review") {
+        if (!member.allow.includes(request.reviewer))
+          throw new Error(
+            "Reviewer is outside the member's directed communication allow list",
+          );
+        result = this.requestReview(
+          member.name,
+          request.reviewer,
+          request.message,
+          request.files,
+          task.id,
+        );
+      } else if (request.op === "review-status") {
+        result = this.reviewContext(member.name);
+      } else if (request.op === "goal-context") {
         result = this.assignedGoalContext(
           task,
           request.section,
@@ -3068,7 +3427,7 @@ export class MissionKernel {
             "Only this task and its direct descendants can be collected",
           );
         result = {
-          task: target,
+          task: taskView(target),
           result: target.resultPath
             ? this.store.readArtifact(target.resultPath)
             : undefined,
@@ -3099,9 +3458,19 @@ export class MissionKernel {
           request.message.length > 16000
         )
           throw new Error("Invalid teammate message");
-        if (to !== "lead" && !member.allow.includes(to))
+        const communication =
+          task.capabilitySnapshot &&
+          task.capabilitySnapshot.revision !== member.revision
+            ? task.capabilitySnapshot
+            : member;
+        if (to !== "lead" && !communication.allow.includes(to))
           throw new Error(`Communication denied: ${member.name} -> ${to}`);
-        if (to === "lead" || request.operation === "note") {
+        if (
+          request.operation !== undefined &&
+          !["note", "assign"].includes(request.operation)
+        )
+          throw new Error("Message operation must be note or assign");
+        if (to === "lead" || request.operation !== "assign") {
           const kind = ["decision", "failure", "progress"].includes(
             request.kind,
           )

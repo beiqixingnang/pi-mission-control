@@ -18,6 +18,8 @@ import installReconnect from "./reconnect.ts";
 import { searchWeb, fetchPage } from "../../runtime/web.ts";
 import { fileURLToPath } from "node:url";
 import type { Member } from "../../runtime/types.ts";
+import { memberWorkflowGuidance } from "../../runtime/guidance.ts";
+import { capabilityView } from "../../runtime/team-policy.ts";
 
 const result = (value: unknown) => ({
   details: undefined,
@@ -56,6 +58,7 @@ export default async function (pi: ExtensionAPI) {
     getAgentDir(),
     getPackageDir(),
     config.directory,
+    fileURLToPath(new URL("../../", import.meta.url)),
   ]);
   const names: string[] = [];
   let permitted = new Set<string>();
@@ -131,7 +134,7 @@ export default async function (pi: ExtensionAPI) {
       }),
     ),
   );
-  if (policy.access === "read-write") {
+  if (access.writeRoots.length) {
     register(
       guard(
         createWriteToolDefinition(process.cwd(), {
@@ -194,16 +197,7 @@ export default async function (pi: ExtensionAPI) {
         if (stat.isSymbolicLink()) return;
         if (stat.isDirectory()) {
           for (const e of await fs.readdir(target, { withFileTypes: true })) {
-            if (
-              [
-                ".git",
-                ".pi",
-                ".agents",
-                "node_modules",
-                ".mission-control",
-              ].includes(e.name)
-            )
-              continue;
+            if (["node_modules"].includes(e.name)) continue;
             await walk(path.join(target, e.name));
             if (matches.length >= 200) break;
           }
@@ -291,16 +285,7 @@ export default async function (pi: ExtensionAPI) {
         if (stat.isSymbolicLink()) return;
         if (stat.isDirectory())
           for (const entry of await fs.readdir(file, { withFileTypes: true })) {
-            if (
-              [
-                ".git",
-                ".pi",
-                ".agents",
-                "node_modules",
-                ".mission-control",
-              ].includes(entry.name)
-            )
-              continue;
+            if (["node_modules"].includes(entry.name)) continue;
             await walk(path.join(file, entry.name));
             if (visits > 10000 || matches.length >= 500) break;
           }
@@ -374,7 +359,7 @@ export default async function (pi: ExtensionAPI) {
     name: "team_message",
     label: "Team message",
     description:
-      "Assign approved downstream work, or send a progress/decision note. The coordinator validates directed communication permissions and task identity.",
+      "Send a direct note to a permitted executor/reviewer (operation:note, the default; never creates a task), or explicitly assign approved formal downstream work (operation:assign). Ordinary review discussion and counterexamples stay between peers, without lead relay or new task rounds.",
     parameters: Type.Object({
       to: Type.String(),
       message: Type.String({ maxLength: 16000 }),
@@ -400,6 +385,40 @@ export default async function (pi: ExtensionAPI) {
     }),
     async execute(id, args) {
       return result(await request(id, { op: "message", ...args }));
+    },
+  });
+  register({
+    name: "team_capabilities",
+    label: "Inspect actual capabilities",
+    description:
+      "Read this member's desired and running capability revisions, actual tools, model, paths and pending changes. Names and roles grant no permissions.",
+    parameters: Type.Object({}),
+    async execute(id) {
+      return result(await request(id, { op: "capabilities" }));
+    },
+  });
+  register({
+    name: "team_review",
+    label: "Request or inspect paired review",
+    description:
+      "Request a formal review of an explicit file batch by a permitted peer and end this turn at a safe boundary. Execution stays held until review completes; status reads the current snapshot and review evidence without creating work.",
+    parameters: Type.Object({
+      action: Type.Optional(
+        Type.Union([Type.Literal("request"), Type.Literal("status")]),
+      ),
+      reviewer: Type.Optional(Type.String()),
+      message: Type.Optional(Type.String({ minLength: 1, maxLength: 16000 })),
+      files: Type.Optional(
+        Type.Array(Type.String(), { minItems: 1, maxItems: 100 }),
+      ),
+    }),
+    async execute(id, args) {
+      if (args.action === "status")
+        return result(await request(id, { op: "review-status" }));
+      return {
+        ...result(await request(id, { op: "review", ...args })),
+        terminate: true,
+      };
     },
   });
   register({
@@ -438,12 +457,35 @@ export default async function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.on("tool_call", (event) => {
+  const activeCalls = new Set<string>();
+  pi.on("tool_call", async (event, ctx) => {
     if (!permitted.has(event.toolName))
       return {
         block: true,
         reason: "Tool is outside this member's explicit capability set",
       };
+    const gate = await request(`begin:${event.toolCallId}`, {
+      op: "tool-begin",
+      callId: event.toolCallId,
+      tool: event.toolName,
+    });
+    if (gate.denied) {
+      if (gate.action === "settle") ctx.abort();
+      return {
+        block: true,
+        reason:
+          "This execution is settling at a safe boundary for review or a capability revision. The runtime retains results and resumes the authorized batch.",
+      };
+    }
+    activeCalls.add(event.toolCallId);
+  });
+  pi.on("tool_execution_end", async (event, ctx) => {
+    if (!activeCalls.delete(event.toolCallId)) return;
+    const gate = await request(`end:${event.toolCallId}`, {
+      op: "tool-end",
+      callId: event.toolCallId,
+    });
+    if (gate.action === "settle") ctx.abort();
   });
   pi.on("user_bash", () => ({
     result: {
@@ -455,7 +497,7 @@ export default async function (pi: ExtensionAPI) {
   }));
   let timer: ReturnType<typeof setInterval> | undefined;
   let failures = 0;
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     const configured: string[] = JSON.parse(
       process.env.MC_V2_WORKER_EXTENSIONS ?? "[]",
     );
@@ -528,11 +570,14 @@ export default async function (pi: ExtensionAPI) {
       "team_collect",
       "mission_decision",
       "goal_context",
+      "team_capabilities",
+      "team_review",
     ];
     permitted = new Set(
       member.tools ? [...coordination, ...member.tools] : available,
     );
     pi.setActiveTools([...permitted]);
+    await request("ready", { op: "ready", tools: [...permitted] });
     timer = setInterval(() => {
       let alive = true;
       try {
@@ -546,17 +591,25 @@ export default async function (pi: ExtensionAPI) {
         setTimeout(() => process.exit(1), 1000).unref();
         return;
       }
-      void request("ping", { op: "ping" }).then(
-        () => {
-          failures = 0;
-        },
-        () => {
-          if (++failures >= 3) {
-            ctx.abort();
-            setTimeout(() => process.exit(1), 1000).unref();
-          }
-        },
-      );
+      void request("ping", { op: "ping" })
+        .then(
+          async (status) => {
+            failures = 0;
+            if (status.pending && !activeCalls.size) {
+              const gate = await request(`checkpoint:${crypto.randomUUID()}`, {
+                op: "checkpoint",
+              });
+              if (gate.action === "settle") ctx.abort();
+            }
+          },
+          () => {
+            if (++failures >= 3) {
+              ctx.abort();
+              setTimeout(() => process.exit(1), 1000).unref();
+            }
+          },
+        )
+        .catch(() => {});
     }, 2000);
     timer.unref();
   });
@@ -579,6 +632,8 @@ export default async function (pi: ExtensionAPI) {
     pi.setActiveTools([...permitted]);
     event.systemPromptOptions.promptGuidelines.push(
       `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use tools needed for the actual approved task; role names add no separate restrictions. Use goal_context for complete assigned criteria and scope. Reuse valid evidence, report concrete results and uncovered items, and let the lead record acceptance. Choose routine methods yourself; avoid repeated checks or needless permission requests. Use team_message for permitted peers and team_wait alone for descendants. Never ask the lead to run routine tests on your behalf when your tools allow them; report an actual capability gap precisely.`,
+      `Actual capabilities for this execution: ${JSON.stringify(capabilityView(member, [...permitted]))}`,
+      memberWorkflowGuidance,
     );
   });
   pi.on("session_shutdown", () => {

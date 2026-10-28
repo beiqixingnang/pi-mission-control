@@ -15,6 +15,7 @@ import { Store } from "./store.ts";
 import { snapshotContextMemory } from "./context-memory.ts";
 import { SessionCatalog } from "./session-catalog.ts";
 import { rebindWorkspaceGoalBlocks } from "./workspace-control.ts";
+import { rebaseReviewHolds } from "./team-policy.ts";
 import type { MissionKernel } from "./kernel.ts";
 import type { Member, Task, Delivery } from "./types.ts";
 import {
@@ -253,6 +254,9 @@ function rewriteState(source: Store, target: Store, r: Relocation) {
   const rewriteMember = (m: Member) => {
     m.workspace.root = workspacePath(m.workspace.root);
     m.workspace.extraReadRoots = m.workspace.extraReadRoots.map(workspacePath);
+    if (m.workspace.extraWriteRoots)
+      m.workspace.extraWriteRoots =
+        m.workspace.extraWriteRoots.map(workspacePath);
     if (m.sessionFile) m.sessionFile = statePath(workspacePath(m.sessionFile));
     return m;
   };
@@ -274,6 +278,7 @@ function rewriteState(source: Store, target: Store, r: Relocation) {
     return t;
   };
   target.transaction(() => {
+    rebaseReviewHolds(target, (value) => statePath(workspacePath(value)));
     for (const row of target.db.prepare("SELECT data FROM members").iterate()) {
       const m = JSON.parse(String(row.data)) as Member;
       target.putMember(rewriteMember(m));

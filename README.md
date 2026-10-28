@@ -65,7 +65,13 @@ SQLite是唯一正式账本，不要求模型维护MD或JSON文件。当前阶�
 
 统一名单来自Pi的`getAllTools()`宿主注册表。各模块用`registerTool`注册名称、说明和参数schema；入口按本包来源收集工具，在会话启动及每次模型回合请求前更新`setActiveTools`。因此主模型直接收到完整工具定义，无需搜索或先调用发现工具；旧会话reload也会更新名称和参数。子智能体仍按成员入口及权限提供自己的工具。
 
-`mission_capabilities`是可查询目录，列出51个插件工具的名称、说明、启用状态和命令对应关系，也返回待核对任务的epoch及目标revision。查看某个完整参数时传`toolName`和`includeSchemas=true`；不指定名称时，schema响应最多展示前5项，名称目录则默认全部展示。
+`mission_capabilities`是可查询目录，列出插件工具的名称、说明、启用状态和命令对应关系，也返回待核对任务的epoch及目标revision。查看某个完整参数时传`toolName`和`includeSchemas=true`；不指定名称时，schema响应最多展示前5项，名称目录则默认全部展示。
+
+`team_capabilities`查询成员期望配置、当前执行使用的revision、实际工具和待生效变更。`team_configure`可以在成员运行时登记新模型、工具、工作区和通信权限；当前操作完成后保存检查点，同一任务与成员会话按新版本继续。需要立即撤销时先取消任务。角色名不授予权限，也不固定对应任何模型。
+
+工作区的`access`控制主根目录，`extraReadRoots`补充只读目录，`extraWriteRoots`补充明确授权的读写产物目录（目录需先存在）。文件工具不按`.agents`、`.pi`或`.git`等名字禁写；实际Pi配置、安装及会话状态路径仍然保护。`execution:files`不运行命令；`host`为显式信任的宿主命令，文件根目录不构成操作系统隔离。sandbox仍可显式配置，其额外写根仅供文件工具使用，不自动挂入容器。
+
+`team_review(action:request,executor,reviewer,files,message)`对明确文件批次建立审查暂停。执行者先完成已开始的操作，运行时保存文件哈希快照并暂停后续工具，随后启动所选审查员；审查成功后保存收据、恢复同一任务，要求重新读取文件和审查意见。失败或取消的审查保留暂停，主模型核对后可`action:release`并说明原因。`action:status`查询快照、审查任务和结果；角色本身不会自动设置沙盒，通常按需要选择只读文件审查或完整宿主执行能力。
 
 如果模型只反复查询状态、仍声称必须由用户输入`/mission reconcile`，先看`mission_status.runtime`确认版本及恢复工具可见性。2.0.18起已可直接调用`mission_reconcile`和`mission_control`；重启不会自动证明unknown进程已停止。2.0.19在状态和系统引导最前面给出`recoveryPlan`，修正旧no_progress提示，长状态采用结构化摘录而不切断JSON。模型应先检查宿主进程与产物，再执行计划中的工具；工具实际失败时应报告工具名和原始错误，不能把一次状态查询称作恢复失败。
 
@@ -92,7 +98,7 @@ SQLite是唯一正式账本，不要求模型维护MD或JSON文件。当前阶�
 | --- | --- |
 | 核对中断执行 | `mission_reconcile`，批量提交精确任务epoch及进程已结束的检查证据 |
 | 恢复无进展阻塞 | `mission_control(action=resume)`，核对目标身份及revision，保留预算用量 |
-| 给成员发消息 | `team_message`，运行中steer，空闲时创建受跟踪回合 |
+| 给成员发消息 | `team_message`，`note`只讨论（空闲时保留到下次派工），`assign`才创建正式任务；运行中的普通消息用steer送达 |
 | 设置报告间隔 | `mission_report` |
 | 压缩及摘要模型 | `mission_compact`、`compaction_model`，主/成员设置分开 |
 | 重连设置 | `reconnect_config`，不续期共享故障恢复额度 |

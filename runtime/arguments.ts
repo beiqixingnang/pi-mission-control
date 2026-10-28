@@ -35,6 +35,7 @@ export function workspaceInput(raw: any, defaults: any = {}) {
     access,
     execution,
     extraReadRoots: value.extraReadRoots ?? defaults.extraReadRoots ?? [],
+    extraWriteRoots: value.extraWriteRoots ?? defaults.extraWriteRoots ?? [],
     sandbox,
   };
 }

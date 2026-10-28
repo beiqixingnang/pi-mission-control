@@ -73,6 +73,21 @@ test('extra roots are readable only and read-only policy blocks both edit and mk
  await assert.rejects(ro.mkdir('new'),/read-only/);await assert.rejects(ro.write('inside.txt','modified'),/read-only/);
  assert.match(await fs.readFile(path.join(f.root,'inside.txt'),'utf8'),/INSIDE_MARKER/);
 }));
+test('explicit extra write roots grant read-only members a bounded output directory',()=>fixture(async f=>{
+ const output=path.join(f.base,'output');await fs.mkdir(output);
+ const policy=await resolveWorkspace({root:f.root,access:'read-only',extraWriteRoots:[output]},f.base);
+ const access=new WorkspaceAccess(policy,f.root);
+ await access.write(path.join(output,'receipt.txt'),'RECEIPT');
+ assert.equal(await fs.readFile(path.join(output,'receipt.txt'),'utf8'),'RECEIPT');
+ await assert.rejects(access.write(path.join(f.extra,'denied.txt'),'x'),/outside|read-only/);
+}));
+test('runtime protection uses explicit paths rather than directory names',()=>fixture(async f=>{
+ const state=path.join(f.base,'state');await fs.mkdir(state);
+ const access=new WorkspaceAccess(await resolveWorkspace({root:f.root},f.base),f.root,[state]);
+ await assert.rejects(access.write(path.join(state,'secret.txt'),'x'),/outside|protected/);
+ const named=path.join(f.root,'.agents');await fs.mkdir(named);await access.write(path.join(named,'allowed.txt'),'x');
+ assert.equal(await fs.readFile(path.join(named,'allowed.txt'),'utf8'),'x');
+}));
 test('junction traversal and missing children below outside junctions are denied',()=>fixture(async f=>{
  await fs.symlink(f.outside,path.join(f.root,'escape'),'junction');
  const access=new WorkspaceAccess(await resolveWorkspace({root:f.root},f.base),f.root);
@@ -85,12 +100,16 @@ test('hardlinks cannot disclose outside data or overwrite their external target'
  await assert.rejects(access.read('hard.txt'),/hard-linked/);await assert.rejects(access.write('hard.txt','overwrite'),/hard-linked/);
  assert.equal(await fs.readFile(path.join(f.outside,'secret.txt'),'utf8'),'OUTSIDE_SECRET');
 }));
-test('nested writes and exact edits work inside, protected metadata remains unchanged',()=>fixture(async f=>{
+test('nested writes and exact edits work inside, directory names do not create hidden policy rules',()=>fixture(async f=>{
  const h=await guardHarness(f);const file=path.join(f.root,'nested','result.txt');
  await h.tool('write',{path:file,content:'before value'});await h.tool('edit',{path:file,edits:[{oldText:'before',newText:'after'}]});
  assert.equal(await fs.readFile(file,'utf8'),'after value');
- for(const dir of ['.pi','.agents','.git'])await assert.rejects(h.tool('write',{path:path.join(f.root,dir,'escape.ts'),content:'x'}),/protected/);
- await assert.rejects(fs.stat(path.join(f.root,'.pi')),/ENOENT/);
+ for(const dir of ['.pi','.agents','.git']) {
+  await fs.mkdir(path.join(f.root,dir),{recursive:true});
+  const target=path.join(f.root,dir,'escape.ts');
+  await h.tool('write',{path:target,content:'authorized'});
+  assert.equal(await fs.readFile(target,'utf8'),'authorized');
+ }
 }));
 test('guard blocks shell, MCP, codemode and all nested delegation, including direct hook calls',()=>fixture(async f=>{
  const h=await guardHarness(f,'read-only');assert.deepEqual(h.active(),['workspace_read','workspace_ls','workspace_find','workspace_grep']);

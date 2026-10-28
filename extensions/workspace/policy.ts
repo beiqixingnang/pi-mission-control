@@ -8,6 +8,7 @@ export interface WorkspaceOptions {
 	root: string;
 	access?: "read-only" | "read-write";
 	extraReadRoots?: string[];
+	extraWriteRoots?: string[];
 	execution?: "disabled" | "sandbox" | "host";
 	sandbox?:SandboxConfig;
 }
@@ -15,6 +16,7 @@ export interface ResolvedWorkspace {
 	root: string;
 	access: "read-only" | "read-write";
 	extraReadRoots: string[];
+	extraWriteRoots?: string[];
 	execution: "disabled" | "sandbox" | "host";
 	sandbox?:SandboxConfig;
 }
@@ -23,7 +25,7 @@ export const readableTools = ["read", "ls", "find", "grep"];
 export const writableTools = ["write", "edit"];
 export const bridgeTools = ["team_message", "team_wait", "team_task_status", "team_task_cancel"];
 export const toolAlias = (name: string) => `workspace_${name}`;
-export const allowedTools = (policy: ResolvedWorkspace) => [...readableTools, ...(policy.access === "read-write" ? writableTools : []), ...(policy.execution==="sandbox"?["exec","exec_status"]:policy.execution==="host"?["bash"]:[]), ...bridgeTools];
+export const allowedTools = (policy: ResolvedWorkspace) => [...readableTools, ...(policy.access === "read-write" || policy.extraWriteRoots?.length ? writableTools : []), ...(policy.execution==="sandbox"?["exec","exec_status"]:policy.execution==="host"?["bash"]:[]), ...bridgeTools];
 export function inside(root: string, target: string) {
 	const relative = path.relative(root, target);
 	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
@@ -68,17 +70,20 @@ export async function resolveWorkspace(options: WorkspaceOptions, baseCwd: strin
 		if(options.sandbox!==undefined)throw new Error("Host execution cannot include a sandbox profile.");
 	}else if(options.sandbox!==undefined)throw new Error("Set execution:sandbox to authorize a command backend.");
 	if (options.extraReadRoots !== undefined && (!Array.isArray(options.extraReadRoots) || options.extraReadRoots.length > 20 || options.extraReadRoots.some(root => typeof root !== "string"))) throw new Error("extraReadRoots must be an array of at most 20 directory paths.");
+	if (options.extraWriteRoots !== undefined && (!Array.isArray(options.extraWriteRoots) || options.extraWriteRoots.length > 20 || options.extraWriteRoots.some(root => typeof root !== "string"))) throw new Error("extraWriteRoots must be an array of at most 20 directory paths.");
 	const root = await canonicalDirectory(options.root, baseCwd);
 	const extraReadRoots = [...new Set(await Promise.all((options.extraReadRoots ?? []).map(extra => canonicalDirectory(extra, baseCwd))))];
+	const extraWriteRoots = [...new Set(await Promise.all((options.extraWriteRoots ?? []).map(extra => canonicalDirectory(extra, baseCwd))))];
 	for (const extra of extraReadRoots) {
 		if (inside(root, extra) || inside(extra, root)) throw new Error("Extra read roots must be separate from the primary workspace; overlapping roots are ambiguous.");
 	}
-	return { root, access: options.access ?? "read-write", extraReadRoots, execution: sandbox?"sandbox":options.execution??"disabled",...(sandbox?{sandbox}:{}) };
+	return { root, access: options.access ?? "read-write", extraReadRoots, extraWriteRoots, execution: sandbox?"sandbox":options.execution??"disabled",...(sandbox?{sandbox}:{}) };
 }
 
 /** Checks at the point of filesystem access; a file-tool policy, not an OS sandbox. */
 export class WorkspaceAccess {
 	readonly readRoots: string[];
+	readonly writeRoots: string[];
 	readonly policy: ResolvedWorkspace;
 	readonly cwd: string;
 	readonly protectedWriteRoots: string[];
@@ -86,17 +91,21 @@ export class WorkspaceAccess {
 		this.policy = policy;
 		this.cwd = cwd;
 		this.protectedWriteRoots = protectedWriteRoots;
-		this.readRoots = [policy.root, ...policy.extraReadRoots];
+		this.writeRoots = [...(policy.access === "read-write" ? [policy.root] : []), ...(policy.extraWriteRoots ?? [])];
+		this.readRoots = [...new Set([policy.root, ...policy.extraReadRoots, ...(policy.extraWriteRoots ?? [])])];
 	}
 	async authorize(input: string, write = false, allowMissing = false): Promise<string> {
 		const target = resolveInput(input, this.cwd);
-		if (write && this.policy.access !== "read-write") throw new Error("WORKSPACE_DENIED: this member is read-only.");
-		const roots = write ? [this.policy.root] : this.readRoots;
+		if (write && !this.writeRoots.length) throw new Error("WORKSPACE_DENIED: this member is read-only.");
+		const roots = write ? this.writeRoots : this.readRoots;
 		const owner = roots.find(root => inside(root, target));
 		if (!owner) throw new Error("WORKSPACE_DENIED: path is outside the authorized workspace roots.");
 		if (write) {
-			if (this.protectedWriteRoots.some(root => inside(root, target))) throw new Error("WORKSPACE_DENIED: Pi runtime/configuration is protected.");
-			if (path.relative(this.policy.root, target).split(path.sep).some(segment => [".pi", ".agents", ".git"].includes(segment.toLowerCase()))) throw new Error("WORKSPACE_DENIED: agent configuration and Git metadata are protected.");
+			for (const root of this.protectedWriteRoots) {
+				let canonical = path.resolve(root);
+				try { canonical = await fs.realpath(canonical); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+				if (inside(canonical, target) || inside(path.resolve(root), target)) throw new Error(`WORKSPACE_DENIED: Pi runtime/configuration is protected: ${canonical}`);
+			}
 		}
 		// Validate every component instead of only the final realpath. An allowed
 		// symlink pointing elsewhere cannot be used by read or recursive search.

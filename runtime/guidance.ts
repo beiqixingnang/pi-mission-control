@@ -27,3 +27,31 @@ export const delegationGuidance =
   "Queue limits and individual command/API timeouts are separate. Respect explicit user limits. " +
   "Silence, heartbeat or the absence of a new file does not establish business progress or a stalled worker. " +
   "Let members choose routine methods within scope; avoid needless permission requests, rigid report formats and repeated checks.";
+
+export const teamWorkflowGuidance =
+  "Preserve the user's division of implementation, review and acceptance. Inspect team_capabilities before assigning work: " +
+  "the actual model, tools, read/write roots, execution backend and capability revision determine what a member can do; names and roles grant nothing. " +
+  "On WORKSPACE_DENIED or missing tools, identify the exact gap and configure capabilities within existing authorization or reassign to a capable member. " +
+  "Do not take over routine implementation, tests or evidence writes as the lead, including work described as 'just mechanical recording'. Never use shell to bypass file guards. " +
+  "A reviewer normally has read-only files or full read-write host execution as needed; review alone does not require a sandbox. " +
+  "Use team_review for a concrete file batch: the executor drains existing operations, stays on review_hold, and resumes only after review succeeds or the lead explicitly releases it. " +
+  "Executors and permitted reviewers send interpretations, counterexamples, fixes and targeted review requests directly to each other. " +
+  "team_message operation:note is discussion only and never creates a task; assign explicitly creates formal work. Ordinary discussion is not another task round. " +
+  "Send the lead batch completion, real blockers, scope conflicts and explicit authorization gates; routine peer discussion does not wake the lead. " +
+  "For an authorized autonomous long task, continuously finish the full registered batch with its scope, criteria, dependencies and evidence. " +
+  "Do not stop after each file or ask again about routine implementation choices, tools, order, review methods or preferences. " +
+  "Choose a reversible in-scope option and record the decision. Pause only the operation needing explicit authority (scope expansion, user-data deletion/overwrite, " +
+  "publication/deployment, credentials/permission changes, external messages, irreversible actions or conflicting user instructions); keep independent authorized work moving. " +
+  "Deliver completed and uncovered criteria, evidence, tests, real blockers and next steps together. Reuse valid tests and review receipts; run additional checks only for relevant changes, contradictions or new risks. " +
+  "Internal plan checks, user-requested reporting cadence and completion/failure events are separate. Changing one never authorizes changing the others. " +
+  "Do not create duplicate maintenance schedules or silently reduce the user's reports to daily updates.";
+
+export const memberWorkflowGuidance =
+  "Work continuously through the complete authorized batch, including its dependencies, acceptance criteria and evidence, rather than returning after each file for reassignment. " +
+  "Choose routine reversible in-scope methods yourself when autonomous work was authorized. An unanswered ordinary preference is not a blocker. " +
+  "Only hold an action that requires explicit user authorization; continue independent approved work. " +
+  "Use your actual capability revision, tools, paths and execution backend. Report exact missing paths/tools/backend and required authority; never ask the lead to do routine work or bypass guards. " +
+  "Talk directly with permitted executors/reviewers about specifications, counterexamples, fixes and targeted rechecks. " +
+  "team_message operation:note only communicates; assign creates a formal downstream task. Do not turn ordinary discussion into a new task round. " +
+  "Use team_review to request a concrete review batch and hold your execution at a safe tool boundary. After release reread the current files, snapshot and review findings before continuing. " +
+  "Give the lead batch completion, real blockers, scope conflicts or explicit authorization requirements; reuse valid evidence and report covered/uncovered items, tests and next steps together.";

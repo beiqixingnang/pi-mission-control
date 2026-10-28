@@ -1,0 +1,264 @@
+{
+  "date": "2026-10-28",
+  "version": "2.8.0",
+  "baseline": "3d6e47f7940524e5130a1fe509bde63151107a50",
+  "windows": {
+    "tests": 353,
+    "pass": 349,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4
+  },
+  "wsl": {
+    "tests": 353,
+    "pass": 348,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 5
+  },
+  "windowsFocused": {
+    "tests": 10,
+    "pass": 10,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "wslFocused": {
+    "tests": 14,
+    "pass": 14,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "workspace": {
+    "windows": 15,
+    "wsl": 15
+  },
+  "tui": {
+    "checks": 170,
+    "sameProcess": true,
+    "portableTransfer": true
+  },
+  "windowsLoadErrors": [],
+  "wslLoadErrors": [],
+  "productionConversationControlled": false,
+  "hashNormalization": "CRLF to LF for text sources",
+  "sources": [
+    {
+      "file": "extensions/mission-control/compaction.ts",
+      "sha256": "a9b1967cb9b4b7ef4467300272921765a4b354126ca37c25cdfb57f12f0c1b45"
+    },
+    {
+      "file": "extensions/mission-control/context-memory.ts",
+      "sha256": "f6c071ac5a1c82e3abdbc6ee97c49b7151d0a9146b5f18b26cb880602b267d55"
+    },
+    {
+      "file": "extensions/mission-control/goals-ui.ts",
+      "sha256": "b1d4d747165252cbf1fb2976c3112080e68b599a95dfe7d96021d5aca8aac5c6"
+    },
+    {
+      "file": "extensions/mission-control/index.ts",
+      "sha256": "8f0249df14c51b3aa4b650b526072d2f07df31d0864ac56cb0438deabd89c498"
+    },
+    {
+      "file": "extensions/mission-control/lead-history.ts",
+      "sha256": "602d9ef44864b6687d99b6fe0912917eaa15c2ac8a4eb243ed9945d6c3830476"
+    },
+    {
+      "file": "extensions/mission-control/member.ts",
+      "sha256": "1493e87e4e4f9dd7d59c6f5c841871a47b0ccfa36c0bab664fb93c4f21efe53a"
+    },
+    {
+      "file": "extensions/mission-control/presentation.ts",
+      "sha256": "c0deb0b0b074e131c5ef70a172dccdaecc3fcab3b4eda16bf58d08cb048b5842"
+    },
+    {
+      "file": "extensions/mission-control/project.ts",
+      "sha256": "05caa9bc85504ab5ad2b8bb75ce1e0d11f9615aa45f79a31cf8addb17f5b3e2e"
+    },
+    {
+      "file": "extensions/mission-control/reconnect.ts",
+      "sha256": "8f8b8abf20ee80a5a380a050fa3da7e398d0f982368e1b21867021d287fc2cde"
+    },
+    {
+      "file": "extensions/mission-control/recovery-ui.ts",
+      "sha256": "63f163e7e8014f449505ebecf5811eb3f93be6c76e64a723cc38f651b06b68e6"
+    },
+    {
+      "file": "extensions/mission-control/ui.ts",
+      "sha256": "1cea19295ad3c6671ed21374fdce78062d16978a6263f16cf0eac6b479d9eacd"
+    },
+    {
+      "file": "extensions/mission-control/viewer.ts",
+      "sha256": "691758d29cdefdd06ccfc2208848e0f5ce683c58c75be582537f614286ebd1de"
+    },
+    {
+      "file": "extensions/project/identity.ts",
+      "sha256": "c9ea18eb60af289f00bebe2c49bd8aa7c0c0a829dc829847d1f861ccea43b5a8"
+    },
+    {
+      "file": "extensions/workspace/policy.ts",
+      "sha256": "2bcf4a6980fa2bda457d236dd622eb624ed93876d099e590cce2802e9977c52e"
+    },
+    {
+      "file": "extensions/workspace/sandbox.ts",
+      "sha256": "9a0bd9406d685c2ee468b998b64d4ded29154b269c04fccdb3553cb3650823eb"
+    },
+    {
+      "file": "package-lock.json",
+      "sha256": "a3a755f7a3bf5c008d06af713e1e60cba76e798852bc5565919a48cf9f5bacc6"
+    },
+    {
+      "file": "package.json",
+      "sha256": "7d3f4798742807c81f6c091e21742f363968c23559b9387373470cee56c89467"
+    },
+    {
+      "file": "runtime/activity-clock.ts",
+      "sha256": "78e9f43684cbd2bb5c152c5c378721dc9e1732559b6120070e29d04236e29e79"
+    },
+    {
+      "file": "runtime/archive/job.ts",
+      "sha256": "93ee4df3af68236098a9bb9b85652778969b184684850781ad68181c520458d4"
+    },
+    {
+      "file": "runtime/arguments.ts",
+      "sha256": "dbfd260a14463cf2abffe270f3f03d2147a30bb5b16765227d5cc17a92b5c521"
+    },
+    {
+      "file": "runtime/bridge.ts",
+      "sha256": "544bfb5597d83c83c6f55d6a0a2ec4117da5ab59862ef12203dbb848afdd2bb4"
+    },
+    {
+      "file": "runtime/context-budget.ts",
+      "sha256": "e555c03cb5266375e6056eb436a7d894bce0360072409738815b0a9cc4a9ab31"
+    },
+    {
+      "file": "runtime/context-memory.ts",
+      "sha256": "05fedc8a3f2292b6d413ad256bfdf451671b68c4bb68ea5d55aa4f2077335dab"
+    },
+    {
+      "file": "runtime/context-mode-policy.ts",
+      "sha256": "4d61de69b7f599b5467a3d9e2666b34e7c29e3a7a3dac5e53d3e273518002c47"
+    },
+    {
+      "file": "runtime/goals.ts",
+      "sha256": "fe50a025f83d5db86a0d71ec81c94e8e6bb180feaadc67048715665f4ffb7127"
+    },
+    {
+      "file": "runtime/guidance.ts",
+      "sha256": "93df87e7aea75a6d10d2dc07bbbd63864137e9149dd542e129269f799af0d065"
+    },
+    {
+      "file": "runtime/jsonl.ts",
+      "sha256": "bb1318697218cbbd133e415e2b4fa667816e3be5743772ed7f60e4a640f346ea"
+    },
+    {
+      "file": "runtime/kernel.ts",
+      "sha256": "09e2ee1ea75f449a333652fc284343a788040882876fc10cef55b62ce4c526c1"
+    },
+    {
+      "file": "runtime/path-mapping.ts",
+      "sha256": "15b0691f81bfd7f33bc7bf2c93df2c22b9f61f57c57ff48ec233def3cd5d00aa"
+    },
+    {
+      "file": "runtime/project-request.ts",
+      "sha256": "cd8f1ce8fe746747a535d8e0b1e9f0c2a21e95c1d2605990137cde78110b1bb3"
+    },
+    {
+      "file": "runtime/public.ts",
+      "sha256": "7a3e5f6a6229ba695faee104045ea8ad011f0940ff0c5a2085a4558ae098f0d9"
+    },
+    {
+      "file": "runtime/reconnect.ts",
+      "sha256": "39feda5c4565b7b0872ba32516539c6db1c671dc67d8c1be0e3b6d21d40cf750"
+    },
+    {
+      "file": "runtime/recovery.ts",
+      "sha256": "a9c188756e130077fcceefb2521300ad2b638334649965df2ba3cad9a5586210"
+    },
+    {
+      "file": "runtime/relocation.ts",
+      "sha256": "b9c18501d38238c48549133143443c46bf42c907350f92cd1451313f7bf506b9"
+    },
+    {
+      "file": "runtime/roster.ts",
+      "sha256": "0ec2c2eff571d12e504558ab4ef66853c2c212727cb3daf30b8836ac4bc8a570"
+    },
+    {
+      "file": "runtime/rpc-records.ts",
+      "sha256": "a59eeb01a0437a5ddcbc982030a2c1a9919bd5c0d7e9330f4806cc43e11b97f8"
+    },
+    {
+      "file": "runtime/rpc-worker.ts",
+      "sha256": "a87f3b8660e0dd22142e87c80519328e38eac4072427028b572433fa85720923"
+    },
+    {
+      "file": "runtime/session-catalog.ts",
+      "sha256": "09c4c2140012a664aa7dd00ba6503c2af2e1c968907b0f094b84a8e21447c36e"
+    },
+    {
+      "file": "runtime/store.ts",
+      "sha256": "11395dc6c4573361ecdd267fa11db14a4b9d2ca85299ff4df71d31f6a4f6d0b5"
+    },
+    {
+      "file": "runtime/summarize.ts",
+      "sha256": "ed1b8b29cb382139218199195ff7dddc3661f162021f12c8dab573657ef102f3"
+    },
+    {
+      "file": "runtime/summary-request.ts",
+      "sha256": "e2c229700a81c6790e2dca0979fe941dcc4259fae0dffff93ce5b5f94c21394e"
+    },
+    {
+      "file": "runtime/task-policy.ts",
+      "sha256": "a4d2173bc1fa89ce2a682886dcc03aab32122d120be0764a60003fe07e540255"
+    },
+    {
+      "file": "runtime/team-policy.ts",
+      "sha256": "e859594683bde68170278cf0dc10588edeea30a296e4cec87ee6e7053904b0b6"
+    },
+    {
+      "file": "runtime/time.ts",
+      "sha256": "d4636c6286b973f62f04bfdb3bc0d6d37ac1d51a62d7872275bb54f3baae4baa"
+    },
+    {
+      "file": "runtime/transcript.ts",
+      "sha256": "7bdfa6226753ca01cff1b3665892830c2222aa2620f5222eb0bae4306d2e72d3"
+    },
+    {
+      "file": "runtime/transfer/files.ts",
+      "sha256": "bfc7a9322ad31cebb6686f6dd9bce53a40a42b5f1c2a120492f04af5df5d5e7d"
+    },
+    {
+      "file": "runtime/transfer/session.ts",
+      "sha256": "49cec4647db2d53aab4e7f3ac9e6b4c1050b889cb3c65aaf2bd9c80ae593c9c0"
+    },
+    {
+      "file": "runtime/types.ts",
+      "sha256": "878c260f9bd10bb4e787150be24226af084bfb7b2e41abe75abc7bf48458e1f7"
+    },
+    {
+      "file": "runtime/web.ts",
+      "sha256": "76e4fc9e10924f861d7edd4bbdf187f437a7015c9dd5700104da4f03c360e4c6"
+    },
+    {
+      "file": "runtime/workspace-control.ts",
+      "sha256": "df85434dda7e2c973738030df797470a3d84f260842716ab63ed0be099c72393"
+    },
+    {
+      "file": "runtime/workspace-locks.ts",
+      "sha256": "b5ff518e7f739df43dd77e55843931aafa535d54275acdf0b2ed28db7e2c6f6c"
+    },
+    {
+      "file": "runtime/workspace-recovery.ts",
+      "sha256": "31570e94616fd8c82fb2815e17a525806fa51e099d108b6e3ed70a22cd6e3ce5"
+    },
+    {
+      "file": "scripts/test-task-policies-tui.py",
+      "sha256": "5341b2c8125cbe22db8280722c858008991843991bf884e84de107fd68836718"
+    },
+    {
+      "file": "tests/v2/offline-provider.ts",
+      "sha256": "dd8156f1edd7bb726a51837fd98b6903f0019ce36339a09128ee2fdeeaa9b7a7"
+    }
+  ]
+}

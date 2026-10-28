@@ -210,6 +210,46 @@ def main():
         task = next(t for t in query("tasks") if t["member"] == member and t.get("resultPath") and t["state"] == "completed")
         assert task["timeoutPolicy"] == "none" and task["timeoutMs"] == 0
         assert "Exact decode findings saved" in Path(task["resultPath"]).read_text()
+        # Upgrade semantics must work through the same TUI and conversation.
+        policy_dir = workspace / ("capabilities-" + uuid.uuid4().hex[:8])
+        policy_dir.mkdir()
+        executor = "executor-" + uuid.uuid4().hex[:6]
+        reviewer = "reviewer-" + uuid.uuid4().hex[:6]
+        for name in [executor, reviewer]:
+            tool("team_spawn", {"name": name, "role": name, "model": "mission-fixture/model", "workspace": {"execution": "files"}})
+            wait(lambda: any(m["name"] == name for m in query("members")), "same TUI created " + name + " with an independent model and capability profile")
+        named_output = workspace / ".agents" / ("receipt-" + uuid.uuid4().hex[:6] + ".txt")
+        tool("team_send", {"to": executor, "message": "V2_TEST:" + json.dumps({"op": "tool", "name": "write", "args": {"path": str(named_output), "content": "AUTHORIZED_NAMED_DIRECTORY"}})})
+        wait(named_output.exists, "member wrote .agents under its authorized root without a directory-name blacklist")
+        wait(lambda: not any(t["member"] == executor and t["state"] in ["running", "queued", "waiting"] for t in query("tasks")), "named-directory member task settled")
+        command, denied_output = policy_dir / "command.txt", policy_dir / "denied-write.txt"
+        tool("team_send", {"to": executor, "message": "V2_TEST:" + json.dumps({"op": "boundary-batch", "file": str(command), "output": str(denied_output), "delayMs": 3500})})
+        wait(lambda: Path(str(command) + ".started").exists(), "finite member operation started before a running capability update")
+        tool("team_configure", {"name": executor, "tools": ["read", "fixture_boundary_command"]})
+        wait(lambda: next(m for m in query("members") if m["name"] == executor).get("revision", 0) == 2, "new desired capabilities were registered while the old operation was running")
+        wait(lambda: any(t["member"] == executor and t.get("epoch") == 2 and t["state"] == "completed" for t in query("tasks")), "safe capability checkpoint resumed the same task under revision 2")
+        assert command.read_text() == "COMMAND_FINISHED" and not denied_output.exists()
+        checks.append("running operation drained completely; the new tool allowlist denied the next write")
+        tool("team_configure", {"name": executor, "tools": None})
+        wait(lambda: next(m for m in query("members") if m["name"] == executor).get("revision", 0) == 3, "full permitted tools restored without creating a task")
+        batch, continued, review_receipt = policy_dir / "batch.txt", policy_dir / "continued.txt", policy_dir / "review.txt"
+        batch.write_text("BEFORE_REVIEW")
+        tool("team_send", {"to": executor, "message": "V2_TEST:" + json.dumps({"op": "boundary-batch", "file": str(batch), "output": str(continued), "delayMs": 3500})})
+        wait(lambda: Path(str(batch) + ".started").exists(), "executor began the next concrete file batch")
+        tool("team_review", {"action": "request", "executor": executor, "reviewer": reviewer, "files": [str(batch)],
+            "message": "V2_TEST:" + json.dumps({"op": "tool", "name": "fixture_boundary_command", "args": {"file": str(review_receipt), "delayMs": 2500}})})
+        wait(lambda: Path(str(review_receipt) + ".started").exists(), "reviewer started only after the executor reached its safe boundary")
+        assert batch.read_text() == "COMMAND_FINISHED" and not continued.exists()
+        wait(continued.exists, "executor continued its same batch after review completed")
+        held_member = next(m for m in query("members") if m["name"] == executor)
+        review = query("meta", "key=?", ("reviewHold:" + held_member["id"],))[0]
+        assert review["state"] == "released" and Path(review["snapshotPath"]).exists() and Path(review["resultPath"]).exists()
+        checks.append("review snapshot, held execution and release receipts persisted in the existing conversation")
+        wait(lambda: not any(t["member"] == executor and t["state"] in ["running", "queued", "waiting"] for t in query("tasks")), "reviewed execution settled before acceptance")
+        previous_tasks = len(query("tasks"))
+        tool("team_message", {"to": reviewer, "operation": "note", "message": "Direct discussion only; no formal task"})
+        wait(lambda: any(d["to"] == reviewer and "Direct discussion only" in d["summary"] for d in query("deliveries")), "idle note was retained without a new execution turn")
+        assert len(query("tasks")) == previous_tasks
         artifact = workspace / "decode-findings.txt"
         if artifact.exists():
             artifact.unlink()

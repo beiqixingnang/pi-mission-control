@@ -16,6 +16,27 @@ let notesCycle: any;
 let bulkRun: any;
 let previousPayload = "";
 export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "fixture_boundary_command",
+    label: "Offline boundary command",
+    description:
+      "Test-only finite operation for checking safe capability/review boundaries.",
+    parameters: Type.Object({
+      file: Type.String(),
+      delayMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+    }),
+    async execute(_id, args) {
+      fs.writeFileSync(args.file + ".started", "started");
+      await new Promise((resolve) => setTimeout(resolve, args.delayMs ?? 900));
+      fs.writeFileSync(args.file, "COMMAND_FINISHED");
+      return {
+        content: [
+          { type: "text" as const, text: "BOUNDARY_COMMAND_DONE " + args.file },
+        ],
+        details: undefined,
+      };
+    },
+  });
   pi.registerCommand("fixture-ready", {
     description: "Test-only editor readiness handshake",
     handler: async (nonce, ctx) => {
@@ -805,6 +826,58 @@ export default function (pi: ExtensionAPI) {
                 message: "V2_TEST:" + JSON.stringify(command.child),
                 operation: "assign",
               });
+          } else if (command.op === "boundary-batch") {
+            const finished = context.messages.some(
+              (m: any) =>
+                m.role === "toolResult" &&
+                ["fixture_boundary_command", "bash", "powershell"].includes(
+                  m.toolName,
+                ) &&
+                textOf(m).includes("BOUNDARY_COMMAND_DONE " + command.file),
+            );
+            const writeIds = new Set(
+              context.messages
+                .flatMap((m: any) =>
+                  Array.isArray(m.content) ? m.content : [],
+                )
+                .filter(
+                  (part: any) =>
+                    part.type === "toolCall" &&
+                    part.name === "write" &&
+                    part.arguments?.path === command.output,
+                )
+                .map((part: any) => part.id),
+            );
+            const written = context.messages.findLast(
+              (m: any) =>
+                m.role === "toolResult" &&
+                m.toolName === "write" &&
+                writeIds.has(m.toolCallId),
+            );
+            if (!finished && command.host) {
+              const script = `const fs=require('node:fs');const file=${JSON.stringify(command.file)};fs.writeFileSync(file+'.started','started');setTimeout(()=>{fs.writeFileSync(file,'COMMAND_FINISHED');console.log('BOUNDARY_COMMAND_DONE '+file)},${command.delayMs ?? 1800})`;
+              const encoded = Buffer.from(script).toString("base64");
+              tool(process.platform === "win32" ? "powershell" : "bash", {
+                command: `node -e "eval(Buffer.from('${encoded}','base64').toString())"`,
+              });
+            } else if (!finished)
+              tool("fixture_boundary_command", {
+                file: command.file,
+                delayMs: command.delayMs ?? 1800,
+              });
+            else if (!written)
+              tool("write", {
+                path: command.output,
+                content: "BATCH_CONTINUED",
+              });
+            else
+              answer(
+                JSON.stringify({
+                  done: true,
+                  writeError: written.isError,
+                  text: textOf(written),
+                }),
+              );
           } else if (command.op === "read" || command.op === "stream-read") {
             if (last?.role === "toolResult" && last.toolName === "read")
               answer("READ_RESULT " + lastText);

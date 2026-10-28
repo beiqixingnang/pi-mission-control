@@ -465,6 +465,7 @@ test("peer dispatch does not bypass the configured thirty-minute progress interv
     h.kernel.memberRequest(parent.token, {
       op: "message",
       id: "assign-1",
+      operation: "assign",
       to: "worker",
       message: "child",
     });
@@ -516,12 +517,14 @@ test("supervisor waits without a live process and resumes its same task for desc
     const child = h.kernel.memberRequest(parent.token, {
       op: "message",
       id: "child-request",
+      operation: "assign",
       to: "worker",
       message: "implement",
     });
     const duplicate = h.kernel.memberRequest(parent.token, {
       op: "message",
       id: "child-request",
+      operation: "assign",
       to: "worker",
       message: "implement",
     });
@@ -583,6 +586,7 @@ test("directed communication, ancestor-cycle checks and stale execution tokens r
         h.kernel.memberRequest(assignment.token, {
           op: "message",
           id: "cycle",
+          operation: "assign",
           to: "reviewer",
           message: "loop",
         }),

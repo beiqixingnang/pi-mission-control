@@ -44,8 +44,10 @@ import { installProject } from "./project.ts";
 import {
   goalPlanningGuidance,
   delegationGuidance,
+  teamWorkflowGuidance,
 } from "../../runtime/guidance.ts";
 import { taskTiming } from "../../runtime/task-policy.ts";
+import { taskView } from "../../runtime/team-policy.ts";
 import {
   delegationInput,
   optionalText,
@@ -97,6 +99,7 @@ const WorkspaceSchema = Type.Object({
     ]),
   ),
   extraReadRoots: optional(Type.Array(Type.String(), { maxItems: 20 })),
+  extraWriteRoots: optional(Type.Array(Type.String(), { maxItems: 20 })),
   sandbox: optional(
     Type.Object({
       engine: optional(Type.Literal("podman")),
@@ -485,6 +488,7 @@ export default function (pi: ExtensionAPI) {
     event.systemPromptOptions.promptGuidelines.unshift(
       goalPlanningGuidance,
       delegationGuidance,
+      teamWorkflowGuidance,
     );
     event.systemPromptOptions.promptGuidelines.unshift(
       `Mission Control ${pluginVersion}: mission_reconcile and mission_control are directly callable lead tools. When the current recovery plan permits model recovery, inspect the actual blocker and use these tools; old claims that only a user slash command can reconcile or resume no_progress are obsolete. Reload itself never attests stopped processes. Explicit user/workspace/budget/decision controls remain authoritative.`,
@@ -784,6 +788,7 @@ export default function (pi: ExtensionAPI) {
         access: raw?.access ?? "read-write",
         execution: execution === "files" ? "disabled" : execution,
         extraReadRoots: raw?.extraReadRoots ?? [],
+        extraWriteRoots: raw?.extraWriteRoots ?? [],
         sandbox: raw?.sandbox,
       },
       context.cwd,
@@ -857,8 +862,8 @@ export default function (pi: ExtensionAPI) {
   );
   tool(
     "team_configure",
-    "Configure idle member",
-    "Change an idle member's role/model/workspace/communication or optional tool allowlist. Omit tools to keep the current list; tools:null restores all permitted tools. Existing running work must finish or be cancelled.",
+    "Configure member capabilities",
+    "Change role/model/workspace/communication or tools. Idle changes apply immediately. Running executions retain their recorded revision until current operations settle, then resume under the new revision. Inspect team_capabilities for pending changes; cancel first only for immediate revocation. Omit tools to keep the list; tools:null restores all permitted tools.",
     Type.Object({
       name: Type.String(),
       role: optional(Type.String()),
@@ -908,6 +913,43 @@ export default function (pi: ExtensionAPI) {
       if (args.tools !== undefined) patch.tools = args.tools ?? undefined;
       return current().configureMember(args.name, patch);
     },
+  );
+  tool(
+    "team_capabilities",
+    "Inspect member capabilities",
+    "Read desired and active capability revisions, actual tools, models, read/write roots, execution and pending changes. Check actual capabilities before assigning implementation or review; role names grant no permissions.",
+    Type.Object({ name: optional(Type.String()) }),
+    (args) => current().memberCapabilities(args.name),
+  );
+  tool(
+    "team_review",
+    "Coordinate a safe review batch",
+    "Request review of explicit files by a chosen peer. Existing executor operations drain before a snapshot is hashed and the reviewer starts; further executor work stays held. Review success releases it with evidence. A failed/cancelled review remains held until explicit release after inspection. Reviewer capabilities and model are configured independently; no automatic sandbox or fixed model.",
+    Type.Object({
+      action: Type.Union([
+        Type.Literal("request"),
+        Type.Literal("status"),
+        Type.Literal("release"),
+      ]),
+      executor: Type.String(),
+      reviewer: optional(Type.String()),
+      message: optional(Type.String({ minLength: 1, maxLength: 16000 })),
+      files: optional(
+        Type.Array(Type.String(), { minItems: 1, maxItems: 100 }),
+      ),
+      reason: optional(Type.String({ minLength: 1, maxLength: 2000 })),
+    }),
+    (args) =>
+      args.action === "request"
+        ? current().requestReview(
+            args.executor,
+            args.reviewer ?? "",
+            args.message ?? "",
+            args.files ?? [],
+          )
+        : args.action === "release"
+          ? current().releaseReview(args.executor, args.reason ?? "")
+          : current().reviewContext(args.executor),
   );
   tool(
     "team_disband",
@@ -962,7 +1004,7 @@ export default function (pi: ExtensionAPI) {
       const task = current().store.task(id)!;
       if (terminal(task))
         return {
-          task,
+          task: taskView(task),
           result: task.resultPath
             ? current().store.readArtifact(task.resultPath)
             : undefined,
@@ -1020,6 +1062,7 @@ export default function (pi: ExtensionAPI) {
       members: current().store.members(),
       tasks: current()
         .store.tasks()
+        .map(taskView)
         .map(({ inputPath, resultPath, ...t }) => ({ ...t, resultPath })),
       maintenance: current().snapshot().maintenance,
     }),
@@ -1042,7 +1085,7 @@ export default function (pi: ExtensionAPI) {
         : current().store.tasks().filter(terminal).slice(0, 5);
       return collected(
         tasks.map((t) => ({
-          task: t,
+          task: t ? taskView(t) : undefined,
           result: t?.resultPath
             ? current().store.readArtifact(t.resultPath, 24000)
             : undefined,
@@ -1084,12 +1127,16 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_message",
     "Message a teammate",
-    "Send an approved instruction to a running member using steering; if idle, create a new tracked turn. This is separate from team_send, which always assigns a task.",
+    "Send direct discussion with operation:note (default): steer a running member or retain a note for its next assigned turn, without creating a task. operation:assign explicitly creates formal work. Ordinary peer discussion needs no lead relay or extra task round.",
     Type.Object({
       to: Type.String(),
       message: Type.String({ minLength: 1, maxLength: 16000 }),
+      operation: optional(
+        Type.Union([Type.Literal("note"), Type.Literal("assign")]),
+      ),
     }),
-    (args) => current().messageMember(args.to, args.message),
+    (args) =>
+      current().messageMember(args.to, args.message, args.operation ?? "note"),
   );
   tool(
     "subagent",

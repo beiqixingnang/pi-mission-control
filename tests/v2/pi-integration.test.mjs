@@ -175,6 +175,237 @@ async function until(fn, timeout = 25000) {
 }
 
 test(
+  "real member writes named metadata and explicit output roots while denying the actual agent state",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const lead = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      try {
+        const output = path.join(h.cwd, "output");
+        await fs.mkdir(output);
+        await h.tool("team_spawn", {
+          name: "scoped-writer",
+          role: "Write approved evidence",
+          workspace: { root: h.cwd, execution: "files" },
+        });
+        const run = async (name, args) => {
+          const sent = JSON.parse(
+            (
+              await h.tool("team_send", {
+                to: "scoped-writer",
+                message:
+                  "V2_TEST:" + JSON.stringify({ op: "tool", name, args }),
+              })
+            ).content[0].text,
+          );
+          await until(async () =>
+            (await h.snapshot()).tasks.some(
+              (task) => task.id === sent.taskId && task.state === "completed",
+            ),
+          );
+          return (await h.snapshot()).tasks.find(
+            (task) => task.id === sent.taskId,
+          );
+        };
+        for (const dir of [".agents", ".pi", ".git"]) {
+          const file = path.join(h.cwd, dir, "receipt.txt");
+          await run("write", { path: file, content: "AUTHORIZED" });
+          assert.equal(await fs.readFile(file, "utf8"), "AUTHORIZED");
+        }
+        const denied = path.join(
+          process.env.PI_CODING_AGENT_DIR,
+          "denied-receipt.txt",
+        );
+        await h.tool("team_configure", {
+          name: "scoped-writer",
+          workspace: {
+            access: "read-only",
+            extraWriteRoots: [output, process.env.PI_CODING_AGENT_DIR],
+          },
+        });
+        await run("write", { path: denied, content: "DENIED" });
+        assert.equal(fsSync.existsSync(denied), false);
+        await run("write", {
+          path: path.join(output, "external.txt"),
+          content: "OUTPUT",
+        });
+        assert.equal(
+          await fs.readFile(path.join(output, "external.txt"), "utf8"),
+          "OUTPUT",
+        );
+      } finally {
+        await h.session.abort();
+        await lead;
+      }
+    }),
+);
+
+test(
+  "real capability update drains a finite operation and continues the same member task without replay",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const lead = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      try {
+        await h.tool("team_spawn", {
+          name: "boundary-worker",
+          role: "Finite approved batch",
+          workspace: { execution: "host" },
+        });
+        const file = path.join(h.cwd, "command.txt"),
+          output = path.join(h.cwd, "write.txt");
+        const sent = JSON.parse(
+          (
+            await h.tool("team_send", {
+              to: "boundary-worker",
+              message:
+                "V2_TEST:" +
+                JSON.stringify({
+                  op: "boundary-batch",
+                  file,
+                  output,
+                  host: true,
+                }),
+            })
+          ).content[0].text,
+        );
+        await until(() => fsSync.existsSync(file + ".started"));
+        await h.tool("team_configure", {
+          name: "boundary-worker",
+          tools: ["read", "fixture_boundary_command"],
+        });
+        const capabilities = JSON.parse(
+          (await h.tool("team_capabilities", { name: "boundary-worker" }))
+            .content[0].text,
+        )[0];
+        assert.equal(capabilities.executions[0].pending, true);
+        assert.equal(capabilities.executions[0].active.revision, 1);
+        await until(async () =>
+          (await h.snapshot()).tasks.some(
+            (task) => task.id === sent.taskId && task.state === "completed",
+          ),
+        );
+        assert.equal(await fs.readFile(file, "utf8"), "COMMAND_FINISHED");
+        assert.equal(fsSync.existsSync(output), false);
+        const task = (await h.snapshot()).tasks.find(
+          (task) => task.id === sent.taskId,
+        );
+        assert.equal(task.epoch, 2);
+        assert.equal(task.capabilityRevision, 2);
+        assert.equal(task.capabilitySnapshot, undefined);
+        const history = (await fs.readFile(task.sessionFile, "utf8"))
+          .split("\n")
+          .filter(Boolean)
+          .map(JSON.parse);
+        assert.equal(
+          history.filter(
+            (entry) =>
+              entry.message?.role === "toolResult" &&
+              ["powershell", "bash"].includes(entry.message.toolName),
+          ).length,
+          1,
+        );
+      } finally {
+        await h.session.abort();
+        await lead;
+      }
+    }),
+);
+
+test(
+  "real review gate holds the executor through review then resumes the same task and session",
+  { timeout: 25000 },
+  () =>
+    harness(async (h) => {
+      const lead = h.session.prompt('V2_TEST:{"op":"hang"}');
+      await until(() => h.session.isStreaming);
+      try {
+        for (const name of ["executor", "reviewer"])
+          await h.tool("team_spawn", {
+            name,
+            role: name,
+            workspace: { execution: "files" },
+          });
+        const file = path.join(h.cwd, "batch.txt"),
+          output = path.join(h.cwd, "continued.txt"),
+          reviewFile = path.join(h.cwd, "review.txt");
+        await fs.writeFile(file, "BEFORE");
+        const sent = JSON.parse(
+          (
+            await h.tool("team_send", {
+              to: "executor",
+              message:
+                "V2_TEST:" +
+                JSON.stringify({ op: "boundary-batch", file, output }),
+            })
+          ).content[0].text,
+        );
+        await until(() => fsSync.existsSync(file + ".started"));
+        const hold = await h.tool("team_review", {
+          action: "request",
+          executor: "executor",
+          reviewer: "reviewer",
+          files: [file],
+          message:
+            "V2_TEST:" +
+            JSON.stringify({
+              op: "tool",
+              name: "fixture_boundary_command",
+              args: { file: reviewFile, delayMs: 1300 },
+            }),
+        });
+        assert.ok(!hold.isError, hold.content[0].text);
+        await until(() => fsSync.existsSync(reviewFile + ".started"));
+        assert.equal(fsSync.existsSync(output), false);
+        assert.equal(await fs.readFile(file, "utf8"), "COMMAND_FINISHED");
+        const during = JSON.parse(
+          (
+            await h.tool("team_review", {
+              action: "status",
+              executor: "executor",
+            })
+          ).content[0].text,
+        );
+        assert.equal(during.hold.state, "held");
+        const originalSession = (await h.snapshot()).members.find(
+          (member) => member.name === "executor",
+        ).sessionId;
+        await until(async () =>
+          (await h.snapshot()).tasks.some(
+            (task) => task.id === sent.taskId && task.state === "completed",
+          ),
+        );
+        assert.equal(await fs.readFile(output, "utf8"), "BATCH_CONTINUED");
+        const after = (await h.snapshot()).tasks.find(
+          (task) => task.id === sent.taskId,
+        );
+        assert.equal(after.epoch, 2);
+        assert.equal(
+          (await h.snapshot()).members.find(
+            (member) => member.name === "executor",
+          ).sessionId,
+          originalSession,
+        );
+        const done = JSON.parse(
+          (
+            await h.tool("team_review", {
+              action: "status",
+              executor: "executor",
+            })
+          ).content[0].text,
+        );
+        assert.equal(done.hold.state, "released");
+        assert.ok(done.hold.snapshotPath && done.hold.resultPath);
+      } finally {
+        await h.session.abort();
+        await lead;
+      }
+    }),
+);
+
+test(
   "real Pi goal_accept rejects an unselected root atomically and returns the original acceptance on repeats",
   { timeout: 20000 },
   () =>
@@ -2881,7 +3112,7 @@ test(
       const catalog = JSON.parse(
         (await h.tool("mission_capabilities")).content[0].text,
       );
-      assert.equal(catalog.tools.length, 55);
+      assert.equal(catalog.tools.length, 57);
       assert.ok(catalog.tools.every((t) => t.active));
       h.session.setActiveToolsByName(["read"]);
       await h.session.reload();

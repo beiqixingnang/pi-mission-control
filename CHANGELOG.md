@@ -1,3 +1,10 @@
+# 2.8.0 — member capabilities and paired review (2026-10-28)
+
+- Authorize file writes by explicit roots, including extraWriteRoots, without directory-name bans for .agents, .pi or .git. Keep the actual Pi agent, installation and session-state paths protected; host commands retain their explicitly trusted authority.
+- Add team_capabilities with desired/active revisions and actual tools. Accept team_configure during work, drain current operations, retain checkpoint receipts and resume the same task/session under the new revision without replaying completed commands.
+- Add team_review for explicit file batches. Hold executor work at a safe boundary, hash the batch, run the chosen reviewer, save review evidence and resume the executor. Failed reviews stay held until inspected and explicitly released. Preserve holds and write roots across relocation and transfer.
+- Make lead team_message notes discussion only, including when idle; assign creates formal work. Clarify direct executor/reviewer communication, full-batch autonomy, capability gaps, scoped authorization gates, valid evidence reuse and independent reporting cadence, without fixed role/model mappings or automatic review sandboxes.
+
 # 2.7.1 — Windows migration evidence validation (2026-10-28)
 
 - Match evidence entries with the same Windows case normalization used by the file manifest. Validate mixed-case evidence filenames in the isolated migration fixture and the Windows-to-WSL handoff.

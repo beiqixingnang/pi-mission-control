@@ -21,6 +21,7 @@ export interface Workspace {
   access: "read-only" | "read-write";
   execution: Execution;
   extraReadRoots: string[];
+  extraWriteRoots?: string[];
   sandbox?: {
     engine: "podman";
     image: string;
@@ -82,9 +83,28 @@ export interface Task {
   executionMs?: number;
   processState: "not-started" | "running" | "stopped" | "unknown";
   reviewDeliveryIds: string[];
+  capabilitySnapshot?: Member;
+  actualTools?: string[];
+  boundaryRequested?: "capabilities" | "review";
+  reviewHoldId?: string;
+  reviewFor?: string;
+  continuation?: string;
   sessionFile?: string;
   blockedReason?: string;
   archivedAt?: number;
+}
+export interface ReviewHold {
+  id: string;
+  executorId: string;
+  reviewerId: string;
+  reviewTaskId: string;
+  state: "draining" | "held" | "released";
+  files: string[];
+  snapshotPath?: string;
+  resultPath?: string;
+  error?: string;
+  createdAt: number;
+  releasedAt?: number;
 }
 export type GoalState =
   | "planned"
