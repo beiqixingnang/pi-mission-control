@@ -15,13 +15,16 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: [24.x]
+        # Pin the patched Node 24 release. The floating 24.x label selected
+        # Node 24.15.0 on the failing Windows run, where npm ci could crash
+        # while unpacking the dependency tree.
+        node: [24.16.0]
         pi: [1.4.0]
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
       - name: Install Pi host
