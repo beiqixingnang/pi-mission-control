@@ -122,6 +122,18 @@ export class GoalPanel {
             : []),
           ...(goal.reason ? [`原因：${goal.reason}`] : []),
           ...(goal.nextStep ? [`下一步：${goal.nextStep}`] : []),
+          ...(detail.submissions?.length
+            ? [
+                `成员提交：${detail.submissions.filter((submission) => submission.state === "current").length ? "待验收" : "无当前提交"} · 共 ${detail.submissions.length} 次`,
+                ...(detail.submissions
+                  .filter((submission) => submission.state === "current")
+                  .slice(0, 2)
+                  .map(
+                    (submission) =>
+                      `   ${cleanText(submission.summary, 400)} · ${submission.evidence.length} 条证据 · ${submission.id}`,
+                  ) ?? []),
+              ]
+            : ["成员提交：暂无"]),
           ...(goal.plan
             ? [
                 `执行计划 · 版本 ${goal.planRevision ?? 0}：`,

@@ -1076,6 +1076,60 @@ export class MissionKernel {
       return record;
     });
   }
+  submitGoalsFromMember(
+    task: Task,
+    entries: Array<{
+      goalId?: string;
+      revision: number;
+      summary: string;
+      evidence?: Array<{ criterion: number; summary: string; path?: string }>;
+    }>,
+    withdrawGoalIds: Array<{ goalId: string; revision: number }> = [],
+  ) {
+    const submissions = entries?.length
+      ? this.goals.submit(
+          entries.map((entry) => ({
+            ...entry,
+            goalId: entry.goalId ?? task.goalId,
+          })) as Array<{
+            goalId: string;
+            revision: number;
+            summary: string;
+            evidence?: Array<{
+              criterion: number;
+              summary: string;
+              path?: string;
+            }>;
+          }>,
+          task,
+        )
+      : [];
+    const withdrawn = withdrawGoalIds.map((entry) =>
+      this.goals.withdrawSubmission(entry.goalId, entry.revision, task),
+    );
+    for (const submission of submissions)
+      this.notifyGoalSubmitted(submission.id);
+    this.turnActed = true;
+    this.changed();
+    return {
+      submitted: submissions.map((submission) => ({
+        id: submission.id,
+        goalId: submission.goalId,
+        revision: submission.revision,
+        submittedAt: submission.submittedAt,
+        evidenceCount: submission.evidence.length,
+        state: submission.state,
+      })),
+      withdrawn: withdrawn.map((submission) => ({
+        id: submission.id,
+        goalId: submission.goalId,
+        revision: submission.revision,
+        state: submission.state,
+      })),
+      continued: true,
+      note: "Submission is pending lead acceptance; this member task continues without waiting.",
+    };
+  }
   async stopGoal(goalId?: string, reason = "Stopped by the lead") {
     const selected = this.store.mission();
     const id = goalId ?? selected?.id;
@@ -1785,6 +1839,7 @@ export class MissionKernel {
           | "goalRevision"
           | "goalDepth"
           | "goalEvent"
+          | "submissionId"
         >
       >,
   ): Delivery {
@@ -1998,6 +2053,7 @@ export class MissionKernel {
       if (
         delivery.kind === "goal" &&
         delivery.state === "pending" &&
+        delivery.goalEvent !== "submitted" &&
         !triggersLead(delivery, policy)
       ) {
         delivery.state = "superseded";
@@ -2024,6 +2080,23 @@ export class MissionKernel {
       goalDepth: goal.depth,
       goalEvent: "accepted",
       summary: `Level ${goal.depth} goal accepted: ${goal.objective}. Goal ${id}, revision ${goal.revision}, acceptance ${acceptanceId}.`,
+    });
+  }
+  private notifyGoalSubmitted(submissionId: string) {
+    const submission = this.store.goalSubmission(submissionId);
+    if (!submission) return;
+    const goal = this.goals.node(submission.goalId);
+    this.delivery({
+      key: `goal-submitted:${submission.id}`,
+      from: this.store.member(submission.memberId)?.name ?? submission.memberId,
+      to: "lead",
+      kind: "goal",
+      goalId: goal.id,
+      goalRevision: goal.revision,
+      goalDepth: goal.depth,
+      goalEvent: "submitted",
+      submissionId: submission.id,
+      summary: `Level ${goal.depth} goal submitted for acceptance: ${goal.objective}. Goal ${goal.id}, revision ${goal.revision}, submission ${submission.id}. The member continues its task; inspect evidence and call goal_accept when verified.`,
     });
   }
   private goalBatchSettled(goal: GoalNode) {
@@ -2135,7 +2208,11 @@ export class MissionKernel {
     return delivery.goalEvent === "accepted"
       ? goal.state === "accepted" &&
           delivery.key === `goal-accepted:${goal.acceptanceId}`
-      : this.goalBatchSettled(goal) &&
+      : delivery.goalEvent === "submitted"
+        ? goal.state === "review" &&
+          goal.submissionId === delivery.submissionId &&
+          delivery.key === `goal-submitted:${delivery.submissionId}`
+        : this.goalBatchSettled(goal) &&
           delivery.key === this.goalBatchKey(goal) &&
           !["accepted", "cancelled", "skipped", "blocked"].includes(
             goal.state,
@@ -2949,7 +3026,7 @@ export class MissionKernel {
         .slice(0, 6)
         .map((x, i) => `${i + 1}. ${cleanText(x, 200)}`)
         .join(" | ")}`,
-      `Goal ledger progress: ${JSON.stringify(s.goals)}. goal_tree reads the durable plan and evidence. For complex work, register stages and leaf deliverables with goal_plan before implementation; use dependencies to preserve batch order. Focus a ready leaf with goal_focus before commands or delegation. goal_accept records evidence once for each goal; completed member turns never accept goals. Use goal_edit to record blockers, next steps or explicit reopening. Tool receipts and task results can be referenced; statements are labelled model claims. Reuse accepted evidence unless requirements or relevant artifacts change. Multiple main goals coexist; goal_activate selects only one and never clears holds or renews budgets.`,
+      `Goal ledger progress: ${JSON.stringify(s.goals)}. goal_tree reads the durable plan, member submissions and evidence. Members may call goal_submit for assigned completed sections while their long task continues; this marks a goal reviewable without accepting it or waking the lead. Inspect goal_tree(section:submissions), then use goal_accept with source:submission only after verifying the exact revision and evidence. For complex work, register stages and leaf deliverables with goal_plan before implementation; use dependencies to preserve batch order. Focus a ready leaf with goal_focus before commands or delegation. goal_accept records evidence once for each goal; completed member turns never accept goals. Use goal_edit to record blockers, next steps or explicit reopening. Tool receipts and task results can be referenced; statements are labelled model claims. Reuse accepted evidence unless requirements or relevant artifacts change. Multiple main goals coexist; goal_activate selects only one and never clears holds or renews budgets.`,
       `Tasks: ${
         s.tasks
           .filter((t) => !terminal(t))
@@ -3937,6 +4014,12 @@ export class MissionKernel {
           request.offset,
           request.limit,
           request.goalId,
+        );
+      } else if (request.op === "goal-submit") {
+        result = this.submitGoalsFromMember(
+          task,
+          request.submissions,
+          request.withdrawGoalIds,
         );
       } else if (request.op === "goal-plan-update") {
         const id = request.goalId ?? task.goalId;

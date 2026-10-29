@@ -134,6 +134,7 @@ export interface GoalNode {
   revision: number;
   reason?: string;
   nextStep?: string;
+  submissionId?: string;
   /** Optional execution guidance; independent of the acceptance revision. */
   plan?: string;
   planRevision?: number;
@@ -172,12 +173,35 @@ export interface GoalDefinition {
 export interface GoalEvidence {
   criterion: number;
   summary: string;
-  source: "statement" | "artifact" | "task" | "tool" | "acceptance";
+  source:
+    | "statement"
+    | "artifact"
+    | "task"
+    | "tool"
+    | "acceptance"
+    | "submission";
   path?: string;
   taskId?: string;
   receiptId?: string;
   acceptanceId?: string;
+  submissionId?: string;
   fingerprint?: { size: number; mtimeMs: number; sha256?: string };
+}
+export interface GoalSubmissionEvidence {
+  criterion: number;
+  summary: string;
+  path?: string;
+}
+export interface GoalSubmission {
+  id: string;
+  goalId: string;
+  revision: number;
+  taskId: string;
+  memberId: string;
+  summary: string;
+  evidence: GoalSubmissionEvidence[];
+  submittedAt: number;
+  state: "current" | "superseded" | "withdrawn";
 }
 export interface GoalAcceptance {
   id: string;
@@ -229,7 +253,8 @@ export interface Delivery {
   goalId?: string;
   goalRevision?: number;
   goalDepth?: number;
-  goalEvent?: "ready" | "accepted";
+  goalEvent?: "ready" | "submitted" | "accepted";
+  submissionId?: string;
 }
 export interface Mission {
   id: string;

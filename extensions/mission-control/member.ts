@@ -359,6 +359,46 @@ export default async function (pi: ExtensionAPI) {
     },
   });
   register({
+    name: "goal_submit",
+    label: "Submit goal completion",
+    description:
+      "Submit one or many assigned goals as completed for lead acceptance while this member task continues. Bind every entry to its exact goalId and current revision; include a concrete result summary and optional criterion evidence paths. This records a pending submission, never accepts or changes criteria/scope, never waits for the lead, and never ends the task. Resubmit after code changes to supersede the prior submission; withdrawGoalIds retracts this task's current submissions so work can continue.",
+    parameters: Type.Object({
+      submissions: Type.Optional(
+        Type.Array(
+          Type.Object({
+            goalId: Type.Optional(Type.String()),
+            revision: Type.Integer({ minimum: 0 }),
+            summary: Type.String({ minLength: 8, maxLength: 2000 }),
+            evidence: Type.Optional(
+              Type.Array(
+                Type.Object({
+                  criterion: Type.Integer({ minimum: 1 }),
+                  summary: Type.String({ minLength: 8, maxLength: 2000 }),
+                  path: Type.Optional(Type.String({ maxLength: 4000 })),
+                }),
+                { maxItems: 100 },
+              ),
+            ),
+          }),
+          { minItems: 1, maxItems: 50 },
+        ),
+      ),
+      withdrawGoalIds: Type.Optional(
+        Type.Array(
+          Type.Object({
+            goalId: Type.String(),
+            revision: Type.Integer({ minimum: 0 }),
+          }),
+          { maxItems: 50 },
+        ),
+      ),
+    }),
+    async execute(id, args) {
+      return result(await request(id, { op: "goal-submit", ...args }));
+    },
+  });
+  register({
     name: "goal_plan_update",
     label: "Edit authorized execution plan",
     description:
@@ -591,6 +631,7 @@ export default async function (pi: ExtensionAPI) {
       "team_collect",
       "mission_decision",
       "goal_context",
+      "goal_submit",
       "goal_plan_update",
       "team_capabilities",
       "team_review",
@@ -653,7 +694,7 @@ export default async function (pi: ExtensionAPI) {
     }
     pi.setActiveTools([...permitted]);
     event.systemPromptOptions.promptGuidelines.push(
-      `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use tools needed for the actual approved task; role names add no separate restrictions. Use goal_context for complete assigned criteria, scope and optional execution plans. Follow available plans within existing authorization and choose routine details without repeated questions. Read the current planRevision; goal_plan_update needs an explicit once/permanent grant for that goal and changes plan text only. Reuse valid evidence, report concrete results and uncovered items, and let the lead record acceptance. Choose routine methods yourself; avoid repeated checks or needless permission requests. Use team_message for permitted peers and team_wait alone for descendants. Never ask the lead to run routine tests on your behalf when your tools allow them; report an actual capability gap precisely.`,
+      `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use tools needed for the actual approved task; role names add no separate restrictions. Use goal_context for complete assigned criteria, scope and optional execution plans. When a concrete subgoal is finished, call goal_submit with its exact current revision, result summary and evidence paths; batch related assigned goals when appropriate. goal_submit records pending lead acceptance and lets this task continue; it never accepts the goal or waits for the lead. Resubmit after relevant changes or withdraw your current submission before continuing. Follow available plans within existing authorization and choose routine details without repeated questions. Read the current planRevision; goal_plan_update needs an explicit once/permanent grant for that goal and changes plan text only. Reuse valid evidence, report concrete results and uncovered items, and let the lead record acceptance. Choose routine methods yourself; avoid repeated checks or needless permission requests. Use team_message for permitted peers and team_wait alone for descendants. Never ask the lead to run routine tests on your behalf when your tools allow them; report an actual capability gap precisely.`,
       `Actual capabilities for this execution: ${JSON.stringify(capabilityView(member, [...permitted]))}`,
       memberWorkflowGuidance,
     );

@@ -123,14 +123,15 @@ const goalEvidence = Type.Array(
     criterion: Type.Integer({ minimum: 1 }),
     summary: Type.String({ minLength: 8, maxLength: 2000 }),
     source: Type.Union(
-      ["statement", "artifact", "task", "tool", "acceptance"].map((value) =>
-        Type.Literal(value),
+      ["statement", "artifact", "task", "tool", "acceptance", "submission"].map(
+        (value) => Type.Literal(value),
       ),
     ),
     path: Type.Optional(Type.String()),
     taskId: Type.Optional(Type.String()),
     receiptId: Type.Optional(Type.String()),
     acceptanceId: Type.Optional(Type.String()),
+    submissionId: Type.Optional(Type.String()),
   }),
   { minItems: 1, maxItems: 100 },
 );
@@ -1370,7 +1371,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_tree",
     "Read goal ledger",
-    "Read persistent goal hierarchy, accepted counts and current focus. Supply goalId for acceptance history, tool receipts, blockers and task results. Main-goal selection and acceptance survive /reload. Counts mean accepted deliverables, not finished agent turns. Remaining effort is a range, not a wall-clock deadline.",
+    "Read persistent goal hierarchy, accepted counts, current focus and member completion submissions. Supply goalId for submissions, acceptance history, tool receipts, blockers and task results. Main-goal selection, submissions and acceptance survive /reload. Counts mean accepted deliverables, not finished agent turns. Remaining effort is a range, not a wall-clock deadline.",
     Type.Object({
       rootId: Type.Optional(Type.String()),
       goalId: Type.Optional(Type.String()),
@@ -1381,6 +1382,7 @@ export default function (pi: ExtensionAPI) {
             "definition",
             "scope",
             "plan",
+            "submissions",
             "acceptance",
             "history",
             "receipts",
@@ -1472,15 +1474,17 @@ export default function (pi: ExtensionAPI) {
                   }))
                 : args.section === "receipts"
                   ? detail.receipts
-                  : args.section === "tasks"
-                    ? detail.tasks.map((t) => ({
-                        id: t.id,
-                        goalId: t.goalId,
-                        state: t.state,
-                        processState: t.processState,
-                        resultPath: t.resultPath,
-                      }))
-                    : undefined;
+                  : args.section === "submissions"
+                    ? detail.submissions
+                    : args.section === "tasks"
+                      ? detail.tasks.map((t) => ({
+                          id: t.id,
+                          goalId: t.goalId,
+                          state: t.state,
+                          processState: t.processState,
+                          resultPath: t.resultPath,
+                        }))
+                      : undefined;
         const pageSize =
           args.section === "receipts" ? Math.min(limit, 4) : limit;
         if (entries)
@@ -1521,7 +1525,7 @@ export default function (pi: ExtensionAPI) {
             output: r.output ? cleanText(r.output, 500) : undefined,
           })),
           bounded: true,
-          next: "Use section:definition|acceptance|history|receipts|tasks with offset/limit for retained details",
+          next: "Use section:definition|submissions|acceptance|history|receipts|tasks with offset/limit for retained details",
         };
       }
       const snapshot = ledger.snapshot(

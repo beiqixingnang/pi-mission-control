@@ -8,6 +8,8 @@ import type {
   GoalEvidence,
   GoalNode,
   GoalReceipt,
+  GoalSubmission,
+  GoalSubmissionEvidence,
   GoalState,
   GoalScope,
   Mission,
@@ -507,7 +509,17 @@ export class GoalLedger {
         revision: definitionChanged ? nextRevision : goal.revision,
         updatedAt: this.now(),
       };
-      if (definitionChanged) goal.acceptanceId = undefined;
+      if (definitionChanged) {
+        goal.acceptanceId = undefined;
+        if (goal.submissionId) {
+          const submission = this.store.goalSubmission(goal.submissionId);
+          if (submission) {
+            submission.state = "superseded";
+            this.store.putGoalSubmission(submission);
+          }
+        }
+        delete goal.submissionId;
+      }
       this.assertGraph(
         this.store.goals().map((n) => (n.id === goal.id ? goal : n)),
       );
@@ -694,6 +706,31 @@ export class GoalLedger {
             "Reference a current accepted descendant's acceptance record",
           );
         result.acceptanceId = acceptance.id;
+      } else if (item.source === "submission") {
+        const submission = item.submissionId
+          ? this.store.goalSubmission(item.submissionId)
+          : undefined;
+        if (
+          !submission ||
+          submission.goalId !== goal.id ||
+          submission.revision !== goal.revision ||
+          submission.state !== "current"
+        )
+          throw new Error(
+            "Submission evidence requires a current submission for this exact goal revision",
+          );
+        const submitted = submission.evidence.find(
+          (entry) => entry.criterion === item.criterion,
+        );
+        if (!submitted)
+          throw new Error(
+            "Submission evidence must include the requested acceptance criterion",
+          );
+        result.submissionId = submission.id;
+        if (submitted.path) {
+          result.path = path.resolve(this.cwd, submitted.path);
+          result.fingerprint = this.fingerprint(result.path);
+        }
       } else if (item.source !== "statement")
         throw new Error("Unknown evidence source");
       return result;
@@ -703,6 +740,167 @@ export class GoalLedger {
     )
       throw new Error("Evidence is required for every acceptance criterion");
     return checked;
+  }
+  submit(
+    entries: Array<{
+      goalId: string;
+      revision: number;
+      summary: string;
+      evidence?: GoalSubmissionEvidence[];
+    }>,
+    task: { id: string; missionId: string; memberId: string; goalId?: string },
+  ) {
+    return this.store.transaction(() => {
+      if (!Array.isArray(entries) || !entries.length || entries.length > 50)
+        throw new Error("Submit 1..50 goal completions per call");
+      const ids = new Set<string>();
+      const result: GoalSubmission[] = [];
+      for (const entry of entries) {
+        if (ids.has(entry.goalId))
+          throw new Error(
+            "A goal may appear only once in one submission batch",
+          );
+        ids.add(entry.goalId);
+        const goal = this.node(entry.goalId);
+        if (goal.rootId !== task.missionId)
+          throw new Error("Submitted goal belongs to another main goal");
+        if (goal.revision !== entry.revision)
+          throw new Error(
+            `Goal revision changed: ${goal.id} is revision ${goal.revision}`,
+          );
+        if (goal.state === "accepted" || excluded(goal))
+          throw new Error("Cannot submit a closed or excluded goal");
+        const assigned =
+          goal.id === task.goalId ||
+          this.store
+            .missionTasks(task.missionId)
+            .some(
+              (candidate) =>
+                candidate.memberId === task.memberId &&
+                candidate.goalId === goal.id &&
+                !["cancelled", "failed", "interrupted"].includes(
+                  candidate.state,
+                ),
+            );
+        if (!assigned)
+          throw new Error(
+            "Members can submit only goals assigned to their current execution",
+          );
+        if (
+          typeof entry.summary !== "string" ||
+          entry.summary.trim().length < 8
+        )
+          throw new Error(
+            "Submission summary must describe the actual result (at least eight characters)",
+          );
+        if (entry.summary.length > 2000)
+          throw new Error("Submission summary must be at most 2000 characters");
+        const evidence = (entry.evidence ?? []).map((item) => {
+          if (
+            !Number.isSafeInteger(item.criterion) ||
+            item.criterion < 1 ||
+            item.criterion > goal.criteria.length
+          )
+            throw new Error(
+              "Submission evidence criterion is outside this goal revision",
+            );
+          if (
+            typeof item.summary !== "string" ||
+            item.summary.trim().length < 8
+          )
+            throw new Error(
+              "Submission evidence summary must be at least eight characters",
+            );
+          if (item.summary.length > 2000)
+            throw new Error(
+              "Submission evidence summary must be at most 2000 characters",
+            );
+          return {
+            criterion: item.criterion,
+            summary: cleanText(item.summary, 2000),
+            ...(item.path
+              ? {
+                  path: path.resolve(
+                    this.store.member(task.memberId)?.workspace.root ??
+                      this.cwd,
+                    cleanText(item.path, 4000),
+                  ),
+                }
+              : {}),
+          };
+        });
+        if (evidence.length > 100)
+          throw new Error(
+            "A submission may contain at most 100 evidence entries",
+          );
+        for (const previous of this.store.goalSubmissions(goal.id, 200))
+          if (previous.state === "current") {
+            previous.state = "superseded";
+            this.store.putGoalSubmission(previous);
+          }
+        const submission: GoalSubmission = {
+          id: randomUUID(),
+          goalId: goal.id,
+          revision: goal.revision,
+          taskId: task.id,
+          memberId: task.memberId,
+          summary: cleanText(entry.summary, 2000),
+          evidence,
+          submittedAt: this.now(),
+          state: "current",
+        };
+        this.store.putGoalSubmission(submission);
+        goal.submissionId = submission.id;
+        goal.state = "review";
+        goal.reason =
+          "Member submitted completion evidence; lead acceptance is still required";
+        goal.updatedAt = this.now();
+        this.store.putGoal(goal);
+        this.store.event("goal.submitted", goal.id, {
+          submissionId: submission.id,
+          revision: goal.revision,
+          taskId: task.id,
+          memberId: task.memberId,
+        });
+        result.push(submission);
+      }
+      return result;
+    });
+  }
+  withdrawSubmission(
+    goalId: string,
+    revision: number,
+    task: { id: string; missionId: string; memberId: string },
+  ) {
+    return this.store.transaction(() => {
+      const goal = this.node(goalId);
+      if (goal.rootId !== task.missionId || goal.revision !== revision)
+        throw new Error("Goal identity or revision changed");
+      const submission = goal.submissionId
+        ? this.store.goalSubmission(goal.submissionId)
+        : undefined;
+      if (
+        !submission ||
+        submission.state !== "current" ||
+        submission.taskId !== task.id ||
+        submission.memberId !== task.memberId
+      )
+        throw new Error(
+          "Only the member's current submission can be withdrawn",
+        );
+      submission.state = "withdrawn";
+      this.store.putGoalSubmission(submission);
+      delete goal.submissionId;
+      if (goal.state === "review") goal.state = "active";
+      goal.reason = "Member withdrew the submitted completion for further work";
+      goal.updatedAt = this.now();
+      this.store.putGoal(goal);
+      this.store.event("goal.submission-withdrawn", goal.id, {
+        submissionId: submission.id,
+        taskId: task.id,
+      });
+      return submission;
+    });
   }
   private checkAcceptedArtifacts(id: string) {
     for (const node of this.subtree(id)) {
@@ -918,6 +1116,7 @@ export class GoalLedger {
         : undefined,
       history: this.store.acceptances(id),
       receipts: this.store.goalReceipts(id),
+      submissions: this.store.goalSubmissions(id),
       tasks: this.store
         .missionTasks(goal.rootId)
         .filter((t) => t.goalId === id || (!t.goalId && t.missionId === id)),

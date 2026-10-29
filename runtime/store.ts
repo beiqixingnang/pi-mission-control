@@ -12,6 +12,7 @@ import type {
   GoalNode,
   GoalAcceptance,
   GoalReceipt,
+  GoalSubmission,
 } from "./types.ts";
 
 /** One session owner, normalized transactional state, immutable large artifacts. */
@@ -78,6 +79,8 @@ export class Store {
         CREATE INDEX IF NOT EXISTS goal_acceptance_goal ON goal_acceptances(goal);
         CREATE TABLE IF NOT EXISTS goal_receipts(id TEXT PRIMARY KEY,goal TEXT NOT NULL,data TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS goal_receipt_goal ON goal_receipts(goal);
+        CREATE TABLE IF NOT EXISTS goal_submissions(id TEXT PRIMARY KEY,goal TEXT NOT NULL,data TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS goal_submission_goal ON goal_submissions(goal);
         CREATE TABLE IF NOT EXISTS goal_missions(id TEXT PRIMARY KEY,data TEXT NOT NULL);
       `);
       const version = this.get<number>("schema");
@@ -264,6 +267,28 @@ export class Store {
           "SELECT data FROM goal_receipts WHERE goal=? ORDER BY rowid DESC LIMIT ?",
         )
         .all(goalId, Math.max(1, Math.min(100, limit))) as { data: string }[]
+    ).map((row) => JSON.parse(row.data));
+  }
+  putGoalSubmission(submission: GoalSubmission) {
+    this.db
+      .prepare(
+        "INSERT INTO goal_submissions VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+      )
+      .run(submission.id, submission.goalId, JSON.stringify(submission));
+  }
+  goalSubmission(id: string): GoalSubmission | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM goal_submissions WHERE id=?")
+      .get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
+  }
+  goalSubmissions(goalId: string, limit = 50): GoalSubmission[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT data FROM goal_submissions WHERE goal=? ORDER BY rowid DESC LIMIT ?",
+        )
+        .all(goalId, Math.max(1, Math.min(200, limit))) as { data: string }[]
     ).map((row) => JSON.parse(row.data));
   }
   putMember(m: Member) {

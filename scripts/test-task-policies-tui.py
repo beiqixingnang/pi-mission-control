@@ -605,6 +605,17 @@ def main():
 
         assert "Initial child methods" in plan_worker_call("goal_context", {"section": "plan"})
         assert "authorization" in plan_worker_call("goal_plan_update", {"plan": "Unauthorized", "planRevision": 0})
+        submission_result = plan_worker_call("goal_submit", {"submissions": [{
+            "goalId": plan_leaf["id"], "revision": plan_leaf.get("revision", 0),
+            "summary": "The assigned section is complete and ready for lead acceptance.",
+            "evidence": [{"criterion": 1, "summary": "The section result is saved for review."}],
+        }]})
+        assert "continued" in submission_result
+        submitted_leaf = next(node for node in query("goal_nodes") if node["id"] == plan_leaf["id"])
+        assert submitted_leaf["state"] == "review" and submitted_leaf.get("submissionId")
+        submission_rows = query("goal_submissions", "json_extract(data,'$.goalId')=?", (plan_leaf["id"],))
+        assert submission_rows and submission_rows[0]["state"] == "current"
+        checks.append("real restricted member submitted assigned completion evidence, stayed non-accepted and remained task-compatible")
         failed, text = call_tool("goal_plan_authorize", {"goalId": plan_leaf["id"], "member": plan_member, "mode": "once"})
         assert not failed, text
         assert "One approved refinement" in plan_worker_call("goal_plan_update", {"plan": "One approved refinement", "planRevision": 0})

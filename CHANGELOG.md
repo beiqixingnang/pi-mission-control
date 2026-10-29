@@ -1,3 +1,9 @@
+# 2.12.0 — member completion submissions (2026-10-29)
+
+- Add the member-only `goal_submit` interface for one or up to 50 assigned goals per call. Bind current goal revisions, result summaries and optional criterion evidence paths; mark goals reviewable without accepting, ending or pausing the long-running member task, and keep the call quiet under lead notification policy.
+- Persist current and superseded submission records across reload, migration and later reports. Allow resubmission after changes and withdrawal before continuing. Expose paginated `goal_tree(section:submissions)` history, goal-panel pending status and `source:"submission"` evidence for lead acceptance after task settlement.
+- Fence submissions to the member's assigned goal/task identity, exact revision and live execution token. Keep acceptance, criteria, scope, task completion and wake policy independent; add real member-tool coverage for batching, withdrawal, reload, acceptance and quiet notifications.
+
 # 2.11.0 — optional execution plans and direct goal archival (2026-10-28)
 
 - Add optional execution-plan text to main goals and subgoals, with independent revisions, readable task/ancestor previews, paginated member access and goal-panel display. Plan-only edits preserve acceptance, scope, pauses, budgets and running tasks.

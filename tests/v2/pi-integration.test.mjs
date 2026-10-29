@@ -4169,6 +4169,89 @@ test(
 );
 
 test(
+  "real member goal_submit records pending acceptance evidence without ending the assigned task",
+  { timeout: 20000 },
+  () =>
+    harness(async (h) => {
+      const created = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                key: "root",
+                objective: "Long member submission fixture",
+                criteria: ["Retain the submitted result"],
+              },
+              {
+                key: "leaf",
+                parentId: "root",
+                objective: "Submit one completed section",
+                criteria: ["Member result is reviewable"],
+              },
+            ],
+          })
+        ).content[0].text,
+      ).created;
+      const leaf = created.find((node) => node.key === "leaf");
+      await h.tool("team_spawn", {
+        name: "submission-reader",
+        role: "Submit the finished section and continue",
+        model: "mission-fixture/model",
+        tools: ["read"],
+        workspace: { execution: "files" },
+      });
+      await h.session.prompt(
+        "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "team_send",
+            args: {
+              to: "submission-reader",
+              goalId: leaf.id,
+              wait: true,
+              message:
+                "V2_TEST:" +
+                JSON.stringify({
+                  op: "tool",
+                  name: "goal_submit",
+                  args: {
+                    submissions: [
+                      {
+                        goalId: leaf.id,
+                        revision: 0,
+                        summary:
+                          "The member finished the section and saved its reviewable result.",
+                        evidence: [
+                          {
+                            criterion: 1,
+                            summary:
+                              "The section result is ready for lead inspection.",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                }),
+            },
+          }),
+      );
+      const response = JSON.parse(h.session.getLastAssistantText());
+      assert.equal(response.isError, false, response.text);
+      const submissions = JSON.parse(
+        (await h.tool("goal_tree", { goalId: leaf.id, section: "submissions" }))
+          .content[0].text,
+      );
+      assert.equal(submissions.total, 1);
+      assert.equal(submissions.entries[0].state, "current");
+      const detail = JSON.parse(
+        (await h.tool("goal_tree", { goalId: leaf.id })).content[0].text,
+      );
+      assert.equal(detail.goal.state, "review");
+      assert.equal(detail.acceptance, undefined);
+    }),
+);
+
+test(
   "real Pi depth authorization and multiple main goals survive reload without automatic selection",
   { timeout: 15000 },
   () =>
