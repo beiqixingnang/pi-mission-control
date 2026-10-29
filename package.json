@@ -38,6 +38,7 @@
     "scripts/render-terminal-preview.py",
     "scripts/pi-timestamps.mjs",
     "tests/v2",
+    "skills",
     "agents",
     "docs",
     "README.md",
