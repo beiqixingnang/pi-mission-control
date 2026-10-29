@@ -41,11 +41,7 @@ import {
 } from "../../runtime/transcript.ts";
 import installReconnect from "./reconnect.ts";
 import { installProject } from "./project.ts";
-import {
-  goalPlanningGuidance,
-  delegationGuidance,
-  teamWorkflowGuidance,
-} from "../../runtime/guidance.ts";
+import { leadMechanismGuidance } from "../../runtime/guidance.ts";
 import { taskTiming } from "../../runtime/task-policy.ts";
 import { taskView } from "../../runtime/team-policy.ts";
 import {
@@ -486,19 +482,9 @@ export default function (pi: ExtensionAPI) {
     // session_start finishes. Reapply the current registry immediately before
     // building this model request, including schema changes to existing tools.
     activateMissionTools();
-    event.systemPromptOptions.promptGuidelines.unshift(
-      goalPlanningGuidance,
-      delegationGuidance,
-      teamWorkflowGuidance,
-    );
-    event.systemPromptOptions.promptGuidelines.unshift(
-      `Mission Control ${pluginVersion}: mission_reconcile and mission_control are directly callable lead tools. When the current recovery plan permits model recovery, inspect the actual blocker and use these tools; old claims that only a user slash command can reconcile or resume no_progress are obsolete. Reload itself never attests stopped processes. Explicit user/workspace/budget/decision controls remain authoritative.`,
-    );
-    event.systemPromptOptions.promptGuidelines.unshift(
-      "Mission Control autonomy policy: choose implementation details, retries, commands, files, member assignments and formatting within the approved scope. Ask the user only for a concrete business boundary (scope, acceptance, permission, budget, deadline, release or irreversible risk). Do not call mission_decision for generic validation, planning, implementation or execution choices.",
-    );
-    event.systemPromptOptions.promptGuidelines.unshift(
-      "For work with multiple deliverables, inventory the required modules, outputs and checks, then register stages and leaf goals with goal_plan before implementation. Declare stage dependsOn gates to preserve the approved batch order. Use goal_tree to recover exact progress, goal_focus before execution, goal_edit for blockers/next steps and goal_accept for evidence against every criterion. These are directly callable tools: fill missing plan/focus/evidence yourself within approved scope. Acceptance is recorded once and reused; model statements are labelled claims. Keep multiple main goals with one selected through goal_activate. Default depth is three; flatten excess detail into execution tasks rather than routinely asking for more depth.",
+    event.systemPromptOptions.promptGuidelines.push(
+      `Mission Control ${pluginVersion}: plugin tools are direct host registrations. Use current IDs, revisions, epochs, permissions and recoveryPlan as the runtime contract. Reload does not attest stopped processes; explicit holds remain authoritative.`,
+      leadMechanismGuidance,
     );
     const wake =
       event.messageType === "custom" &&
@@ -864,7 +850,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_configure",
     "Configure member capabilities",
-    "Change role/model/workspace/communication or tools. Idle changes apply immediately. Running executions retain their recorded revision until current operations settle, then resume under the new revision. Inspect team_capabilities for pending changes; cancel first only for immediate revocation. Omit tools to keep the list; tools:null restores all permitted tools.",
+    "Change a member's role, model, workspace, communication allowlist or tool list. Running work keeps its capability snapshot until a safe boundary; inspect team_capabilities for revisions and pending changes.",
     Type.Object({
       name: Type.String(),
       role: optional(Type.String()),
@@ -925,7 +911,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_review",
     "Coordinate a safe review batch",
-    "Request review of explicit files by a chosen peer. Existing executor operations drain before a snapshot is hashed and the reviewer starts; further executor work stays held. Review success releases it with evidence. A failed/cancelled review remains held until explicit release after inspection. Reviewer capabilities and model are configured independently; no automatic sandbox or fixed model.",
+    "Request, inspect or release a review hold for explicit files. The runtime drains current operations, hashes the batch, holds the executor and records the reviewer result.",
     Type.Object({
       action: Type.Union([
         Type.Literal("request"),
@@ -974,7 +960,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_send",
     "Assign team task",
-    "Durably assign work. goalId keeps the legacy single-goal form; goalIds formally associates one long-running task with multiple leaf goals in the same main goal, preserving each goal's revision for context, evidence and goal_submit. Choose deadlines for the actual task: none disables the total deadline; fixed requires positive timeoutMs. Queue timeout is separate. Default has no execution deadline unless configured. TUI/RPC wait:false returns immediately with automatic completion wakeups. One-shot print/json joins children.",
+    "Create a durable member task. goalId is the legacy single association; goalIds associates multiple leaf goals and stores each revision. wait controls whether the call waits for task settlement; timing fields configure execution and queue limits.",
     Type.Object({
       to: Type.String(),
       message: Type.String({ minLength: 1, maxLength: 200000 }),
@@ -1037,7 +1023,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_broadcast",
     "Assign to team",
-    "Assign the same approved input to selected members, optionally associating every task with one or multiple leaf goals through goalId/goalIds, enrolling every task in automatic maintenance.",
+    "Create one durable task per selected member with the same message and optional goalId/goalIds associations.",
     Type.Object({
       members: Type.Array(Type.String(), { minItems: 1, maxItems: 16 }),
       message: Type.String({ maxLength: 200000 }),
@@ -1156,7 +1142,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "subagent",
     "Delegate isolated task",
-    "Run one task, parallel tasks, or a dependency chain. Use goalIds when one long task covers several assigned leaf goals; each association is checked against the same main goal and current revision. Choose workspace, tools and deadlines from the task rather than its role name. Default has full permitted development tools and no total deadline unless configured. Each task can override shared timing. All work is tracked; default is asynchronous.",
+    "Create one task, parallel tasks or a dependency chain. goalIds may associate one task with multiple leaf goals; each association is validated against the same main goal and revision. Workspace, tools and timing are per task.",
     Type.Object({
       agent: optional(Type.String()),
       task: optional(Type.String()),
@@ -1309,7 +1295,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "mission_wait",
     "Wait for team",
-    "Call as the only tool in its response after dispatch. TUI/RPC ends this lead run; one-shot print/json joins results before Pi exits.",
+    "End the current lead turn while retaining durable tasks and deliveries. In print/json mode, waitForTask returns settled task results.",
     Type.Object({}),
     wait,
     (context) => !oneShot(context),
@@ -1317,7 +1303,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_wait",
     "Wait for team",
-    "Compatibility alias for mission_wait. Works even when no Goal was explicitly created.",
+    "Compatibility alias for mission_wait; retains durable tasks and deliveries.",
     Type.Object({}),
     wait,
     (context) => !oneShot(context),
@@ -1363,8 +1349,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_plan",
     "Register goal plan",
-    "Atomically register main goals and stage/leaf deliverables with explicit acceptance criteria. Level 2 organizes phases; level 3+ code leaves name concrete files or an explicitly listed batch, the work and its verifiable output. Record scope when known; a vague subsystem-wide objective is not a useful leaf. Scope describes work and never grants file permissions. Default depth is three; parentId/dependsOn can reference batch keys. " +
-      goalPlanningGuidance,
+    "Atomically register main goals and stage/leaf deliverables with explicit acceptance criteria, optional scope, dependencies, estimates and execution plans. parentId/dependsOn may reference batch keys. Scope describes work and never grants file permissions. The plugin validates graph shape and persists each goal revision.",
     Type.Object({
       goals: Type.Array(
         Type.Object({
@@ -1402,13 +1387,13 @@ export default function (pi: ExtensionAPI) {
           revision: node.revision,
         })),
       progress: current().goals.summary(),
-      planningGuidance: goalPlanningGuidance,
+      mechanismGuidance: leadMechanismGuidance,
     }),
   );
   tool(
     "goal_tree",
     "Read goal ledger",
-    "Read persistent goal hierarchy, accepted counts, current focus and member completion submissions. Supply goalId for submissions, acceptance history, tool receipts, blockers and task results. Main-goal selection, submissions and acceptance survive /reload. Counts mean accepted deliverables, not finished agent turns. Remaining effort is a range, not a wall-clock deadline.",
+    "Read persistent goal definitions, states, submissions, acceptance history, receipts and task references. Supply goalId and section for bounded details. Results persist across reload.",
     Type.Object({
       rootId: Type.Optional(Type.String()),
       goalId: Type.Optional(Type.String()),
@@ -1658,7 +1643,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_focus",
     "Focus leaf goal",
-    "Select a ready leaf goal for the lead's commands and default delegated tasks. Ancestor stage prerequisites must be accepted. Different ready leaves may have parallel member tasks; focus identifies the lead's current work. Reopen accepted work explicitly before more execution.",
+    "Set the current ready leaf focus. The plugin checks that the goal is a leaf, current, unblocked and eligible for work.",
     Type.Object({
       goalId: Type.String(),
       revision: Type.Integer({ minimum: 0 }),
@@ -1676,7 +1661,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_accept",
     "Accept goal with evidence",
-    "Register one acceptance for this exact goal revision after every criterion and required child has evidence. Artifact paths, completed task IDs, successful tool receipt IDs or current descendant acceptance IDs are checked once. statement is explicitly a model claim, suitable for explanatory planning evidence, never an automatically verified test. Reuse accepted evidence; no repeated model reviews are required. Accepting the main goal also completes the mission.",
+    "Register acceptance for this exact goal revision. Evidence may reference artifacts, completed tasks, tool receipts, submissions, statements or accepted descendants; the plugin validates current ownership and settled work.",
     Type.Object({
       goalId: Type.String(),
       revision: Type.Integer({ minimum: 0 }),
@@ -1730,7 +1715,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_update",
     "Update goal",
-    "Revise the main goal definition and acceptance criteria while preserving pause, independent holds, budgets and usage. A paused goal is editable without resuming. Use goalId for a non-selected paused main goal; use goal_edit to change the relevant subgoal. If an earlier goal_stop archived a temporary pause, restore paused planning with goal_pause(goalId) first.",
+    "Revise a main goal's objective or criteria at a supplied revision. The plugin preserves usage and holds, and rejects stale identities or unsettled affected work.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       objective: Type.String({ minLength: 1, maxLength: 8000 }),
@@ -1748,7 +1733,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_pause",
     "Pause execution, keep plan editable",
-    "Pause execution or goal reminders while retaining an editable main/child plan and all usage/history/independent holds. The lead AI may pause proactively when planning or coordination requires it; no user pause command is required. source:agent is the default; source:user forwards an actual user pause request. Existing user pauses remain user-owned. Edits alone do not resume execution. Omit goalId for the current main goal. An explicit retained goalId can restore a mistakenly stopped/archived goal as paused planning without replaying tasks; honor the user's resume intent with goal_resume. Another selected goal is not switched. Use goal_resume to continue, goal_stop only for final stop/archive.",
+    "Pause a selected or retained goal while preserving its plan, usage, history and holds. source records whether the pause is agent- or user-owned; the plugin does not replay tasks or switch another selected goal.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       reason: Type.Optional(Type.String({ maxLength: 2000 })),
@@ -1763,7 +1748,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_resume",
     "Resume paused goal",
-    "Resume the AI's own planning pause, or carry out the user's natural-language continue/restart request with source:user. No slash command is required. For an edit-only request keep a user pause. Preserve usage and budget counters, acceptance history and independent workspace/authorization/budget/unknown-process holds. Restoring a stopped goal is explicit: goal_pause(goalId), edit as needed, then goal_resume on the user's restart request. Another selected goal is not switched automatically; use goal_activate after settling it when selection is requested.",
+    "Resume a paused retained goal at the supplied revision and source. The plugin preserves usage, acceptance history and independent holds; stopped goals require an explicit prior goal_pause restore.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       reason: Type.Optional(Type.String({ maxLength: 2000 })),
@@ -1783,7 +1768,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "goal_stop",
     "Stop goal",
-    "Permanently stop and archive a main goal by goalId (defaults to the selected goal). Inactive, planned, paused or blocked main goals can be archived directly without activation or affecting another selected goal. Cancel only that goal's unfinished tasks and suppress its stale deliveries; repeated stops return the existing archive. For a temporary pause, disabling goal reminders or planning edits while paused, use goal_pause instead. Only use this for the user's actual final stop/archive request; it is not a pause switch.",
+    "Stop and archive a main goal by ID (or the selected goal). The plugin cancels only that goal's unfinished work, suppresses its stale deliveries and preserves its history; repeated calls are idempotent.",
     Type.Object({
       goalId: Type.Optional(Type.String()),
       reason: Type.Optional(Type.String({ maxLength: 2000 })),
@@ -1854,8 +1839,8 @@ export default function (pi: ExtensionAPI) {
   );
   tool(
     "mission_policy",
-    "Inspect or apply autonomy policy",
-    "Inspect the default business-only policy, or apply that same policy when asked. Execution choices within approved scope stay with the lead; material scope, permission or irreversible-risk questions still require their own authority. Applying policy does not resolve an existing decision, release a hold or authorize actions. No user slash command is required to apply this policy.",
+    "Decision policy",
+    "Read or persist the runtime decision-policy value. Applying it does not resolve decisions, release holds or grant permissions.",
     Type.Object({
       action: Type.Optional(
         Type.Union([Type.Literal("status"), Type.Literal("apply")]),

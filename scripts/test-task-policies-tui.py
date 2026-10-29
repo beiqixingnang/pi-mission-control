@@ -164,6 +164,13 @@ def main():
         if mission() and mission()["status"] not in ["complete", "stopped"]:
             line("/mission stop")
             wait(lambda: mission()["status"] == "stopped", "previous isolated test goal explicitly stopped before a new regression")
+        # The dedicated conversation is intentionally persistent so /reload and
+        # recovery are tested against the same session.  Member identities are
+        # durable too, so clean completed test members through the public
+        # runtime operation before creating the next bounded fixture batch.
+        if query("members"):
+            tool("team_disband", {"name": "*", "reason": "Reset completed members before the next isolated regression round"})
+            wait(lambda: not query("members"), "completed members were archived through the public disband operation before the next regression")
         if query("meta", "key='relocationHold'") == [True]:
             line("/mission resume")
             wait(lambda: query("meta", "key='relocationHold'") == [False], "a leftover dedicated-test migration pause was explicitly resumed before new setup")

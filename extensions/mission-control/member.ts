@@ -18,7 +18,7 @@ import installReconnect from "./reconnect.ts";
 import { searchWeb, fetchPage } from "../../runtime/web.ts";
 import { fileURLToPath } from "node:url";
 import type { Member } from "../../runtime/types.ts";
-import { memberWorkflowGuidance } from "../../runtime/guidance.ts";
+import { memberMechanismGuidance } from "../../runtime/guidance.ts";
 import { capabilityView } from "../../runtime/team-policy.ts";
 
 const result = (value: unknown) => ({
@@ -341,7 +341,7 @@ export default async function (pi: ExtensionAPI) {
     name: "goal_context",
     label: "Read assigned goal",
     description:
-      "Read this task's goal revision, parent stages, scope, acceptance criteria and optional execution plan. section:plan returns text pages and current planRevision/editPermission; goalId may select an ancestor, descendant or another explicitly authorized plan in this main goal. Fetch missing pages only when previews are incomplete. Reading grants no edit or acceptance authority.",
+      "Read the current task's associated goal data. section selects summary, criteria, scope or plan; goalId may select another associated goal or an explicitly authorized plan in the same main goal. Read-only; it does not grant edit or acceptance authority.",
     parameters: Type.Object({
       section: Type.Optional(
         Type.Union(
@@ -362,7 +362,7 @@ export default async function (pi: ExtensionAPI) {
     name: "goal_submit",
     label: "Submit goal completion",
     description:
-      "Submit one or many assigned goals as completed for lead acceptance while this member task continues. Bind every entry to its exact goalId and current revision; include a concrete result summary and optional criterion evidence paths. This records a pending submission, never accepts or changes criteria/scope, never waits for the lead, and never ends the task. Resubmit after code changes to supersede the prior submission; withdrawGoalIds retracts this task's current submissions so work can continue.",
+      "Record pending evidence for one or more goals associated with this member task. Each entry requires the exact goalId and current revision; the task continues and the lead accepts separately. Resubmission supersedes the current record; withdrawGoalIds retracts this task's current records.",
     parameters: Type.Object({
       submissions: Type.Optional(
         Type.Array(
@@ -402,7 +402,7 @@ export default async function (pi: ExtensionAPI) {
     name: "goal_plan_update",
     label: "Edit authorized execution plan",
     description:
-      "Edit only execution-plan text for the assigned goal (or an explicitly authorized goalId in this main goal). Requires a once or permanent grant from the lead and the latest planRevision from goal_context(section:plan). A successful changed write consumes a once grant; stale/invalid/no-op writes do not. null removes the plan. Cannot change criteria, scope, acceptance, execution permission or grant editing to others.",
+      "Edit execution-plan text for the assigned or explicitly authorized goal. Requires the latest planRevision and a once or permanent grant. null removes the plan. This cannot change criteria, scope, acceptance or permissions.",
     parameters: Type.Object({
       goalId: Type.Optional(Type.String()),
       plan: Type.Union([Type.String({ maxLength: 16000 }), Type.Null()]),
@@ -416,7 +416,7 @@ export default async function (pi: ExtensionAPI) {
     name: "team_message",
     label: "Team message",
     description:
-      "Send a direct note to a permitted executor/reviewer (operation:note, the default; never creates a task), or explicitly assign approved formal downstream work (operation:assign). Ordinary review discussion and counterexamples stay between peers, without lead relay or new task rounds.",
+      "Send a note to a permitted peer or lead, or assign a child task when operation is assign. note does not create a task.",
     parameters: Type.Object({
       to: Type.String(),
       message: Type.String({ maxLength: 16000 }),
@@ -465,7 +465,7 @@ export default async function (pi: ExtensionAPI) {
     name: "team_review",
     label: "Request or inspect paired review",
     description:
-      "Request a formal review of an explicit file batch by a permitted peer and end this turn at a safe boundary. Execution stays held until review completes; status reads the current snapshot and review evidence without creating work.",
+      "Request or inspect a review of explicit files by a permitted peer. The runtime holds the executor at a safe boundary until release.",
     parameters: Type.Object({
       action: Type.Optional(
         Type.Union([Type.Literal("request"), Type.Literal("status")]),
@@ -701,9 +701,9 @@ export default async function (pi: ExtensionAPI) {
     }
     pi.setActiveTools([...permitted]);
     event.systemPromptOptions.promptGuidelines.push(
-      `You are ${member.name}: ${member.role}. Assigned root ${policy.root}, access ${policy.access}, execution ${policy.execution}. Host mode is explicitly trusted and unconfined at the OS level. Use tools needed for the actual approved task; role names add no separate restrictions. Use goal_context for complete assigned criteria, scope and optional execution plans. When a concrete subgoal is finished, call goal_submit with its exact current revision, result summary and evidence paths; batch related assigned goals when appropriate. goal_submit records pending lead acceptance and lets this task continue; it never accepts the goal or waits for the lead. Resubmit after relevant changes or withdraw your current submission before continuing. Follow available plans within existing authorization and choose routine details without repeated questions. Read the current planRevision; goal_plan_update needs an explicit once/permanent grant for that goal and changes plan text only. Reuse valid evidence, report concrete results and uncovered items, and let the lead record acceptance. Choose routine methods yourself; avoid repeated checks or needless permission requests. Use team_message for permitted peers and team_wait alone for descendants. Never ask the lead to run routine tests on your behalf when your tools allow them; report an actual capability gap precisely.`,
+      `Managed member ${member.name} (${member.role}). Assigned workspace root=${policy.root}, access=${policy.access}, execution=${policy.execution}. Active tools and capability revision are authoritative; role names do not grant permissions.`,
       `Actual capabilities for this execution: ${JSON.stringify(capabilityView(member, [...permitted]))}`,
-      memberWorkflowGuidance,
+      memberMechanismGuidance,
     );
   });
   pi.on("session_shutdown", () => {

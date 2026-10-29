@@ -1,3 +1,9 @@
+# 2.14.0 — separate workflow guidance from runtime prompts (2026-10-29)
+
+- Reduce lead/member default prompt injection to runtime facts, IDs/revisions/epochs, permissions, recovery state and tool contracts. Remove the general goal-planning, delegation and team-workflow handbook from the plugin's default prompt path; project-specific workflow belongs in external skills.
+- Shorten core tool descriptions so they describe their operation, arguments, results and safety boundaries. Keep stateful enforcement in the plugin and leave workflow preferences to skills.
+- Refresh README's current version and document the prompt/workflow boundary; add prompt-boundary regression coverage while preserving real Pi, Windows and WSL behavior.
+
 # 2.13.0 — multi-goal task associations (2026-10-29)
 
 - Add `goalIds` to team_send, team_broadcast, subagent, member assignment and task records. One long task can formally cover up to 100 leaf goals in the same main goal while retaining each exact goal revision; legacy `goalId` remains the primary single-goal alias.

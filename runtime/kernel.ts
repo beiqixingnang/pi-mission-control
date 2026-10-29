@@ -3047,16 +3047,14 @@ export class MissionKernel {
       m = s.mission;
     if (!m) return "";
     return [
-      `Lead notification policy: ${JSON.stringify(s.notificationPolicy)}. Use mission_notifications to configure task-success/failure wakeups and goal ready/accepted levels separately. Quiet results remain saved for collection or the next scheduled report. Goal-ready means execution settled, not acceptance. Do not alter the user's report cadence as a substitute for notification settings.`,
-      `Current Mission Control recovery plan: ${JSON.stringify(this.recoveryPlan(5))}. Follow this current plan before repeating old recovery advice. Tools named here are callable by the lead model; do not claim that recovery failed unless an actual recovery tool returned an error.`,
-      `Autonomy policy: ${this.decisionPolicyValue}. Choose implementation, retry, command, file, member and formatting details yourself inside the approved scope. Use mission_decision only for a concrete business boundary such as scope, acceptance, permission, budget, deadline, release or irreversible risk.`,
-      "Decision answers do not require A/B/C tokens. A new direct human answer may delegate an in-scope choice to the lead. Quote that actual answer when resolving the exact decisionId and explain the selected next step; do not request another confirmation merely to obtain a letter. A policy change alone does not answer an existing decision or expand workspace or action authorization.",
+      `Mission Control state: mission=${m.id} status=${m.status}; notificationPolicy=${JSON.stringify(s.notificationPolicy)}.`,
+      `Current Mission Control recovery plan: ${JSON.stringify(this.recoveryPlan(5))}. Use only the named current recovery tool; reload does not attest stopped processes.`,
       `Mission ${m.id}: ${m.status}. ${cleanText(m.objective, 1200)}`,
-      `Acceptance (${m.criteria.length} items; goal_tree has details): ${m.criteria
+      `Acceptance criteria (${m.criteria.length}; goal_tree has details): ${m.criteria
         .slice(0, 6)
         .map((x, i) => `${i + 1}. ${cleanText(x, 200)}`)
         .join(" | ")}`,
-      `Goal ledger progress: ${JSON.stringify(s.goals)}. goal_tree reads the durable plan, member submissions and evidence. Members may call goal_submit for assigned completed sections while their long task continues; this marks a goal reviewable without accepting it or waking the lead. Inspect goal_tree(section:submissions), then use goal_accept with source:submission only after verifying the exact revision and evidence. For complex work, register stages and leaf deliverables with goal_plan before implementation; use dependencies to preserve batch order. Focus a ready leaf with goal_focus before commands or delegation. goal_accept records evidence once for each goal; completed member turns never accept goals. Use goal_edit to record blockers, next steps or explicit reopening. Tool receipts and task results can be referenced; statements are labelled model claims. Reuse accepted evidence unless requirements or relevant artifacts change. Multiple main goals coexist; goal_activate selects only one and never clears holds or renews budgets.`,
+      `Goal ledger: ${JSON.stringify(s.goals)}. goal_tree reads definitions, submissions, evidence and task references. goal_submit records pending evidence; goal_accept is the acceptance operation.`,
       `Tasks: ${
         s.tasks
           .filter((t) => !terminal(t))
@@ -3066,22 +3064,16 @@ export class MissionKernel {
           )
           .join("; ") || "none"
       }`,
-      "Task completion and maintenance are automatic, independent of Goal/reminder tools. Delegate approved work, let teammates review each other, then call mission_wait alone. Honor user pause requests with goal_pause, preserving an editable plan; reserve goal_stop for a final stop/archive. Paused plan edits need no execution resume and must keep the pause. Use mission_complete with evidence after verification; use mission_decision only for a concrete user decision. Inspect saved result paths rather than repeat completed commands.",
-      "Mission Control tools are declared directly from the host registry. mission_capabilities lists their active visibility and exact schemas. Inspect unknown executions and host processes before mission_reconcile; it records your stopped-process evidence and never replays work.",
+      `Holds: ${JSON.stringify({ blocker: m.blocker, decision: m.decision, workspace: Boolean(this.store.get("relocationHold")), userPaused: m.humanPaused, recovery: s.recovery })}.`,
+      "Tools are direct host registrations. Use the current schemas and IDs; no discovery call is required.",
       s.recovery
-        ? `Runtime recovery: ${JSON.stringify(s.recovery)}. Recovery preserves the approved goal and budget. Never turn a runtime fault into a user decision or edit the goal to bypass a hold; inspect mission_recover.`
-        : "",
-      m.blocker
-        ? `Execution hold: ${JSON.stringify(m.blocker)}. ${m.blocker.kind === "no_progress" ? "Inspect saved results and the blocker, then use mission_control with this exact goal identity/revision and the next approved step; usage is preserved." : "This hold cannot be removed by editing the objective or runtime recovery."}`
-        : "",
-      m.decision
-        ? `Pending business decision: ${JSON.stringify(m.decision)}. A status question does not answer it. Resolve only this decision after a new direct human answer.`
+        ? `Runtime recovery is active: ${JSON.stringify(s.recovery)}.`
         : "",
       m.externalWait
-        ? `Waiting for external event ${m.externalWait.id} until ${new Date(m.externalWait.deadline).toISOString()}: ${m.externalWait.reason}. No repeated polling or unchanged reports.`
+        ? `External wait: ${m.externalWait.id} deadline=${new Date(m.externalWait.deadline).toISOString()} reason=${m.externalWait.reason}.`
         : "",
       this.store.get("pathMappings")
-        ? `Explicit workspace rename history: ${JSON.stringify(this.store.get("pathMappings"))}. Historical paths are unchanged; use project_resolve and current authorized roots before execution.`
+        ? `Path mappings are active: ${JSON.stringify(this.store.get("pathMappings"))}.`
         : "",
     ]
       .join("\n")
@@ -3709,7 +3701,7 @@ export class MissionKernel {
         ? `Review gate ${task.reviewFor}: the executor is held. Review only this registered batch, communicate findings directly, and finish with evidence. The runtime resumes the executor after successful completion.`
         : "",
       (task.goalIds?.length ?? (task.goalId ? 1 : 0)) > 0
-        ? "Assigned goal context (this task may cover multiple goals; goal_context retrieves each exact goal's criteria, scope and optional execution plan). Follow plans within existing scope and authority; routine details do not require repeated questions. Plan text grants no permissions. Only goal_plan_update with an explicit per-goal once/permanent grant can edit a member plan; fetch the latest planRevision first.\n" +
+        ? "Assigned goal context (this task may cover multiple goals; goal_context retrieves each exact goal's criteria, scope and optional execution plan). Plan text grants no permissions. goal_plan_update requires an explicit per-goal once/permanent grant and the latest planRevision.\n" +
           (task.goalIds?.length
             ? task.goalIds
             : task.goalId
@@ -3744,7 +3736,7 @@ export class MissionKernel {
             )
             .join("\n\n")
         : "",
-      "Use team_message operation:note for direct discussion; it never creates work. Use assign only for a formal authorized downstream task, then team_wait ALONE if waiting for descendants. Finish the complete authorized batch before reporting; ordinary preferences do not block autonomous work. Continue independent approved work when one operation needs explicit authority.",
+      "Mechanism: team_message note does not create a task; assign creates a child task. team_wait ends this member turn while descendant work is tracked. goal_submit records pending evidence and goal_accept remains a lead operation.",
     ]
       .filter(Boolean)
       .join("\n\n");

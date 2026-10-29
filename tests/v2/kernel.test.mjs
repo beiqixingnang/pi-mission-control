@@ -1054,5 +1054,5 @@ test("a new natural-language human delegation resolves the exact decision withou
     assert.equal(resolved.turns, 9);
     assert.equal(resolved.outputTokens, 13623);
     assert.equal(resolved.budgetStartedAt, m.budgetStartedAt);
-    assert.match(h.kernel.context(), /do not require A\/B\/C/);
+    assert.match(h.kernel.context(), /goal_submit records pending evidence/);
   }));

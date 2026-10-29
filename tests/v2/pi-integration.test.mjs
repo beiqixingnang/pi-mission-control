@@ -3763,7 +3763,11 @@ test(
         .filter((e) => e.type === "message" && e.message.role === "system")
         .at(-1);
       const instructions = JSON.stringify(system.message.sections);
-      assert.match(instructions, /old claims that only a user slash command/);
+      assert.doesNotMatch(
+        instructions,
+        /old claims that only a user slash command/,
+      );
+      assert.match(instructions, /Mission Control exposes stateful tools directly/);
       assert.match(instructions, /Current Mission Control recovery plan/);
       assert.equal((await h.snapshot()).mission.status, "attention");
       assert.equal(
