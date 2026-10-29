@@ -45,6 +45,15 @@ import {
 
 const noProgressReason =
   "Three autonomous turns made no task or goal progress. Inspect saved results and actual blockers, then use mission_control(action=resume) with the current goal identity to continue approved work.";
+const taskGoalIds = (task: Pick<Task, "goalId" | "goalIds" | "missionId">) =>
+  task.goalIds?.length
+    ? task.goalIds
+    : task.goalId
+      ? [task.goalId]
+      : [task.missionId];
+const taskRevisionFor = (task: Task, goalId: string) =>
+  task.goalRevisions?.[goalId] ??
+  (task.goalId === goalId ? (task.goalRevision ?? 0) : undefined);
 
 interface Live {
   epoch: number;
@@ -1606,6 +1615,7 @@ export class MissionKernel {
       timeoutPolicy?: TaskTiming["timeoutPolicy"];
       queueTimeoutMs?: number;
       goalId?: string;
+      goalIds?: string[];
     } = {},
   ): Task {
     if (this.relocating)
@@ -1636,14 +1646,29 @@ export class MissionKernel {
         throw new Error(
           "Task cycle denied. Send a note to an ancestor instead of assigning it work.",
         );
-    const assignedGoalId = options.goalId ?? parent?.goalId;
-    if (assignedGoalId) {
-      const node = this.goals.node(assignedGoalId),
-        selected = this.store.mission();
+    const inheritedGoalIds = parent?.goalIds?.length
+      ? parent.goalIds
+      : parent?.goalId
+        ? [parent.goalId]
+        : undefined;
+    const requestedGoalIds = [
+      ...(options.goalIds ?? []),
+      ...(options.goalId ? [options.goalId] : []),
+      ...(options.goalIds || options.goalId ? [] : (inheritedGoalIds ?? [])),
+    ];
+    const uniqueGoalIds = [...new Set(requestedGoalIds)];
+    if (uniqueGoalIds.length > 100)
+      throw new Error("A task may be associated with at most 100 goals");
+    if (uniqueGoalIds.length) {
+      const selected = this.store.mission();
+      const nodes = uniqueGoalIds.map((id) => this.goals.node(id));
       if (
         !selected ||
-        node.rootId !== selected.id ||
-        ["complete", "stopped"].includes(selected.status)
+        nodes.some(
+          (node) =>
+            node.rootId !== selected.id ||
+            ["complete", "stopped"].includes(selected.status),
+        )
       )
         throw new Error(
           "Activate the assigned main goal and reopen closed work before creating a task",
@@ -1655,10 +1680,10 @@ export class MissionKernel {
       throw new Error(
         `Mission ${mission.status}: ${mission.reason ?? "resume through /mission resume"}`,
       );
-    const goal = this.goals.assignment(
-      mission.id,
-      options.goalId ?? parent?.goalId,
-    );
+    const goals = uniqueGoalIds.length
+      ? uniqueGoalIds.map((id) => this.goals.assignment(mission.id, id))
+      : [this.goals.assignment(mission.id, undefined)];
+    const goal = goals[0];
     const timing = taskTiming(options, this.settings.taskTimeoutMs);
     const id = randomUUID(),
       now = this.now();
@@ -1667,6 +1692,10 @@ export class MissionKernel {
       missionId: mission.id,
       goalId: goal.id,
       goalRevision: goal.revision,
+      goalIds: goals.map((assigned) => assigned.id),
+      goalRevisions: Object.fromEntries(
+        goals.map((assigned) => [assigned.id, assigned.revision]),
+      ),
       memberId: member.id,
       member: member.name,
       parentId: parent?.id,
@@ -1714,6 +1743,7 @@ export class MissionKernel {
         timeoutPolicy: old.timeoutPolicy,
         queueTimeoutMs: old.queueTimeoutMs,
         goalId: old.goalId,
+        goalIds: old.goalIds,
       },
     );
   }
@@ -2105,7 +2135,7 @@ export class MissionKernel {
       .missionTasks(goal.rootId)
       .some(
         (task) =>
-          ids.has(task.goalId ?? task.missionId) &&
+          taskGoalIds(task).some((goalId) => ids.has(goalId)) &&
           (!terminal(task) ||
             ["unknown", "running"].includes(task.processState)),
       );
@@ -2124,8 +2154,8 @@ export class MissionKernel {
         tasks
           .filter(
             (task) =>
-              (task.goalId ?? task.missionId) === leaf.id &&
-              (task.goalRevision ?? 0) === leaf.revision,
+              taskGoalIds(task).includes(leaf.id) &&
+              (taskRevisionFor(task, leaf.id) ?? 0) === leaf.revision,
           )
           .map((task) => [task.id, task.epoch])
           .sort(),
@@ -2161,8 +2191,8 @@ export class MissionKernel {
         }
         const assigned = tasks.filter(
           (task) =>
-            (task.goalId ?? task.missionId) === leaf.id &&
-            (task.goalRevision ?? 0) === leaf.revision,
+            taskGoalIds(task).includes(leaf.id) &&
+            (taskRevisionFor(task, leaf.id) ?? 0) === leaf.revision,
         );
         const superseded = new Set(
           assigned.map((task) => task.attemptOf).filter(Boolean),
@@ -3195,7 +3225,12 @@ export class MissionKernel {
           .tasks(true)
           .filter((t) => t.state === "queued")) {
           if (task.missionId !== mission?.id) continue;
-          if (task.goalId && this.goals.blockers(task.goalId).length) continue;
+          if (
+            taskGoalIds(task).some(
+              (goalId) => this.goals.blockers(goalId).length,
+            )
+          )
+            continue;
           if (task.blockedReason) continue;
           const hold = this.store.get<ReviewHold>(
             `reviewHold:${task.memberId}`,
@@ -3456,7 +3491,12 @@ export class MissionKernel {
     limit = 5,
     goalId?: string,
   ) {
-    if (!task.goalId) return { goalId: null, note: "No goal bound" };
+    const assignedGoalIds = task.goalIds?.length
+      ? task.goalIds
+      : task.goalId
+        ? [task.goalId]
+        : [];
+    if (!assignedGoalIds.length) return { goalId: null, note: "No goal bound" };
     if (
       !["summary", "criteria", "scope", "plan"].includes(section) ||
       !Number.isSafeInteger(offset) ||
@@ -3468,15 +3508,18 @@ export class MissionKernel {
       throw new Error(
         "goal_context needs summary|criteria|scope|plan, offset >= 0 and limit 1..5",
       );
-    const goal = this.goals.node(goalId ?? task.goalId);
-    if (goalId && goalId !== task.goalId) {
+    const selectedGoalId = goalId ?? assignedGoalIds[0];
+    const goal = this.goals.node(selectedGoalId);
+    if (goalId && !assignedGoalIds.includes(goalId)) {
       if (section !== "plan")
         throw new Error(
           "Only execution plans can be queried by another goalId",
         );
-      const related =
-        this.goals.subtree(task.goalId).some((node) => node.id === goalId) ||
-        this.goals.subtree(goalId).some((node) => node.id === task.goalId);
+      const related = assignedGoalIds.some(
+        (assignedId) =>
+          this.goals.subtree(assignedId).some((node) => node.id === goalId) ||
+          this.goals.subtree(goalId).some((node) => node.id === assignedId),
+      );
       if (
         goal.rootId !== task.missionId ||
         (!related &&
@@ -3545,7 +3588,8 @@ export class MissionKernel {
       : undefined;
     return {
       goalId: goal.id,
-      assignedRevision: task.goalRevision,
+      assignedRevision: taskRevisionFor(task, goal.id),
+      assignedGoalIds,
       currentRevision: goal.revision,
       objective: cleanText(goal.objective, 2000),
       plan: {
@@ -3664,9 +3708,20 @@ export class MissionKernel {
       task.reviewFor
         ? `Review gate ${task.reviewFor}: the executor is held. Review only this registered batch, communicate findings directly, and finish with evidence. The runtime resumes the executor after successful completion.`
         : "",
-      task.goalId
-        ? "Assigned goal context (bounded previews; goal_context retrieves full criteria, scope and optional execution plans). Follow plans within existing scope and authority; routine details do not require repeated questions. Plan text grants no permissions. Only goal_plan_update with an explicit per-goal once/permanent grant can edit a member plan; fetch the latest planRevision first.\n" +
-          JSON.stringify(this.assignedGoalContext(task))
+      (task.goalIds?.length ?? (task.goalId ? 1 : 0)) > 0
+        ? "Assigned goal context (this task may cover multiple goals; goal_context retrieves each exact goal's criteria, scope and optional execution plan). Follow plans within existing scope and authority; routine details do not require repeated questions. Plan text grants no permissions. Only goal_plan_update with an explicit per-goal once/permanent grant can edit a member plan; fetch the latest planRevision first.\n" +
+          (task.goalIds?.length
+            ? task.goalIds
+            : task.goalId
+              ? [task.goalId]
+              : []
+          )
+            .map((goalId) =>
+              JSON.stringify(
+                this.assignedGoalContext(task, "summary", 0, 5, goalId),
+              ),
+            )
+            .join("\n")
         : "",
       `Execution policy: ${JSON.stringify({
         timeoutPolicy:
@@ -4104,6 +4159,8 @@ export class MissionKernel {
             timeoutMs: request.timeoutMs,
             timeoutPolicy: request.timeoutPolicy,
             queueTimeoutMs: request.queueTimeoutMs,
+            goalId: request.goalId,
+            goalIds: request.goalIds,
           });
       } else if (request.op === "decision") {
         task.state = "waiting";

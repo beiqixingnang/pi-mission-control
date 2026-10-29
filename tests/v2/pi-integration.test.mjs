@@ -4252,6 +4252,103 @@ test(
 );
 
 test(
+  "real Pi keeps one long task associated with several leaf goals and accepts section submissions from that task",
+  { timeout: 25000 },
+  () =>
+    harness(async (h) => {
+      const created = JSON.parse(
+        (
+          await h.tool("goal_plan", {
+            goals: [
+              {
+                key: "root",
+                objective: "Software file with several sections",
+                criteria: ["All sections are reviewed"],
+              },
+              {
+                key: "one",
+                parentId: "root",
+                objective: "Section 1 implementation",
+                criteria: ["Section 1 has evidence"],
+              },
+              {
+                key: "two",
+                parentId: "root",
+                objective: "Section 2 implementation",
+                criteria: ["Section 2 has evidence"],
+              },
+              {
+                key: "three",
+                parentId: "root",
+                objective: "Section 3 implementation",
+                criteria: ["Section 3 has evidence"],
+              },
+            ],
+          })
+        ).content[0].text,
+      ).created;
+      const leaves = [
+        created.find((node) => node.key === "one"),
+        created.find((node) => node.key === "two"),
+        created.find((node) => node.key === "three"),
+      ];
+      await h.tool("team_spawn", {
+        name: "multi-section-worker",
+        role: "Implement the complete software file",
+        model: "mission-fixture/model",
+        tools: ["read"],
+        workspace: { execution: "files" },
+      });
+      const response = await h.tool("team_send", {
+        to: "multi-section-worker",
+        goalIds: leaves.map((leaf) => leaf.id),
+        wait: true,
+        message:
+          "V2_TEST:" +
+          JSON.stringify({
+            op: "tool",
+            name: "goal_submit",
+            args: {
+              submissions: leaves.map((leaf, index) => ({
+                goalId: leaf.id,
+                revision: 0,
+                summary: `Section ${index + 1} is complete in one long task.`,
+                evidence: [
+                  {
+                    criterion: 1,
+                    summary: `Section ${index + 1} evidence is ready for review.`,
+                  },
+                ],
+              })),
+            },
+          }),
+      });
+      assert.ok(!response.isError, response.content[0].text);
+      const state = await h.snapshot();
+      const task = state.tasks.find(
+        (item) => item.member === "multi-section-worker",
+      );
+      assert.ok(task);
+      assert.deepEqual(
+        task.goalIds,
+        leaves.map((leaf) => leaf.id),
+      );
+      for (const leaf of leaves) {
+        const submissions = JSON.parse(
+          (
+            await h.tool("goal_tree", {
+              goalId: leaf.id,
+              section: "submissions",
+            })
+          ).content[0].text,
+        );
+        assert.equal(submissions.total, 1);
+        assert.equal(submissions.entries[0].state, "current");
+      }
+    }),
+);
+
+test(
   "real Pi depth authorization and multiple main goals survive reload without automatic selection",
   { timeout: 15000 },
   () =>

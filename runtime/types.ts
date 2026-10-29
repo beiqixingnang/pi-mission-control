@@ -58,6 +58,9 @@ export interface Task {
   missionId: string;
   goalId?: string;
   goalRevision?: number;
+  /** Every goal explicitly associated with this long-running task. goalId remains the primary legacy anchor. */
+  goalIds?: string[];
+  goalRevisions?: Record<string, number>;
   memberId: string;
   member: string;
   parentId?: string;

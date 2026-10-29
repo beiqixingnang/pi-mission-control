@@ -157,8 +157,16 @@ test("a batch can submit several assigned goals, and one current submission can 
       },
     ]);
     const member = h.add();
-    const firstWorker = await h.start(member.name, first.id);
-    const secondWorker = await h.start(member.name, second.id);
+    const task = h.kernel.dispatch(
+      member.name,
+      "Implement both sections in one long task",
+      {
+        goalIds: [first.id, second.id],
+      },
+    );
+    await flush();
+    const firstWorker = h.workers.at(-1);
+    assert.deepEqual(task.goalIds, [first.id, second.id]);
     const batch = h.request(firstWorker, {
       op: "goal-submit",
       submissions: [
@@ -184,7 +192,7 @@ test("a batch can submit several assigned goals, and one current submission can 
     assert.equal(h.kernel.goals.node(first.id).state, "review");
     assert.equal(h.kernel.goals.node(second.id).state, "review");
     assert.equal(h.kernel.goals.node(first.id).revision, 0);
-    const updated = h.request(secondWorker, {
+    const updated = h.request(firstWorker, {
       op: "goal-submit",
       submissions: [
         {
@@ -207,6 +215,96 @@ test("a batch can submit several assigned goals, and one current submission can 
     assert.equal(history[0].state, "current");
     assert.equal(history[1].state, "superseded");
     assert.equal(h.kernel.goals.node(second.id).submissionId, history[0].id);
+  }));
+
+test("one long task can be formally associated with many leaf goals and submit every section it covers", () =>
+  using(async (h) => {
+    const [, first, second, third, outside] = h.kernel.planGoals([
+      {
+        key: "root",
+        objective: "Software governance file",
+        criteria: ["All assigned sections are verified"],
+      },
+      {
+        key: "first",
+        parentId: "root",
+        objective: "Section 1",
+        criteria: ["Section 1 is verified"],
+      },
+      {
+        key: "second",
+        parentId: "root",
+        objective: "Section 2",
+        criteria: ["Section 2 is verified"],
+      },
+      {
+        key: "third",
+        parentId: "root",
+        objective: "Section 3",
+        criteria: ["Section 3 is verified"],
+      },
+      {
+        key: "outside",
+        parentId: "root",
+        objective: "Section outside this task",
+        criteria: ["Outside section is verified"],
+      },
+    ]);
+    const member = h.add();
+    const task = h.kernel.dispatch(
+      member.name,
+      "Implement the complete file across sections 1, 2 and 3",
+      {
+        goalIds: [first.id, second.id, third.id],
+      },
+    );
+    await flush();
+    const worker = h.workers.at(-1);
+    assert.deepEqual(task.goalIds, [first.id, second.id, third.id]);
+    assert.deepEqual(task.goalRevisions, {
+      [first.id]: 0,
+      [second.id]: 0,
+      [third.id]: 0,
+    });
+    const context = h.request(worker, {
+      op: "goal-context",
+      goalId: second.id,
+      section: "criteria",
+    });
+    assert.equal(context.goalId, second.id);
+    const result = h.request(worker, {
+      op: "goal-submit",
+      submissions: [first, second, third].map((goal, index) => ({
+        goalId: goal.id,
+        revision: 0,
+        summary: `Section ${index + 1} is complete in the same long task.`,
+        evidence: [
+          {
+            criterion: 1,
+            summary: `Section ${index + 1} verification evidence is saved.`,
+          },
+        ],
+      })),
+    });
+    assert.equal(result.submitted.length, 3);
+    assert.equal(h.kernel.goals.node(first.id).state, "review");
+    assert.equal(h.kernel.goals.node(second.id).state, "review");
+    assert.equal(h.kernel.goals.node(third.id).state, "review");
+    assert.equal(h.kernel.store.task(task.id).state, "running");
+    assert.throws(
+      () =>
+        h.request(worker, {
+          op: "goal-submit",
+          submissions: [
+            {
+              goalId: outside.id,
+              revision: 0,
+              summary: "An unassociated sibling must remain outside this task.",
+            },
+          ],
+        }),
+      /assigned to their current execution/,
+    );
   }));
 
 test("a member can withdraw its current submission, then resubmit; stale, duplicate and unauthorized submissions are rejected", () =>

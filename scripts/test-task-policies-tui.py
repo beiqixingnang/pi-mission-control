@@ -616,6 +616,33 @@ def main():
         submission_rows = query("goal_submissions", "json_extract(data,'$.goalId')=?", (plan_leaf["id"],))
         assert submission_rows and submission_rows[0]["state"] == "current"
         checks.append("real restricted member submitted assigned completion evidence, stayed non-accepted and remained task-compatible")
+        multi_marker = "Long task multi-goal section " + uuid.uuid4().hex[:8]
+        failed, text = call_tool("goal_plan", {"goals": [
+            {"key": "multi-one", "parentId": original["id"], "objective": multi_marker + " 1", "criteria": ["Section 1 verified"]},
+            {"key": "multi-two", "parentId": original["id"], "objective": multi_marker + " 2", "criteria": ["Section 2 verified"]},
+            {"key": "multi-three", "parentId": original["id"], "objective": multi_marker + " 3", "criteria": ["Section 3 verified"]},
+        ]})
+        assert not failed, text
+        multi_goals = [node for node in query("goal_nodes") if node["objective"].startswith(multi_marker)]
+        assert len(multi_goals) == 3
+        multi_member = "multi-section-worker-" + uuid.uuid4().hex[:6]
+        failed, text = call_tool("team_spawn", {"name": multi_member, "role": "Implement all sections in one long task", "model": "mission-fixture/model", "tools": ["read"], "workspace": {"execution": "files"}})
+        assert not failed, text
+        previous_tasks = {task["id"] for task in query("tasks")}
+        failed, text = call_tool("team_send", {
+            "to": multi_member,
+            "goalIds": [node["id"] for node in multi_goals],
+            "wait": True,
+            "message": "V2_TEST:" + json.dumps({"op": "tool", "name": "goal_submit", "args": {"submissions": [
+                {"goalId": node["id"], "revision": node.get("revision", 0), "summary": "This section is complete in the same long task and ready for review.", "evidence": [{"criterion": 1, "summary": "Section evidence is saved for lead inspection."}]}
+                for node in multi_goals]}})
+        })
+        assert not failed, text
+        multi_task = next(task for task in query("tasks") if task["id"] not in previous_tasks and task["member"] == multi_member)
+        assert multi_task["goalIds"] == [node["id"] for node in multi_goals]
+        assert all(next(node for node in query("goal_nodes") if node["id"] == goal["id"])["state"] == "review" for goal in multi_goals)
+        assert all(query("goal_submissions", "json_extract(data,'$.goalId')=?", (goal["id"],))[0]["state"] == "current" for goal in multi_goals)
+        checks.append("real Pi workflow associated one long task with three leaf goals and recorded three independent pending submissions")
         failed, text = call_tool("goal_plan_authorize", {"goalId": plan_leaf["id"], "member": plan_member, "mode": "once"})
         assert not failed, text
         assert "One approved refinement" in plan_worker_call("goal_plan_update", {"plan": "One approved refinement", "planRevision": 0})

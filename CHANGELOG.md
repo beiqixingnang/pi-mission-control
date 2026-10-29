@@ -1,3 +1,9 @@
+# 2.13.0 — multi-goal task associations (2026-10-29)
+
+- Add `goalIds` to team_send, team_broadcast, subagent, member assignment and task records. One long task can formally cover up to 100 leaf goals in the same main goal while retaining each exact goal revision; legacy `goalId` remains the primary single-goal alias.
+- Make assigned context, plan access, goal_submit, task evidence, ready notifications, blocker checks and acceptance guards resolve every associated goal. Unassociated sibling submissions remain rejected, so task text cannot silently expand authorization.
+- Reproduce the software-development Pi workflow with one file task spanning several sections, real member context, three pending submissions, continued execution and persisted task/goal identities.
+
 # 2.12.0 — member completion submissions (2026-10-29)
 
 - Add the member-only `goal_submit` interface for one or up to 50 assigned goals per call. Bind current goal revisions, result summaries and optional criterion evidence paths; mark goals reviewable without accepting, ending or pausing the long-running member task, and keep the call quiet under lead notification policy.

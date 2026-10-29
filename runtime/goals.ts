@@ -13,6 +13,7 @@ import type {
   GoalState,
   GoalScope,
   Mission,
+  Task,
 } from "./types.ts";
 import { cleanText } from "./public.ts";
 import { executionPlan } from "./goal-plans.ts";
@@ -20,6 +21,15 @@ import { mappedPath, type PathMapping } from "./path-mapping.ts";
 
 const excluded = (goal: GoalNode) =>
   goal.state === "cancelled" || goal.state === "skipped";
+const taskGoalIds = (task: Pick<Task, "goalId" | "goalIds" | "missionId">) =>
+  task.goalIds?.length
+    ? task.goalIds
+    : task.goalId
+      ? [task.goalId]
+      : [task.missionId];
+const taskRevisionFor = (task: Task, goalId: string) =>
+  task.goalRevisions?.[goalId] ??
+  (task.goalId === goalId ? (task.goalRevision ?? 0) : undefined);
 const text = (value: string, name: string, max = 2000) => {
   if (typeof value !== "string" || !value.trim() || value.length > max)
     throw new Error(`${name} requires 1..${max} characters`);
@@ -358,7 +368,7 @@ export class GoalLedger {
       .missionTasks(this.node(id).rootId)
       .some(
         (task) =>
-          (task.goalId ? ids.has(task.goalId) : id === task.missionId) &&
+          taskGoalIds(task).some((goalId) => ids.has(goalId)) &&
           (!["completed", "failed", "cancelled", "interrupted"].includes(
             task.state,
           ) ||
@@ -393,7 +403,7 @@ export class GoalLedger {
         .missionTasks(this.node(id).rootId)
         .some(
           (task) =>
-            ids.has(task.goalId ?? task.missionId) &&
+            taskGoalIds(task).some((goalId) => ids.has(goalId)) &&
             (!["completed", "failed", "cancelled", "interrupted"].includes(
               task.state,
             ) ||
@@ -652,7 +662,7 @@ export class GoalLedger {
         if (
           !task ||
           task.missionId !== goal.rootId ||
-          !subtree.has(task.goalId ?? task.missionId) ||
+          !taskGoalIds(task).some((goalId) => subtree.has(goalId)) ||
           task.state !== "completed" ||
           task.processState !== "stopped" ||
           !task.resultPath ||
@@ -661,10 +671,7 @@ export class GoalLedger {
           throw new Error(
             "Task evidence requires a completed, stopped task belonging to this goal subtree with a saved result",
           );
-        if (
-          (task.goalRevision ?? 0) !==
-          this.node(task.goalId ?? task.missionId).revision
-        )
+        if (taskRevisionFor(task, goal.id) !== goal.revision)
           throw new Error(
             "Task result belongs to an older goal revision; inspect the artifact and verify the revised criteria",
           );
@@ -748,7 +755,13 @@ export class GoalLedger {
       summary: string;
       evidence?: GoalSubmissionEvidence[];
     }>,
-    task: { id: string; missionId: string; memberId: string; goalId?: string },
+    task: {
+      id: string;
+      missionId: string;
+      memberId: string;
+      goalId?: string;
+      goalIds?: string[];
+    },
   ) {
     return this.store.transaction(() => {
       if (!Array.isArray(entries) || !entries.length || entries.length > 50)
@@ -771,17 +784,7 @@ export class GoalLedger {
         if (goal.state === "accepted" || excluded(goal))
           throw new Error("Cannot submit a closed or excluded goal");
         const assigned =
-          goal.id === task.goalId ||
-          this.store
-            .missionTasks(task.missionId)
-            .some(
-              (candidate) =>
-                candidate.memberId === task.memberId &&
-                candidate.goalId === goal.id &&
-                !["cancelled", "failed", "interrupted"].includes(
-                  candidate.state,
-                ),
-            );
+          task.goalIds?.includes(goal.id) ?? goal.id === task.goalId;
         if (!assigned)
           throw new Error(
             "Members can submit only goals assigned to their current execution",

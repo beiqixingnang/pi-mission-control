@@ -439,6 +439,13 @@ export default async function (pi: ExtensionAPI) {
       queueTimeoutMs: Type.Optional(
         Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
       ),
+      goalId: Type.Optional(Type.String()),
+      goalIds: Type.Optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+          minItems: 1,
+          maxItems: 100,
+        }),
+      ),
     }),
     async execute(id, args) {
       return result(await request(id, { op: "message", ...args }));

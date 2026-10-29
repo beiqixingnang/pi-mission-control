@@ -974,13 +974,19 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_send",
     "Assign team task",
-    "Durably assign work. Choose deadlines for the actual task: none disables the total deadline; fixed requires positive timeoutMs. Queue timeout is separate. Default has no execution deadline unless configured. TUI/RPC wait:false returns immediately with automatic completion wakeups. One-shot print/json joins children.",
+    "Durably assign work. goalId keeps the legacy single-goal form; goalIds formally associates one long-running task with multiple leaf goals in the same main goal, preserving each goal's revision for context, evidence and goal_submit. Choose deadlines for the actual task: none disables the total deadline; fixed requires positive timeoutMs. Queue timeout is separate. Default has no execution deadline unless configured. TUI/RPC wait:false returns immediately with automatic completion wakeups. One-shot print/json joins children.",
     Type.Object({
       to: Type.String(),
       message: Type.String({ minLength: 1, maxLength: 200000 }),
       wait: Type.Optional(Type.Boolean()),
       ...timingSchema,
       goalId: Type.Optional(Type.String()),
+      goalIds: Type.Optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+          minItems: 1,
+          maxItems: 100,
+        }),
+      ),
     }),
     async (args, signal, context) => {
       const task = current().dispatch(args.to, args.message, {
@@ -988,6 +994,7 @@ export default function (pi: ExtensionAPI) {
         timeoutPolicy: args.timeoutPolicy,
         queueTimeoutMs: args.queueTimeoutMs,
         goalId: args.goalId,
+        goalIds: args.goalIds,
       });
       if (args.wait || oneShot(context))
         return collected(await waitForTask(task.id, signal), [task.id]);
@@ -1030,11 +1037,17 @@ export default function (pi: ExtensionAPI) {
   tool(
     "team_broadcast",
     "Assign to team",
-    "Assign the same approved input to selected members, enrolling every task in automatic maintenance.",
+    "Assign the same approved input to selected members, optionally associating every task with one or multiple leaf goals through goalId/goalIds, enrolling every task in automatic maintenance.",
     Type.Object({
       members: Type.Array(Type.String(), { minItems: 1, maxItems: 16 }),
       message: Type.String({ maxLength: 200000 }),
       goalId: Type.Optional(Type.String()),
+      goalIds: Type.Optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+          minItems: 1,
+          maxItems: 100,
+        }),
+      ),
       ...timingSchema,
     }),
     async (args, signal, context) => {
@@ -1043,6 +1056,7 @@ export default function (pi: ExtensionAPI) {
           current().dispatch(name, args.message, {
             ...taskTiming(args, current().settings.taskTimeoutMs),
             goalId: args.goalId,
+            goalIds: args.goalIds,
           }),
         ),
       );
@@ -1142,7 +1156,7 @@ export default function (pi: ExtensionAPI) {
   tool(
     "subagent",
     "Delegate isolated task",
-    "Run one task, parallel tasks, or a dependency chain. Choose workspace, tools and deadlines from the task rather than its role name. Default has full permitted development tools and no total deadline unless configured. Each task can override shared timing. All work is tracked; default is asynchronous.",
+    "Run one task, parallel tasks, or a dependency chain. Use goalIds when one long task covers several assigned leaf goals; each association is checked against the same main goal and current revision. Choose workspace, tools and deadlines from the task rather than its role name. Default has full permitted development tools and no total deadline unless configured. Each task can override shared timing. All work is tracked; default is asynchronous.",
     Type.Object({
       agent: optional(Type.String()),
       task: optional(Type.String()),
@@ -1152,6 +1166,12 @@ export default function (pi: ExtensionAPI) {
         Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
       ),
       goalId: optional(Type.String()),
+      goalIds: optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+          minItems: 1,
+          maxItems: 100,
+        }),
+      ),
       ...timingSchema,
       tasks: optional(
         Type.Array(
@@ -1164,6 +1184,12 @@ export default function (pi: ExtensionAPI) {
               Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
             ),
             goalId: optional(Type.String()),
+            goalIds: optional(
+              Type.Array(Type.String({ minLength: 1 }), {
+                minItems: 1,
+                maxItems: 100,
+              }),
+            ),
             ...timingSchema,
           }),
           { maxItems: 16 },
@@ -1180,6 +1206,12 @@ export default function (pi: ExtensionAPI) {
               Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 }),
             ),
             goalId: optional(Type.String()),
+            goalIds: optional(
+              Type.Array(Type.String({ minLength: 1 }), {
+                minItems: 1,
+                maxItems: 100,
+              }),
+            ),
             ...timingSchema,
           }),
           { maxItems: 16 },
@@ -1193,6 +1225,7 @@ export default function (pi: ExtensionAPI) {
         task: string;
         timing: ReturnType<typeof taskTiming>;
         goalId?: string;
+        goalIds?: string[];
       }[] = [];
       for (const input of inputs) {
         const name = `sub-${(input.agent ?? "worker").replace(/[^a-z0-9-]/g, "").slice(0, 20)}-${randomUUID().slice(0, 8)}`;
@@ -1212,20 +1245,24 @@ export default function (pi: ExtensionAPI) {
           task: input.task,
           timing: taskTiming(input, current().settings.taskTimeoutMs),
           goalId: input.goalId,
+          goalIds: input.goalIds,
         });
       }
       const jobs = current().store.transaction(() => {
         let previous: string | undefined;
-        return prepared.map(({ definition, task: input, timing, goalId }) => {
-          current().addMember(definition);
-          const task = current().dispatch(definition.name, input, {
-            dependsOn: chain ? previous : undefined,
-            ...timing,
-            goalId,
-          });
-          previous = task.id;
-          return task;
-        });
+        return prepared.map(
+          ({ definition, task: input, timing, goalId, goalIds }) => {
+            current().addMember(definition);
+            const task = current().dispatch(definition.name, input, {
+              dependsOn: chain ? previous : undefined,
+              ...timing,
+              goalId,
+              goalIds,
+            });
+            previous = task.id;
+            return task;
+          },
+        );
       });
       return oneShot(context)
         ? collected(

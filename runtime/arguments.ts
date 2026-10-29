@@ -61,6 +61,17 @@ export function delegationInput(args: any) {
       throw new Error(
         "Every delegated item requires a non-empty task. No tasks were started.",
       );
+    const rawGoalIds = input.goalIds ?? args.goalIds;
+    if (
+      rawGoalIds !== undefined &&
+      (!Array.isArray(rawGoalIds) ||
+        rawGoalIds.length > 100 ||
+        rawGoalIds.some((id: unknown) => typeof id !== "string" || !id.trim()))
+    )
+      throw new Error("goalIds must contain at most 100 non-empty goal IDs");
+    const goalIds = rawGoalIds?.length
+      ? [...new Set(rawGoalIds.map((id: string) => id.trim()))]
+      : undefined;
     return {
       ...input,
       task: input.task,
@@ -75,6 +86,7 @@ export function delegationInput(args: any) {
       queueTimeoutMs: input.queueTimeoutMs ?? args.queueTimeoutMs,
       tools: input.tools ?? args.tools,
       goalId: input.goalId ?? args.goalId,
+      goalIds,
     };
   });
   return { inputs, chain: Boolean(chain) };
