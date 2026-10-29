@@ -132,6 +132,45 @@ test("execution plans are optional on roots and children; paused edits preserve 
     assert.equal(h.kernel.store.mission().status, "paused");
   }));
 
+test("an authorized member can add a previously absent plan, then modify it only under a permanent grant", () =>
+  using(async (h) => {
+    const [root] = h.kernel.planGoals([
+      {
+        objective: "Goal without an initial plan",
+        criteria: ["Keep the plan optional"],
+      },
+    ]);
+    const member = h.add();
+    const worker = await h.start(root.id);
+    assert.equal(h.kernel.goalPlans.view(root.id).plan, null);
+    h.kernel.authorizeGoalPlan(root.id, member.name, "once");
+    const added = h.request(worker, {
+      op: "goal-plan-update",
+      plan: "1. Inspect the approved files.\n2. Verify the saved result.",
+      planRevision: 0,
+    });
+    assert.equal(added.planRevision, 1);
+    assert.match(added.plan, /Inspect the approved files/);
+    assert.equal(added.editPermission, "none");
+    assert.throws(
+      () =>
+        h.request(worker, {
+          op: "goal-plan-update",
+          plan: "A second edit without a new grant",
+          planRevision: 1,
+        }),
+      /authorization/,
+    );
+    h.kernel.authorizeGoalPlan(root.id, member.name, "permanent");
+    const changed = h.request(worker, {
+      op: "goal-plan-update",
+      plan: "Updated methods after the first verification",
+      planRevision: 1,
+    });
+    assert.equal(changed.planRevision, 2);
+    assert.equal(changed.editPermission, "permanent");
+  }));
+
 test("members receive their plan and ancestor previews and can read the full paginated text", () =>
   using(async (h) => {
     const long = "步骤🙂".repeat(2500);
